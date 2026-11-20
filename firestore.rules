@@ -1,0 +1,604 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Deny all access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Global Hardened Primitives
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOptionalId(id) {
+      return id is string && (id.size() == 0 || isValidId(id));
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isNonEmptyString(val, maxLen) {
+      return val is string && val.size() >= 1 && val.size() <= maxLen;
+    }
+
+    function isBoundedString(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    function isBoundedStringList(arr, maxItems) {
+      return arr is list && arr.size() <= maxItems && (arr.size() == 0 || arr[0] is string);
+    }
+
+    function isBoundedMapList(arr, maxItems) {
+      return arr is list && arr.size() <= maxItems && (arr.size() == 0 || arr[0] is map);
+    }
+
+    function courseExists(userId, courseId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/courses/$(courseId));
+    }
+
+    function conversationExists(userId, courseId, conversationId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/courses/$(courseId)/conversations/$(conversationId));
+    }
+
+    function studySessionExists(userId, courseId, sessionId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/courses/$(courseId)/studySessions/$(sessionId));
+    }
+
+    // =========================================================================
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // =========================================================================
+
+    function isValidUserPreferences(prefs) {
+      return prefs is map
+        && prefs.keys().hasAll(['defaultModel', 'tutorSourceMode', 'voiceEnabled', 'voiceRate', 'defaultDifficulty'])
+        && prefs.keys().hasOnly(['defaultModel', 'tutorSourceMode', 'voiceEnabled', 'voiceRate', 'defaultDifficulty', 'ttsVoice'])
+        && isNonEmptyString(prefs.defaultModel, 80)
+        && prefs.tutorSourceMode in ['materials_only', 'materials_plus_ai', 'general_ai']
+        && prefs.voiceEnabled is bool
+        && prefs.voiceRate is number && prefs.voiceRate >= 0.5 && prefs.voiceRate <= 2.0
+        && prefs.defaultDifficulty in ['foundational', 'standard', 'advanced']
+        && (!('ttsVoice' in prefs) || prefs.ttsVoice in ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr']);
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['userId', 'displayName', 'email', 'photoURL', 'activeCourseId', 'preferences', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'displayName', 'email', 'photoURL', 'activeCourseId', 'preferences', 'createdAt', 'updatedAt'])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && isBoundedString(data.displayName, 120)
+        && isNonEmptyString(data.email, 254)
+        && isBoundedString(data.photoURL, 500)
+        && isOptionalId(data.activeCourseId)
+        && isValidUserPreferences(data.preferences)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCourse(data, userId) {
+      return data.keys().hasAll(['userId', 'code', 'name', 'description', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'code', 'name', 'description', 'createdAt', 'updatedAt'])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && isNonEmptyString(data.code, 32)
+        && isNonEmptyString(data.name, 120)
+        && isBoundedString(data.description, 1000)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTopic(data, userId, courseId) {
+      return data.keys().hasAll(['userId', 'courseId', 'name', 'description', 'order', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'courseId', 'name', 'description', 'order', 'createdAt', 'updatedAt'])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && isNonEmptyString(data.name, 120)
+        && isBoundedString(data.description, 600)
+        && data.order is number && data.order >= 0 && data.order <= 10000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStudySource(data, userId, courseId) {
+      return data.keys().hasAll([
+          'userId', 'courseId', 'topicId', 'title', 'materialType',
+          'extractedContent', 'sections', 'pageOrSlideCount',
+          'processingStatus', 'studentNotes', 'originalFileName',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'courseId', 'topicId', 'title', 'materialType',
+          'extractedContent', 'sections', 'pageOrSlideCount',
+          'processingStatus', 'studentNotes', 'originalFileName',
+          'createdAt', 'updatedAt'
+        ])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && isOptionalId(data.topicId)
+        && isNonEmptyString(data.title, 200)
+        && data.materialType in ['pdf', 'slides', 'textbook_photo', 'handwritten_notes', 'scanned_doc', 'typed_notes', 'pasted_text', 'other']
+        && isBoundedString(data.extractedContent, 450000)
+        && isBoundedMapList(data.sections, 300)
+        && data.pageOrSlideCount is number && data.pageOrSlideCount >= 0 && data.pageOrSlideCount <= 2000
+        && data.processingStatus in ['ready', 'needs_review', 'failed']
+        && isBoundedString(data.studentNotes, 20000)
+        && isBoundedString(data.originalFileName, 260)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTutorConversation(data, userId, courseId) {
+      return data.keys().hasAll(['userId', 'courseId', 'title', 'sourceMode', 'lastMessagePreview', 'messageCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'courseId', 'title', 'sourceMode', 'lastMessagePreview', 'messageCount', 'createdAt', 'updatedAt'])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && isNonEmptyString(data.title, 160)
+        && data.sourceMode in ['materials_only', 'materials_plus_ai', 'general_ai']
+        && isBoundedString(data.lastMessagePreview, 400)
+        && data.messageCount is number && data.messageCount >= 0 && data.messageCount <= 5000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTutorMessage(data, userId, courseId, conversationId) {
+      return data.keys().hasAll(['userId', 'courseId', 'conversationId', 'role', 'content', 'sourceReferences', 'saved', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'courseId', 'conversationId', 'role', 'content', 'sourceReferences', 'saved', 'createdAt'])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && data.conversationId == conversationId
+        && data.role in ['user', 'assistant']
+        && isNonEmptyString(data.content, 40000)
+        && isBoundedMapList(data.sourceReferences, 30)
+        && data.saved is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSavedStudyMaterial(data, userId, courseId) {
+      return data.keys().hasAll(['userId', 'courseId', 'topicId', 'title', 'type', 'content', 'sourceReferences', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'courseId', 'topicId', 'title', 'type', 'content', 'sourceReferences', 'createdAt', 'updatedAt'])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && isOptionalId(data.topicId)
+        && isNonEmptyString(data.title, 200)
+        && data.type in ['flashcards', 'cbt', 'fill_in_the_gap', 'exam_prep', 'tutor_response', 'summary', 'study_guide', 'explanation', 'custom_note']
+        && data.content is map
+        && isBoundedMapList(data.sourceReferences, 50)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAutomaticStudySession(data, userId, courseId) {
+      return data.keys().hasAll([
+          'userId', 'courseId', 'title', 'selectedTopicIds', 'customInstructions',
+          'difficulty', 'status', 'studyPlan', 'currentUnitIndex', 'completedUnitIds',
+          'currentObjective', 'currentQuestion', 'latestStudentAnswer', 'evaluationFeedback',
+          'scores', 'topicMastery', 'topicsRequiringReview', 'lastCheckpointId',
+          'nextAction', 'activeSegmentId', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'courseId', 'title', 'selectedTopicIds', 'customInstructions',
+          'difficulty', 'status', 'studyPlan', 'currentUnitIndex', 'completedUnitIds',
+          'currentObjective', 'currentQuestion', 'latestStudentAnswer', 'evaluationFeedback',
+          'scores', 'topicMastery', 'topicsRequiringReview', 'lastCheckpointId',
+          'nextAction', 'activeSegmentId', 'createdAt', 'updatedAt'
+        ])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && isNonEmptyString(data.title, 200)
+        && isBoundedStringList(data.selectedTopicIds, 50)
+        && isBoundedString(data.customInstructions, 2000)
+        && data.difficulty in ['foundational', 'standard', 'advanced']
+        && data.status in ['planning', 'active', 'paused', 'completed']
+        && isBoundedMapList(data.studyPlan, 100)
+        && data.currentUnitIndex is number && data.currentUnitIndex >= 0 && data.currentUnitIndex <= 100
+        && isBoundedStringList(data.completedUnitIds, 100)
+        && isBoundedString(data.currentObjective, 600)
+        && isBoundedString(data.currentQuestion, 2000)
+        && isBoundedString(data.latestStudentAnswer, 10000)
+        && data.evaluationFeedback is map
+        && isBoundedMapList(data.scores, 200)
+        && data.topicMastery is map
+        && isBoundedStringList(data.topicsRequiringReview, 50)
+        && isOptionalId(data.lastCheckpointId)
+        && isBoundedString(data.nextAction, 300)
+        && isOptionalId(data.activeSegmentId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStudySessionSegment(data, userId, courseId, sessionId) {
+      return data.keys().hasAll(['userId', 'courseId', 'sessionId', 'segmentIndex', 'summaryFromCheckpoint', 'entries', 'tokenEstimate', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'courseId', 'sessionId', 'segmentIndex', 'summaryFromCheckpoint', 'entries', 'tokenEstimate', 'createdAt', 'updatedAt'])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && data.sessionId == sessionId
+        && data.segmentIndex is number && data.segmentIndex >= 0 && data.segmentIndex <= 500
+        && isBoundedString(data.summaryFromCheckpoint, 15000)
+        && isBoundedMapList(data.entries, 120)
+        && data.tokenEstimate is number && data.tokenEstimate >= 0 && data.tokenEstimate <= 500000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStudySessionCheckpoint(data, userId, courseId, sessionId) {
+      return data.keys().hasAll([
+          'userId', 'courseId', 'sessionId', 'reason', 'summary',
+          'currentUnitIndex', 'completedUnitIds', 'nextAction',
+          'masterySnapshot', 'weaknesses', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'courseId', 'sessionId', 'reason', 'summary',
+          'currentUnitIndex', 'completedUnitIds', 'nextAction',
+          'masterySnapshot', 'weaknesses', 'createdAt'
+        ])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && data.sessionId == sessionId
+        && data.reason in ['lesson_completed', 'question_answered', 'evaluation_completed', 'topic_completed', 'paused', 'compaction']
+        && isBoundedString(data.summary, 15000)
+        && data.currentUnitIndex is number && data.currentUnitIndex >= 0 && data.currentUnitIndex <= 100
+        && isBoundedStringList(data.completedUnitIds, 100)
+        && isBoundedString(data.nextAction, 300)
+        && data.masterySnapshot is map
+        && isBoundedStringList(data.weaknesses, 50)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidStudyHistoryRecord(data, userId, courseId) {
+      return data.keys().hasAll([
+          'userId', 'courseId', 'sessionType', 'title', 'topicIds', 'status',
+          'score', 'maxScore', 'percentage', 'correctCount', 'incorrectCount',
+          'skippedCount', 'durationSeconds', 'summary', 'weaknesses', 'details',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'courseId', 'sessionType', 'title', 'topicIds', 'status',
+          'score', 'maxScore', 'percentage', 'correctCount', 'incorrectCount',
+          'skippedCount', 'durationSeconds', 'summary', 'weaknesses', 'details',
+          'createdAt', 'updatedAt'
+        ])
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && data.courseId == courseId
+        && data.sessionType in ['tutor', 'flashcards', 'cbt', 'fill_in_the_gap', 'exam_prep', 'automatic_study']
+        && isNonEmptyString(data.title, 200)
+        && isBoundedStringList(data.topicIds, 50)
+        && data.status in ['in_progress', 'paused', 'completed']
+        && data.score is number && data.score >= 0 && data.score <= 10000
+        && data.maxScore is number && data.maxScore >= 0 && data.maxScore <= 10000
+        && data.percentage is number && data.percentage >= 0 && data.percentage <= 100
+        && data.correctCount is number && data.correctCount >= 0 && data.correctCount <= 10000
+        && data.incorrectCount is number && data.incorrectCount >= 0 && data.incorrectCount <= 10000
+        && data.skippedCount is number && data.skippedCount >= 0 && data.skippedCount <= 10000
+        && data.durationSeconds is number && data.durationSeconds >= 0 && data.durationSeconds <= 864000
+        && isBoundedString(data.summary, 4000)
+        && isBoundedStringList(data.weaknesses, 50)
+        && data.details is map
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // =========================================================================
+    // User-Scoped Collections
+    // =========================================================================
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isVerified() && isOwner(userId) && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified() && isOwner(userId) && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Update active course selection
+          incoming().diff(existing()).affectedKeys().hasOnly(['activeCourseId', 'updatedAt']) ||
+          // Action: Update user preferences
+          incoming().diff(existing()).affectedKeys().hasOnly(['preferences', 'updatedAt']) ||
+          // Action: Sync profile identity details
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoURL', 'updatedAt']) ||
+          // Action: Full settings update
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'activeCourseId', 'preferences', 'updatedAt'])
+        );
+      allow delete: if isVerified() && isOwner(userId) && isValidId(userId);
+
+      // Courses
+      match /courses/{courseId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId)
+          && isValidCourse(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId)
+          && isValidCourse(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: Rename or edit course details
+            incoming().diff(existing()).affectedKeys().hasOnly(['code', 'name', 'description', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['code', 'name', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['description', 'updatedAt'])
+          );
+        allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId);
+
+        // Topics (optional within a course)
+        match /topics/{topicId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(topicId)
+            && courseExists(userId, courseId);
+          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(topicId)
+            && isValidTopic(incoming(), userId, courseId)
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time
+            && courseExists(userId, courseId);
+          allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(topicId)
+            && isValidTopic(incoming(), userId, courseId)
+            && incoming().userId == existing().userId
+            && incoming().courseId == existing().courseId
+            && incoming().createdAt == existing().createdAt
+            && incoming().updatedAt == request.time
+            && (
+              // Action: Rename or edit topic
+              incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'order', 'updatedAt']) ||
+              incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt']) ||
+              incoming().diff(existing()).affectedKeys().hasOnly(['order', 'updatedAt'])
+            )
+            && courseExists(userId, courseId);
+          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(topicId);
+        }
+
+        // Study Sources (Library materials)
+        match /sources/{sourceId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
+            && courseExists(userId, courseId);
+          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
+            && isValidStudySource(incoming(), userId, courseId)
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time
+            && courseExists(userId, courseId);
+          allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
+            && isValidStudySource(incoming(), userId, courseId)
+            && incoming().userId == existing().userId
+            && incoming().courseId == existing().courseId
+            && incoming().createdAt == existing().createdAt
+            && incoming().updatedAt == request.time
+            && (
+              // Action: Rename or reassign topic
+              incoming().diff(existing()).affectedKeys().hasOnly(['title', 'topicId', 'materialType', 'updatedAt']) ||
+              // Action: Edit extracted content or structure
+              incoming().diff(existing()).affectedKeys().hasOnly(['extractedContent', 'sections', 'processingStatus', 'updatedAt']) ||
+              // Action: Edit student annotations
+              incoming().diff(existing()).affectedKeys().hasOnly(['studentNotes', 'updatedAt']) ||
+              // Action: Full source edit
+              incoming().diff(existing()).affectedKeys().hasOnly(['title', 'topicId', 'materialType', 'extractedContent', 'sections', 'processingStatus', 'studentNotes', 'updatedAt'])
+            )
+            && courseExists(userId, courseId);
+          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId);
+        }
+
+        // Tutor Conversations
+        match /conversations/{conversationId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId)
+            && courseExists(userId, courseId);
+          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId)
+            && isValidTutorConversation(incoming(), userId, courseId)
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time
+            && courseExists(userId, courseId);
+          allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId)
+            && isValidTutorConversation(incoming(), userId, courseId)
+            && incoming().userId == existing().userId
+            && incoming().courseId == existing().courseId
+            && incoming().createdAt == existing().createdAt
+            && incoming().updatedAt == request.time
+            && (
+              // Action: Rename conversation
+              incoming().diff(existing()).affectedKeys().hasOnly(['title', 'updatedAt']) ||
+              // Action: Change source mode
+              incoming().diff(existing()).affectedKeys().hasOnly(['sourceMode', 'updatedAt']) ||
+              // Action: Append message summary metadata
+              incoming().diff(existing()).affectedKeys().hasOnly(['lastMessagePreview', 'messageCount', 'updatedAt']) ||
+              incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastMessagePreview', 'messageCount', 'updatedAt'])
+            )
+            && courseExists(userId, courseId);
+          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId);
+
+          // Messages inside a Tutor Conversation
+          match /messages/{messageId} {
+            allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId)
+              && conversationExists(userId, courseId, conversationId);
+            allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+            allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId)
+              && isValidTutorMessage(incoming(), userId, courseId, conversationId)
+              && incoming().createdAt == request.time
+              && conversationExists(userId, courseId, conversationId);
+            allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId)
+              && isValidTutorMessage(incoming(), userId, courseId, conversationId)
+              && incoming().userId == existing().userId
+              && incoming().courseId == existing().courseId
+              && incoming().conversationId == existing().conversationId
+              && incoming().role == existing().role
+              && incoming().content == existing().content
+              && incoming().createdAt == existing().createdAt
+              && (
+                // Action: Toggle saved bookmark on response
+                incoming().diff(existing()).affectedKeys().hasOnly(['saved'])
+              )
+              && conversationExists(userId, courseId, conversationId);
+            allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId);
+          }
+        }
+
+        // Saved Study Materials
+        match /studyMaterials/{materialId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(materialId)
+            && courseExists(userId, courseId);
+          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(materialId)
+            && isValidSavedStudyMaterial(incoming(), userId, courseId)
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time
+            && courseExists(userId, courseId);
+          allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(materialId)
+            && isValidSavedStudyMaterial(incoming(), userId, courseId)
+            && incoming().userId == existing().userId
+            && incoming().courseId == existing().courseId
+            && incoming().type == existing().type
+            && incoming().createdAt == existing().createdAt
+            && incoming().updatedAt == request.time
+            && (
+              // Action: Rename or reassign topic
+              incoming().diff(existing()).affectedKeys().hasOnly(['title', 'topicId', 'updatedAt']) ||
+              // Action: Edit content
+              incoming().diff(existing()).affectedKeys().hasOnly(['title', 'topicId', 'content', 'updatedAt'])
+            )
+            && courseExists(userId, courseId);
+          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(materialId);
+        }
+
+        // Automatic Study Sessions (Flagship Adaptive Teaching State)
+        match /studySessions/{sessionId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId)
+            && courseExists(userId, courseId);
+          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId)
+            && isValidAutomaticStudySession(incoming(), userId, courseId)
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time
+            && courseExists(userId, courseId);
+          allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId)
+            && isValidAutomaticStudySession(incoming(), userId, courseId)
+            && existing().status != 'completed'
+            && incoming().userId == existing().userId
+            && incoming().courseId == existing().courseId
+            && incoming().createdAt == existing().createdAt
+            && incoming().updatedAt == request.time
+            && (
+              // Action: Pause or resume session
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'lastCheckpointId', 'nextAction', 'updatedAt']) ||
+              // Action: Record student answer
+              incoming().diff(existing()).affectedKeys().hasOnly(['latestStudentAnswer', 'nextAction', 'updatedAt']) ||
+              // Action: Advance lesson, evaluation, checkpoint, or compaction state
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'status', 'studyPlan', 'currentUnitIndex', 'completedUnitIds',
+                'currentObjective', 'currentQuestion', 'latestStudentAnswer',
+                'evaluationFeedback', 'scores', 'topicMastery', 'topicsRequiringReview',
+                'lastCheckpointId', 'nextAction', 'activeSegmentId', 'updatedAt'
+              ])
+            )
+            && courseExists(userId, courseId);
+          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId);
+
+          // Session Segments (Linked Conversation Segments for Compaction)
+          match /segments/{segmentId} {
+            allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId)
+              && studySessionExists(userId, courseId, sessionId);
+            allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+            allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId)
+              && isValidStudySessionSegment(incoming(), userId, courseId, sessionId)
+              && incoming().createdAt == request.time
+              && incoming().updatedAt == request.time
+              && studySessionExists(userId, courseId, sessionId);
+            allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId)
+              && isValidStudySessionSegment(incoming(), userId, courseId, sessionId)
+              && incoming().userId == existing().userId
+              && incoming().courseId == existing().courseId
+              && incoming().sessionId == existing().sessionId
+              && incoming().segmentIndex == existing().segmentIndex
+              && incoming().createdAt == existing().createdAt
+              && incoming().updatedAt == request.time
+              && (
+                // Action: Append entries and update token estimate
+                incoming().diff(existing()).affectedKeys().hasOnly(['entries', 'tokenEstimate', 'updatedAt'])
+              )
+              && studySessionExists(userId, courseId, sessionId);
+            allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId);
+          }
+
+          // Session Checkpoints (Immutable snapshots for exact resumption)
+          match /checkpoints/{checkpointId} {
+            allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(checkpointId)
+              && studySessionExists(userId, courseId, sessionId);
+            allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+            allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(checkpointId)
+              && isValidStudySessionCheckpoint(incoming(), userId, courseId, sessionId)
+              && incoming().createdAt == request.time
+              && studySessionExists(userId, courseId, sessionId);
+            allow update: if false;
+            allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(checkpointId);
+          }
+        }
+
+        // Study History Records
+        match /studyHistory/{historyId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(historyId)
+            && courseExists(userId, courseId);
+          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(historyId)
+            && isValidStudyHistoryRecord(incoming(), userId, courseId)
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time
+            && courseExists(userId, courseId);
+          allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(historyId)
+            && isValidStudyHistoryRecord(incoming(), userId, courseId)
+            && existing().status != 'completed'
+            && incoming().userId == existing().userId
+            && incoming().courseId == existing().courseId
+            && incoming().sessionType == existing().sessionType
+            && incoming().createdAt == existing().createdAt
+            && incoming().updatedAt == request.time
+            && (
+              // Action: Progress or finalize study history entry
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'status', 'score', 'maxScore', 'percentage', 'correctCount',
+                'incorrectCount', 'skippedCount', 'durationSeconds', 'summary',
+                'weaknesses', 'details', 'updatedAt'
+              ])
+            )
+            && courseExists(userId, courseId);
+          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(historyId);
+        }
+      }
+    }
+  }
+}

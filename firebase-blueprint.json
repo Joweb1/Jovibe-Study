@@ -1,0 +1,337 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account profile and study workspace preferences.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "activeCourseId": { "type": "string", "maxLength": 128 },
+        "preferences": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "email", "preferences", "createdAt", "updatedAt"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "An academic course created by the student.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "code", "name", "description", "createdAt", "updatedAt"]
+    },
+    "Topic": {
+      "title": "Topic",
+      "description": "An optional subject or topic within a course.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 600 },
+        "order": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "name", "description", "order", "createdAt", "updatedAt"]
+    },
+    "StudySource": {
+      "title": "StudySource",
+      "description": "Extracted and structured study material belonging to a course.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "topicId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "materialType": {
+          "type": "string",
+          "enum": ["pdf", "slides", "textbook_photo", "handwritten_notes", "scanned_doc", "typed_notes", "pasted_text", "other"]
+        },
+        "extractedContent": { "type": "string", "maxLength": 450000 },
+        "sections": { "type": "array" },
+        "pageOrSlideCount": { "type": "number" },
+        "processingStatus": { "type": "string", "enum": ["ready", "needs_review", "failed"] },
+        "studentNotes": { "type": "string", "maxLength": 20000 },
+        "originalFileName": { "type": "string", "maxLength": 260 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "courseId",
+        "topicId",
+        "title",
+        "materialType",
+        "extractedContent",
+        "sections",
+        "pageOrSlideCount",
+        "processingStatus",
+        "studentNotes",
+        "originalFileName",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TutorConversation": {
+      "title": "TutorConversation",
+      "description": "A course-aware AI Tutor conversation thread.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "sourceMode": { "type": "string", "enum": ["materials_only", "materials_plus_ai", "general_ai"] },
+        "lastMessagePreview": { "type": "string", "maxLength": 400 },
+        "messageCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "title", "sourceMode", "lastMessagePreview", "messageCount", "createdAt", "updatedAt"]
+    },
+    "TutorMessage": {
+      "title": "TutorMessage",
+      "description": "A single message within a Tutor conversation.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "conversationId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "content": { "type": "string", "minLength": 1, "maxLength": 40000 },
+        "sourceReferences": { "type": "array" },
+        "saved": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "conversationId", "role", "content", "sourceReferences", "saved", "createdAt"]
+    },
+    "SavedStudyMaterial": {
+      "title": "SavedStudyMaterial",
+      "description": "Saved flashcards, CBT sets, gap-fill exercises, summaries, study guides, or Tutor responses.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "topicId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "type": {
+          "type": "string",
+          "enum": ["flashcards", "cbt", "fill_in_the_gap", "exam_prep", "tutor_response", "summary", "study_guide", "explanation", "custom_note"]
+        },
+        "content": { "type": "object" },
+        "sourceReferences": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "topicId", "title", "type", "content", "sourceReferences", "createdAt", "updatedAt"]
+    },
+    "AutomaticStudySession": {
+      "title": "AutomaticStudySession",
+      "description": "First-class persistent structured state for an adaptive Automatic Study session.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "selectedTopicIds": { "type": "array" },
+        "customInstructions": { "type": "string", "maxLength": 2000 },
+        "difficulty": { "type": "string", "enum": ["foundational", "standard", "advanced"] },
+        "status": { "type": "string", "enum": ["planning", "active", "paused", "completed"] },
+        "studyPlan": { "type": "array" },
+        "currentUnitIndex": { "type": "number" },
+        "completedUnitIds": { "type": "array" },
+        "currentObjective": { "type": "string", "maxLength": 600 },
+        "currentQuestion": { "type": "string", "maxLength": 2000 },
+        "latestStudentAnswer": { "type": "string", "maxLength": 10000 },
+        "evaluationFeedback": { "type": "object" },
+        "scores": { "type": "array" },
+        "topicMastery": { "type": "object" },
+        "topicsRequiringReview": { "type": "array" },
+        "lastCheckpointId": { "type": "string", "maxLength": 128 },
+        "nextAction": { "type": "string", "maxLength": 300 },
+        "activeSegmentId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "courseId",
+        "title",
+        "selectedTopicIds",
+        "customInstructions",
+        "difficulty",
+        "status",
+        "studyPlan",
+        "currentUnitIndex",
+        "completedUnitIds",
+        "currentObjective",
+        "currentQuestion",
+        "latestStudentAnswer",
+        "evaluationFeedback",
+        "scores",
+        "topicMastery",
+        "topicsRequiringReview",
+        "lastCheckpointId",
+        "nextAction",
+        "activeSegmentId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StudySessionSegment": {
+      "title": "StudySessionSegment",
+      "description": "A linked conversation segment within an Automatic Study session for context compaction.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "segmentIndex": { "type": "number" },
+        "summaryFromCheckpoint": { "type": "string", "maxLength": 15000 },
+        "entries": { "type": "array" },
+        "tokenEstimate": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "sessionId", "segmentIndex", "summaryFromCheckpoint", "entries", "tokenEstimate", "createdAt", "updatedAt"]
+    },
+    "StudySessionCheckpoint": {
+      "title": "StudySessionCheckpoint",
+      "description": "An immutable structured checkpoint capturing exact Automatic Study progress for resumption.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reason": {
+          "type": "string",
+          "enum": ["lesson_completed", "question_answered", "evaluation_completed", "topic_completed", "paused", "compaction"]
+        },
+        "summary": { "type": "string", "maxLength": 15000 },
+        "currentUnitIndex": { "type": "number" },
+        "completedUnitIds": { "type": "array" },
+        "nextAction": { "type": "string", "maxLength": 300 },
+        "masterySnapshot": { "type": "object" },
+        "weaknesses": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "courseId",
+        "sessionId",
+        "reason",
+        "summary",
+        "currentUnitIndex",
+        "completedUnitIds",
+        "nextAction",
+        "masterySnapshot",
+        "weaknesses",
+        "createdAt"
+      ]
+    },
+    "StudyHistoryRecord": {
+      "title": "StudyHistoryRecord",
+      "description": "Recorded learning activity and outcome per course.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionType": {
+          "type": "string",
+          "enum": ["tutor", "flashcards", "cbt", "fill_in_the_gap", "exam_prep", "automatic_study"]
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "topicIds": { "type": "array" },
+        "status": { "type": "string", "enum": ["in_progress", "paused", "completed"] },
+        "score": { "type": "number" },
+        "maxScore": { "type": "number" },
+        "percentage": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "incorrectCount": { "type": "number" },
+        "skippedCount": { "type": "number" },
+        "durationSeconds": { "type": "number" },
+        "summary": { "type": "string", "maxLength": 4000 },
+        "weaknesses": { "type": "array" },
+        "details": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "courseId",
+        "sessionType",
+        "title",
+        "topicIds",
+        "status",
+        "score",
+        "maxScore",
+        "percentage",
+        "correctCount",
+        "incorrectCount",
+        "skippedCount",
+        "durationSeconds",
+        "summary",
+        "weaknesses",
+        "details",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profile and workspace preferences."
+    },
+    "/users/{userId}/courses/{courseId}": {
+      "schema": { "$ref": "#/entities/Course" },
+      "description": "Courses owned by the user."
+    },
+    "/users/{userId}/courses/{courseId}/topics/{topicId}": {
+      "schema": { "$ref": "#/entities/Topic" },
+      "description": "Optional topics within a course."
+    },
+    "/users/{userId}/courses/{courseId}/sources/{sourceId}": {
+      "schema": { "$ref": "#/entities/StudySource" },
+      "description": "Extracted study sources and notes within a course."
+    },
+    "/users/{userId}/courses/{courseId}/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/TutorConversation" },
+      "description": "AI Tutor conversation metadata within a course."
+    },
+    "/users/{userId}/courses/{courseId}/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/TutorMessage" },
+      "description": "Messages belonging to a Tutor conversation."
+    },
+    "/users/{userId}/courses/{courseId}/studyMaterials/{materialId}": {
+      "schema": { "$ref": "#/entities/SavedStudyMaterial" },
+      "description": "Saved flashcards, CBT tests, gap-fill sets, summaries, and responses."
+    },
+    "/users/{userId}/courses/{courseId}/studySessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/AutomaticStudySession" },
+      "description": "Persistent structured Automatic Study sessions."
+    },
+    "/users/{userId}/courses/{courseId}/studySessions/{sessionId}/segments/{segmentId}": {
+      "schema": { "$ref": "#/entities/StudySessionSegment" },
+      "description": "Linked conversation segments for long Automatic Study sessions."
+    },
+    "/users/{userId}/courses/{courseId}/studySessions/{sessionId}/checkpoints/{checkpointId}": {
+      "schema": { "$ref": "#/entities/StudySessionCheckpoint" },
+      "description": "Immutable checkpoints for exact Automatic Study resumption."
+    },
+    "/users/{userId}/courses/{courseId}/studyHistory/{historyId}": {
+      "schema": { "$ref": "#/entities/StudyHistoryRecord" },
+      "description": "Course-scoped study activity history records."
+    }
+  }
+}

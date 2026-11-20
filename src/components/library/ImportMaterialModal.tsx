@@ -1,0 +1,995 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import {
+  AlertTriangle,
+  Camera,
+  FileText,
+  Trash2,
+  Type as TypeIcon,
+  Upload,
+  X,
+} from 'lucide-react';
+import type {
+  Course,
+  MaterialType,
+  StudySection,
+  Topic,
+} from '../../types/models';
+import { SCHEMA_LIMITS } from '../../utils/validation';
+import { formatReadableError } from '../../services/firebase/errors';
+import { createStudySource } from '../../services/firebase/sourceService';
+import {
+  ingestTextInput,
+  ingestUploadedFile,
+  type ExtractionResult,
+} from '../../services/ingestion/ingestionPipeline';
+import { inspectPdfPageCount } from '../../services/ingestion/pdfExtractor';
+import {
+  countUncertainMarkers,
+  MATERIAL_TYPE_LABELS,
+  parseStructuredText,
+  sectionsToMarkdown,
+} from '../../services/ingestion/structureParser';
+import type { VisionExtractionMode } from '../../services/ingestion/visionExtractor';
+import { deleteLocalDraft, saveLocalDraft } from '../../services/local/indexedDb';
+import { TopicPickerField } from '../courses/TopicPickerField';
+import { Button } from '../ui/Button';
+import { ErrorBanner } from '../ui/StateViews';
+
+type InputTab = 'document' | 'photo' | 'text';
+type WizardStep = 'input' | 'extracting' | 'preview';
+
+export interface ExtractionDraftPayload {
+  title: string;
+  materialType: MaterialType;
+  courseId: string;
+  topicId: string;
+  extractedContent: string;
+  sections: StudySection[];
+  pageOrSlideCount: number;
+  originalFileName: string;
+  warnings: string[];
+}
+
+interface ImportMaterialModalProps {
+  open: boolean;
+  userId: string;
+  courses: Course[];
+  activeCourse: Course;
+  topics: Topic[];
+  initialTopicId?: string;
+  restoredDraft?: ExtractionDraftPayload | null;
+  draftKey: string;
+  onClose: () => void;
+  onSaved: (sourceId: string, savedCourseId: string) => void;
+}
+
+export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
+  open,
+  userId,
+  courses,
+  activeCourse,
+  topics,
+  initialTopicId = '',
+  restoredDraft = null,
+  draftKey,
+  onClose,
+  onSaved,
+}) => {
+  const [step, setStep] = useState<WizardStep>('input');
+  const [tab, setTab] = useState<InputTab>('document');
+
+  // File / PDF controls
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [pdfTotalPages, setPdfTotalPages] = useState<number | null>(null);
+  const [pdfStartPage, setPdfStartPage] = useState<number>(1);
+  const [pdfEndPage, setPdfEndPage] = useState<number>(1);
+  const [enableScannedOcr, setEnableScannedOcr] = useState<boolean>(true);
+  const [inspectingPdf, setInspectingPdf] = useState<boolean>(false);
+
+  // Photo / Handwriting controls
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoMode, setPhotoMode] = useState<VisionExtractionMode>('textbook_photo');
+
+  // Typed / Pasted text controls
+  const [rawTitle, setRawTitle] = useState('');
+  const [rawText, setRawText] = useState('');
+  const [textInputType, setTextInputType] = useState<'typed_notes' | 'pasted_text'>('pasted_text');
+
+  // Extraction progress
+  const [progressStage, setProgressStage] = useState('');
+  const [progressPercent, setProgressPercent] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Preview & Organize state
+  const [title, setTitle] = useState('');
+  const [materialType, setMaterialType] = useState<MaterialType>('pdf');
+  const [targetCourseId, setTargetCourseId] = useState(activeCourse.id);
+  const [targetTopicId, setTargetTopicId] = useState(initialTopicId);
+  const [sections, setSections] = useState<StudySection[]>([]);
+  const [fullText, setFullText] = useState('');
+  const [pageOrSlideCount, setPageOrSlideCount] = useState(1);
+  const [originalFileName, setOriginalFileName] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [previewMode, setPreviewMode] = useState<'sections' | 'raw'>('sections');
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset or restore draft when modal opens
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+    setSaving(false);
+
+    if (restoredDraft) {
+      setTitle(restoredDraft.title);
+      setMaterialType(restoredDraft.materialType);
+      setTargetCourseId(restoredDraft.courseId || activeCourse.id);
+      setTargetTopicId(restoredDraft.topicId || '');
+      setSections(restoredDraft.sections);
+      setFullText(restoredDraft.extractedContent);
+      setPageOrSlideCount(restoredDraft.pageOrSlideCount || 1);
+      setOriginalFileName(restoredDraft.originalFileName || '');
+      setWarnings(restoredDraft.warnings || []);
+      setPreviewMode(restoredDraft.sections.length > 0 ? 'sections' : 'raw');
+      setStep('preview');
+      return;
+    }
+
+    setStep('input');
+    setTab('document');
+    setSelectedFile(null);
+    setPdfTotalPages(null);
+    setPdfStartPage(1);
+    setPdfEndPage(1);
+    setEnableScannedOcr(true);
+    setPhotoFile(null);
+    setPhotoMode('textbook_photo');
+    setRawTitle('');
+    setRawText('');
+    setTargetCourseId(activeCourse.id);
+    setTargetTopicId(initialTopicId);
+    setSections([]);
+    setFullText('');
+    setWarnings([]);
+  }, [open, activeCourse.id, initialTopicId, restoredDraft]);
+
+  // Persist preview edits as a local IndexedDB draft so interrupted reviews are recoverable
+  useEffect(() => {
+    if (!open || step !== 'preview') return;
+    const timer = window.setTimeout(() => {
+      void saveLocalDraft({
+        key: draftKey,
+        userId,
+        payload: {
+          title,
+          materialType,
+          courseId: targetCourseId,
+          topicId: targetTopicId,
+          extractedContent: fullText,
+          sections,
+          pageOrSlideCount,
+          originalFileName,
+          warnings,
+        },
+        updatedAtMs: Date.now(),
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    open,
+    step,
+    draftKey,
+    userId,
+    title,
+    materialType,
+    targetCourseId,
+    targetTopicId,
+    fullText,
+    sections,
+    pageOrSlideCount,
+    originalFileName,
+    warnings,
+  ]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && step !== 'extracting') onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [open, step, onClose]);
+
+  const uncertainCount = countUncertainMarkers(fullText);
+
+  const handleSelectDocumentFile = async (file: File | null) => {
+    setError(null);
+    setSelectedFile(file);
+    setPdfTotalPages(null);
+    if (!file) return;
+
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      setInspectingPdf(true);
+      try {
+        const count = await inspectPdfPageCount(file);
+        setPdfTotalPages(count);
+        setPdfStartPage(1);
+        setPdfEndPage(Math.min(count, 40));
+      } catch (err) {
+        setError(
+          `Could not inspect PDF file: ${err instanceof Error ? err.message : 'Invalid or encrypted PDF.'}`
+        );
+      } finally {
+        setInspectingPdf(false);
+      }
+    }
+  };
+
+  const applyExtractionResult = (result: ExtractionResult) => {
+    setTitle(result.title);
+    setMaterialType(result.materialType);
+    setSections(result.sections);
+    setFullText(result.extractedContent);
+    setPageOrSlideCount(result.pageOrSlideCount);
+    setOriginalFileName(result.originalFileName);
+    setWarnings(result.warnings);
+    setPreviewMode(result.sections.length > 0 ? 'sections' : 'raw');
+    setStep('preview');
+  };
+
+  const handleStartExtraction = async () => {
+    setError(null);
+
+    if (tab === 'text') {
+      if (!rawText.trim()) {
+        setError('Enter or paste study content before continuing.');
+        return;
+      }
+      const res = ingestTextInput({
+        title: rawTitle || 'Study Notes',
+        rawText,
+        materialType: textInputType,
+      });
+      applyExtractionResult(res);
+      return;
+    }
+
+    const fileToProcess = tab === 'document' ? selectedFile : photoFile;
+    if (!fileToProcess) {
+      setError(
+        tab === 'document'
+          ? 'Choose a PDF, PowerPoint (.pptx), Markdown, or text file first.'
+          : 'Choose or capture a photograph first.'
+      );
+      return;
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setStep('extracting');
+    setProgressStage('Initializing extraction...');
+    setProgressPercent(10);
+
+    try {
+      const result = await ingestUploadedFile(fileToProcess, {
+        visionMode: tab === 'photo' ? photoMode : undefined,
+        overrideType:
+          tab === 'photo'
+            ? photoMode === 'handwriting'
+              ? 'handwritten_notes'
+              : photoMode === 'scanned_doc'
+              ? 'scanned_doc'
+              : 'textbook_photo'
+            : undefined,
+        startPage: pdfTotalPages ? pdfStartPage : undefined,
+        endPage: pdfTotalPages ? pdfEndPage : undefined,
+        enableScannedOcr,
+        signal: controller.signal,
+        onProgress: (p) => {
+          setProgressStage(p.stage);
+          if (typeof p.percent === 'number') setProgressPercent(p.percent);
+        },
+      });
+      applyExtractionResult(result);
+    } catch (err) {
+      setError(formatReadableError(err));
+      setStep('input');
+    } finally {
+      abortRef.current = null;
+    }
+  };
+
+  const handleCancelExtraction = () => {
+    abortRef.current?.abort();
+    setStep('input');
+  };
+
+  const handleUpdateSection = (index: number, patch: Partial<StudySection>) => {
+    setSections((prev) => {
+      const next = prev.map((s, idx) => (idx === index ? { ...s, ...patch } : s));
+      setFullText(sectionsToMarkdown(next));
+      return next;
+    });
+  };
+
+  const handleRemoveSection = (index: number) => {
+    setSections((prev) => {
+      const next = prev.filter((_, idx) => idx !== index);
+      setFullText(sectionsToMarkdown(next));
+      return next;
+    });
+  };
+
+  const handleSwitchPreviewMode = (nextMode: 'sections' | 'raw') => {
+    if (nextMode === 'sections' && previewMode === 'raw') {
+      setSections(parseStructuredText(fullText, title || 'Study Notes'));
+    } else if (nextMode === 'raw' && previewMode === 'sections') {
+      setFullText(sectionsToMarkdown(sections));
+    }
+    setPreviewMode(nextMode);
+  };
+
+  const handleSaveToCloud = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setError('Material title is required.');
+      return;
+    }
+
+    const finalContent =
+      previewMode === 'sections' ? sectionsToMarkdown(sections) : fullText.trim();
+    if (!finalContent) {
+      setError('Extracted content cannot be empty.');
+      return;
+    }
+
+    const finalSections =
+      previewMode === 'raw' ? parseStructuredText(finalContent, trimmedTitle) : sections;
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const created = await createStudySource(userId, targetCourseId, {
+        topicId: targetTopicId,
+        title: trimmedTitle,
+        materialType,
+        extractedContent: finalContent,
+        sections: finalSections,
+        pageOrSlideCount,
+        processingStatus: countUncertainMarkers(finalContent) > 0 ? 'needs_review' : 'ready',
+        originalFileName,
+      });
+
+      await deleteLocalDraft(draftKey);
+      // Discard file references from memory immediately after save
+      setSelectedFile(null);
+      setPhotoFile(null);
+      onSaved(created.id, targetCourseId);
+    } catch (err) {
+      setError(formatReadableError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="import-modal-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 backdrop-blur-[2px] p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="import-material-title"
+        >
+          <motion.div
+            key="import-modal-panel"
+            initial={{ opacity: 0, scale: 0.96, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-zinc-200 bg-white shadow-xl"
+          >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-6 py-4">
+          <div>
+            <div className="flex items-center gap-2 text-xs text-zinc-500">
+              <span className="font-mono">{activeCourse.code}</span>
+              <span aria-hidden="true">·</span>
+              <span>
+                {step === 'input'
+                  ? 'Step 1 of 2 — Import material'
+                  : step === 'extracting'
+                  ? 'Extracting structured text'
+                  : 'Step 2 of 2 — Preview, edit & save'}
+              </span>
+            </div>
+            <h2 id="import-material-title" className="mt-0.5 text-lg font-semibold text-zinc-950">
+              {step === 'preview' ? 'Review extracted content' : 'Add study material'}
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            onClick={step === 'extracting' ? handleCancelExtraction : onClose}
+            aria-label="Close import dialog"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950 cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {error && (
+            <div className="mb-5">
+              <ErrorBanner message={error} onDismiss={() => setError(null)} />
+            </div>
+          )}
+
+          {/* STEP 1: IMPORT INPUT */}
+          {step === 'input' && (
+            <div className="space-y-6">
+              {/* Segmented Input Mode Tabs */}
+              <div className="inline-flex flex-wrap gap-1 rounded-md bg-zinc-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('document');
+                    setError(null);
+                  }}
+                  className={`inline-flex items-center gap-2 rounded px-3.5 py-2 text-xs font-medium whitespace-nowrap cursor-pointer ${
+                    tab === 'document'
+                      ? 'bg-white text-zinc-950 shadow-xs'
+                      : 'text-zinc-600 hover:text-zinc-950'
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  Document (PDF / PPTX / Text)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('photo');
+                    setError(null);
+                  }}
+                  className={`inline-flex items-center gap-2 rounded px-3.5 py-2 text-xs font-medium whitespace-nowrap cursor-pointer ${
+                    tab === 'photo'
+                      ? 'bg-white text-zinc-950 shadow-xs'
+                      : 'text-zinc-600 hover:text-zinc-950'
+                  }`}
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  Textbook Photo / Handwriting
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('text');
+                    setError(null);
+                  }}
+                  className={`inline-flex items-center gap-2 rounded px-3.5 py-2 text-xs font-medium whitespace-nowrap cursor-pointer ${
+                    tab === 'text'
+                      ? 'bg-white text-zinc-950 shadow-xs'
+                      : 'text-zinc-600 hover:text-zinc-950'
+                  }`}
+                >
+                  <TypeIcon className="h-3.5 w-3.5" />
+                  Type or Paste Notes
+                </button>
+              </div>
+
+              {/* Course & Topic selection up front when adding any material or note */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 border-y border-zinc-200 py-4">
+                <div>
+                  <label htmlFor="import-course" className="block text-xs font-medium text-zinc-700">
+                    Course
+                  </label>
+                  <select
+                    id="import-course"
+                    value={targetCourseId}
+                    onChange={(e) => {
+                      setTargetCourseId(e.target.value);
+                      setTargetTopicId('');
+                    }}
+                    className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 focus:border-zinc-950 focus:outline-none"
+                  >
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code} — {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <TopicPickerField
+                  id="import-step1-topic"
+                  userId={userId}
+                  courseId={targetCourseId}
+                  knownTopics={topics}
+                  knownTopicsCourseId={activeCourse.id}
+                  value={targetTopicId}
+                  onChange={setTargetTopicId}
+                />
+              </div>
+
+              {/* TAB A: DOCUMENT UPLOAD */}
+              {tab === 'document' && (
+                <div className="space-y-5">
+                  <label className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/60 px-6 py-10 text-center hover:border-zinc-500 cursor-pointer">
+                    <Upload className="h-5 w-5 text-zinc-600" />
+                    <span className="mt-3 text-sm font-medium text-zinc-950">
+                      {selectedFile ? selectedFile.name : 'Choose a PDF, PowerPoint (.pptx), Markdown, or text file'}
+                    </span>
+                    <span className="mt-1 text-xs text-zinc-500">
+                      Selectable PDFs and .pptx slides extract directly without unnecessary vision calls. Original files are discarded after extraction.
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pdf,.pptx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/markdown"
+                      onChange={(e) => void handleSelectDocumentFile(e.target.files?.[0] ?? null)}
+                      className="sr-only"
+                    />
+                  </label>
+
+                  {inspectingPdf && (
+                    <p className="text-xs text-zinc-600">Inspecting PDF page count...</p>
+                  )}
+
+                  {pdfTotalPages !== null && (
+                    <div className="space-y-4 border-t border-zinc-200 pt-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-medium text-zinc-950">
+                          PDF detected — <span className="font-mono tabular-nums">{pdfTotalPages}</span>{' '}
+                          {pdfTotalPages === 1 ? 'page' : 'pages'}
+                        </div>
+                        {pdfTotalPages > 40 && (
+                          <span className="text-xs text-zinc-600">
+                            Large document: select a chapter or page range for clean, manageable units.
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div>
+                          <label htmlFor="pdf-start" className="block text-xs font-medium text-zinc-700">
+                            Start page
+                          </label>
+                          <input
+                            id="pdf-start"
+                            type="number"
+                            min={1}
+                            max={pdfTotalPages}
+                            value={pdfStartPage}
+                            onChange={(e) => {
+                              const val = Math.max(1, Math.min(pdfTotalPages, Number(e.target.value) || 1));
+                              setPdfStartPage(val);
+                              if (val > pdfEndPage) setPdfEndPage(val);
+                            }}
+                            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-mono tabular-nums"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="pdf-end" className="block text-xs font-medium text-zinc-700">
+                            End page
+                          </label>
+                          <input
+                            id="pdf-end"
+                            type="number"
+                            min={pdfStartPage}
+                            max={pdfTotalPages}
+                            value={pdfEndPage}
+                            onChange={(e) => {
+                              const val = Math.max(
+                                pdfStartPage,
+                                Math.min(pdfTotalPages, Number(e.target.value) || pdfStartPage)
+                              );
+                              setPdfEndPage(val);
+                            }}
+                            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-mono tabular-nums"
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <label className="flex items-center gap-2 text-xs text-zinc-700 pb-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={enableScannedOcr}
+                              onChange={(e) => setEnableScannedOcr(e.target.checked)}
+                              className="h-4 w-4 accent-zinc-950"
+                            />
+                            Use AI Vision OCR if scanned pages are found
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB B: PHOTO / HANDWRITING OCR */}
+              {tab === 'photo' && (
+                <div className="space-y-5">
+                  <div>
+                    <div className="text-xs font-medium text-zinc-700 mb-2">Material type</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {(
+                        [
+                          { id: 'textbook_photo', label: 'Textbook page', desc: 'Printed pages, diagrams, tables' },
+                          {
+                            id: 'handwriting',
+                            label: 'Handwritten notes',
+                            desc: 'Marks unclear words for review',
+                          },
+                          { id: 'scanned_doc', label: 'Scanned sheet', desc: 'Photocopies or scanned handouts' },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setPhotoMode(opt.id)}
+                          className={`rounded-md border p-3 text-left cursor-pointer ${
+                            photoMode === opt.id
+                              ? 'border-zinc-950 bg-zinc-50'
+                              : 'border-zinc-200 hover:border-zinc-400'
+                          }`}
+                        >
+                          <div className="text-sm font-medium text-zinc-950">{opt.label}</div>
+                          <div className="mt-0.5 text-xs text-zinc-500">{opt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/60 px-6 py-10 text-center hover:border-zinc-500 cursor-pointer">
+                    <Camera className="h-5 w-5 text-zinc-600" />
+                    <span className="mt-3 text-sm font-medium text-zinc-950">
+                      {photoFile ? photoFile.name : 'Upload an image or take a photo'}
+                    </span>
+                    <span className="mt-1 text-xs text-zinc-500">
+                      Supports PNG, JPEG, and WebP. Unclear handwriting will be flagged as [unclear: ...] for you to verify.
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      capture="environment"
+                      onChange={(e) => {
+                        setError(null);
+                        setPhotoFile(e.target.files?.[0] ?? null);
+                      }}
+                      className="sr-only"
+                    />
+                  </label>
+                </div>
+              )}
+
+              {/* TAB C: TYPE / PASTE TEXT */}
+              {tab === 'text' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div className="sm:col-span-2">
+                      <label htmlFor="raw-title" className="block text-xs font-medium text-zinc-700">
+                        Material title
+                      </label>
+                      <input
+                        id="raw-title"
+                        type="text"
+                        maxLength={SCHEMA_LIMITS.SOURCE_TITLE_MAX}
+                        value={rawTitle}
+                        onChange={(e) => setRawTitle(e.target.value)}
+                        placeholder="e.g., Chapter 4: Contract Formation Notes"
+                        className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="text-type" className="block text-xs font-medium text-zinc-700">
+                        Source type
+                      </label>
+                      <select
+                        id="text-type"
+                        value={textInputType}
+                        onChange={(e) =>
+                          setTextInputType(e.target.value as 'typed_notes' | 'pasted_text')
+                        }
+                        className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                      >
+                        <option value="pasted_text">Pasted Text</option>
+                        <option value="typed_notes">Typed Notes</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="raw-text" className="block text-xs font-medium text-zinc-700">
+                        Study content (headings, lists, definitions, or raw text)
+                      </label>
+                      <span className="font-mono text-xs text-zinc-400 tabular-nums">
+                        {rawText.length.toLocaleString()} chars
+                      </span>
+                    </div>
+                    <textarea
+                      id="raw-text"
+                      rows={11}
+                      value={rawText}
+                      onChange={(e) => setRawText(e.target.value)}
+                      placeholder="Paste lecture notes, textbook excerpts, or type structured Markdown notes (# Heading, - Bullet, etc.)..."
+                      className="mt-1.5 w-full rounded-md border border-zinc-300 px-3 py-2.5 text-sm leading-relaxed focus:border-zinc-950 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* STEP 2: EXTRACTING PROGRESS */}
+          {step === 'extracting' && (
+            <div className="py-14 text-center space-y-4">
+              <div
+                aria-hidden="true"
+                className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-zinc-950 border-t-transparent"
+              />
+              <div className="text-sm font-medium text-zinc-950">{progressStage}</div>
+              <div className="mx-auto h-1.5 w-full max-w-md overflow-hidden rounded-full bg-zinc-100">
+                <div
+                  className="h-full bg-zinc-950 transition-all"
+                  style={{ width: `${Math.max(8, progressPercent)}%` }}
+                />
+              </div>
+              <p className="text-xs text-zinc-500">
+                Extracting structured headings, paragraphs, and page/slide boundaries...
+              </p>
+              <div className="pt-2">
+                <Button variant="secondary" size="sm" onClick={handleCancelExtraction}>
+                  Cancel extraction
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: PREVIEW, CORRECT & ORGANIZE */}
+          {step === 'preview' && (
+            <form id="save-source-form" onSubmit={handleSaveToCloud} className="space-y-6">
+              {uncertainCount > 0 && (
+                <div className="flex items-start gap-3 rounded-md border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-800">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-zinc-900" />
+                  <div>
+                    <div className="font-medium text-zinc-950">
+                      {uncertainCount} uncertain {uncertainCount === 1 ? 'word or phrase' : 'words or phrases'} marked for review
+                    </div>
+                    <p className="mt-0.5 text-xs text-zinc-600">
+                      Look for <span className="font-mono">[unclear: ...]</span> or{' '}
+                      <span className="font-mono">[illegible]</span> markers below and correct them before saving.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {warnings.length > 0 && (
+                <div className="space-y-1 border-y border-zinc-200 py-3 text-xs text-zinc-600">
+                  {warnings.map((w, idx) => (
+                    <div key={idx}>{w}</div>
+                  ))}
+                </div>
+              )}
+
+              {/* Organize metadata */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="sm:col-span-2">
+                  <label htmlFor="preview-title" className="block text-xs font-medium text-zinc-700">
+                    Material title
+                  </label>
+                  <input
+                    id="preview-title"
+                    type="text"
+                    required
+                    maxLength={SCHEMA_LIMITS.SOURCE_TITLE_MAX}
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="preview-type" className="block text-xs font-medium text-zinc-700">
+                    Material type
+                  </label>
+                  <select
+                    id="preview-type"
+                    value={materialType}
+                    onChange={(e) => setMaterialType(e.target.value as MaterialType)}
+                    className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                  >
+                    {(Object.keys(MATERIAL_TYPE_LABELS) as MaterialType[]).map((key) => (
+                      <option key={key} value={key}>
+                        {MATERIAL_TYPE_LABELS[key]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="preview-course" className="block text-xs font-medium text-zinc-700">
+                    Course
+                  </label>
+                  <select
+                    id="preview-course"
+                    value={targetCourseId}
+                    onChange={(e) => {
+                      setTargetCourseId(e.target.value);
+                      setTargetTopicId('');
+                    }}
+                    className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                  >
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code} — {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="max-w-md">
+                <TopicPickerField
+                  id="preview-topic"
+                  userId={userId}
+                  courseId={targetCourseId}
+                  knownTopics={topics}
+                  knownTopicsCourseId={activeCourse.id}
+                  value={targetTopicId}
+                  onChange={setTargetTopicId}
+                />
+              </div>
+
+              {/* Editor Mode Toggle */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 pt-4">
+                <div className="inline-flex gap-1 rounded-md bg-zinc-100 p-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchPreviewMode('sections')}
+                    className={`rounded px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                      previewMode === 'sections'
+                        ? 'bg-white text-zinc-950 shadow-xs'
+                        : 'text-zinc-600 hover:text-zinc-950'
+                    }`}
+                  >
+                    Structured Sections ({sections.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchPreviewMode('raw')}
+                    className={`rounded px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                      previewMode === 'raw'
+                        ? 'bg-white text-zinc-950 shadow-xs'
+                        : 'text-zinc-600 hover:text-zinc-950'
+                    }`}
+                  >
+                    Full Text Editor
+                  </button>
+                </div>
+
+                <div className="font-mono text-xs text-zinc-500 tabular-nums">
+                  {fullText.length.toLocaleString()} / {SCHEMA_LIMITS.SOURCE_CONTENT_MAX.toLocaleString()} chars
+                </div>
+              </div>
+
+              {/* Structured Section Editor */}
+              {previewMode === 'sections' ? (
+                <div className="space-y-4">
+                  {sections.length === 0 ? (
+                    <p className="text-sm text-zinc-500 py-4">
+                      All sections were removed. Switch to Full Text Editor or go back to re-import.
+                    </p>
+                  ) : (
+                    sections.map((sec, idx) => (
+                      <div
+                        key={sec.id}
+                        className="rounded-md border border-zinc-200 bg-white p-4 space-y-2.5"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="font-mono text-xs text-zinc-400 tabular-nums shrink-0">
+                              {String(idx + 1).padStart(2, '0')}
+                            </span>
+                            <input
+                              type="text"
+                              value={sec.heading}
+                              onChange={(e) =>
+                                handleUpdateSection(idx, { heading: e.target.value })
+                              }
+                              aria-label={`Section ${idx + 1} heading`}
+                              className="w-full border-b border-transparent bg-transparent py-0.5 text-sm font-semibold text-zinc-950 focus:border-zinc-950 focus:outline-none"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {sec.pageOrSlide && (
+                              <span className="font-mono text-xs text-zinc-400 tabular-nums">
+                                {materialType === 'slides' ? `Slide ${sec.pageOrSlide}` : `p. ${sec.pageOrSlide}`}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSection(idx)}
+                              aria-label={`Remove section ${sec.heading}`}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        <textarea
+                          rows={Math.min(10, Math.max(3, Math.ceil(sec.content.length / 110)))}
+                          value={sec.content}
+                          onChange={(e) => handleUpdateSection(idx, { content: e.target.value })}
+                          aria-label={`Section ${idx + 1} content`}
+                          className="w-full rounded border border-zinc-200 bg-zinc-50/40 px-3 py-2 text-sm leading-relaxed text-zinc-800 focus:border-zinc-950 focus:bg-white focus:outline-none"
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  rows={16}
+                  value={fullText}
+                  onChange={(e) => setFullText(e.target.value)}
+                  className="w-full rounded-md border border-zinc-300 px-3.5 py-3 font-mono text-xs leading-relaxed text-zinc-900 focus:border-zinc-950 focus:outline-none"
+                />
+              )}
+            </form>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4">
+          {step === 'input' && (
+            <>
+              <Button variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button onClick={() => void handleStartExtraction()} disabled={inspectingPdf}>
+                {tab === 'text' ? 'Structure & preview' : 'Extract & preview'}
+              </Button>
+            </>
+          )}
+
+          {step === 'extracting' && (
+            <div className="w-full text-right text-xs text-zinc-500">
+              Processing locally and discarding raw file after save...
+            </div>
+          )}
+
+          {step === 'preview' && (
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setStep('input')}
+                disabled={saving}
+              >
+                Back to import
+              </Button>
+              <div className="flex items-center gap-2.5">
+                <Button variant="ghost" onClick={onClose} disabled={saving}>
+                  Save as draft
+                </Button>
+                <Button type="submit" form="save-source-form" loading={saving}>
+                  Confirm &amp; save to Library
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};

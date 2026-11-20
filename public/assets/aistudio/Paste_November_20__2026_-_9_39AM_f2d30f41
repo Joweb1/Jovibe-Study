@@ -1,0 +1,1782 @@
+MASTER BUILD PROMPT — SOTAL STUDY
+
+You are a senior software engineer, product architect, AI engineer, UX designer, and technical lead. Your responsibility is to build SOTAL Study, a complete, intelligent, AI-powered personal study platform designed to help students organize their academic materials, understand difficult concepts, practise effectively, and learn through adaptive teaching.
+
+Do not treat this as a simple AI chatbot with a few study tools. Build it as a cohesive, persistent, intelligent learning environment.
+
+The goal is to build a functional, polished, production-minded application—not just an attractive UI prototype.
+
+---
+
+1. PRODUCT VISION
+
+SOTAL Study is an AI-powered personal learning workspace where students can upload their learning materials, organize them into courses, study with an AI Tutor, practise through different learning methods, and engage in an adaptive AI teaching experience called Automatic Study.
+
+The platform should make studying more organized, interactive, personalized, and effective.
+
+Students should be able to:
+
+- Create and organize their courses.
+- Create subjects and optional topics within courses.
+- Upload their study materials.
+- Convert materials into structured, readable, editable study content.
+- Ask an AI Tutor questions grounded in their own materials.
+- Generate and practise flashcards.
+- Take CBT-style multiple-choice tests.
+- Practise fill-in-the-gap exercises.
+- Participate in AI-led oral examinations.
+- Use Automatic Study for structured, adaptive lessons.
+- Answer questions by typing or voice.
+- Listen to AI explanations.
+- Save useful conversations, study materials, and practice sessions.
+- Track their learning progress.
+- Leave a study session and resume later exactly where they stopped.
+- Access their synced study environment across devices.
+
+The application should feel like a combination of a personal academic library, intelligent tutor, practice environment, and adaptive lecturer.
+
+---
+
+2. DESIGN AND USER EXPERIENCE
+
+Use a minimal, clean, modern design.
+
+Design principles
+
+- Monochrome-first interface.
+- White, black, gray, and subtle neutral tones.
+- Avoid unnecessary colors, gradients, excessive shadows, and decorative UI.
+- Avoid excessive cards and containers.
+- Avoid unnecessarily complex dashboards.
+- Use clean typography and clear spacing.
+- Make navigation intuitive.
+- Prioritize readability and concentration.
+- Use consistent components and design patterns.
+- Make the interface responsive and mobile-first.
+- Ensure the desktop experience also feels complete and intentional.
+
+The application should feel like a serious productivity and learning tool rather than a gamified educational toy.
+
+Application navigation
+
+The primary study environment should have three major sections:
+
+1. Library
+2. Tutor
+3. Practice
+
+Course selection should be accessible through a course selector/dropdown in the application header.
+
+When a student enters a course, they should be able to move naturally between the Library, Tutor, and Practice without losing context.
+
+---
+
+3. COURSE AND ACADEMIC ORGANIZATION
+
+Students should be able to create and manage multiple courses.
+
+Examples:
+
+- BUS 115
+- MGT 101
+- Economics
+- Computer Science
+- Mathematics
+
+Each course can contain:
+
+- Course name
+- Course code
+- Description, if applicable
+- Subjects or topics
+- Study materials
+- Tutor conversations
+- Generated learning materials
+- Practice sessions
+- Automatic Study sessions
+- Learning history
+
+Topics should be optional. A student should be able to study an entire course without having to create a topic structure first.
+
+Course management
+
+Implement real functionality for:
+
+- Create course.
+- Rename course.
+- Edit course details.
+- Delete course.
+- Select active course.
+- Create topics.
+- Rename topics.
+- Delete topics.
+- Assign materials to topics.
+- Move materials between courses or topics.
+- View course-specific learning activities.
+
+The active course should determine the context of the Tutor and Practice sections.
+
+---
+
+4. LIBRARY — PERSONAL STUDY MATERIALS
+
+The Library is the student's personal academic knowledge base.
+
+Students should be able to bring their existing study materials into the application instead of manually rewriting everything.
+
+Supported inputs
+
+Support importing:
+
+- PDF documents.
+- PowerPoint presentations.
+- Photographs of textbook pages.
+- Photographs of handwritten notes.
+- Scanned documents.
+- Typed notes.
+- Pasted text.
+- Other text-based academic materials where technically feasible.
+
+Material ingestion pipeline
+
+Implement a real ingestion process.
+
+Step 1 — Import
+
+Allow the student to upload or capture material.
+
+Step 2 — Extract
+
+Extract text from the material using the appropriate method:
+
+- PDFs: extract selectable text directly first.
+- Scanned PDFs: use OCR or AI vision when needed.
+- PowerPoint: extract slide text and preserve slide boundaries.
+- Images: use OCR or vision.
+- Handwritten notes: use AI vision to interpret handwriting.
+
+Do not unnecessarily send a readable PDF through vision when direct text extraction is sufficient.
+
+Step 3 — Preserve structure
+
+Preserve the original document's structure as much as possible:
+
+- Headings.
+- Subheadings.
+- Paragraphs.
+- Lists.
+- Definitions.
+- Examples.
+- Tables where possible.
+- Page numbers.
+- Slide numbers.
+- Section boundaries.
+
+Do not turn a structured document into one giant unformatted text string.
+
+Step 4 — Preview
+
+Show the extracted content to the student before final saving.
+
+Students must be able to:
+
+- Read the extracted content.
+- Edit it.
+- Correct OCR errors.
+- Fix inaccurate handwriting interpretation.
+- Remove unwanted sections.
+- Confirm the content.
+
+If handwriting is unclear, do not confidently invent words. Mark uncertain interpretations and allow the student to correct them.
+
+Step 5 — Organize
+
+The student can assign:
+
+- Course.
+- Optional topic.
+- Material title.
+- Material type.
+
+Step 6 — Save
+
+Save the extracted and corrected text, metadata, and structural information to Firebase Firestore.
+
+The default approach should be to store the extracted text and useful metadata rather than permanently storing unnecessarily large original files.
+
+Original files may be temporarily used during extraction but should be discarded after processing unless the application has a clear reason to retain them.
+
+Library management
+
+Implement:
+
+- Add material.
+- View material.
+- Edit extracted content.
+- Rename material.
+- Search materials.
+- Assign and reassign course/topic.
+- Add personal annotations.
+- Delete material.
+- Browse by course.
+- Browse by topic.
+- Browse by material type.
+
+Library data structure
+
+Each material should include appropriate metadata:
+
+- ID.
+- User ID.
+- Course ID.
+- Optional topic ID.
+- Title.
+- Material type.
+- Extracted content.
+- Content structure.
+- Page or slide references.
+- Created timestamp.
+- Updated timestamp.
+- Processing status.
+- Optional student notes.
+
+Large document handling
+
+Do not allow document ingestion to become an uncontrolled process.
+
+Implement sensible handling for:
+
+- Large PDFs.
+- Long documents.
+- Processing timeouts.
+- API limitations.
+- Token limits.
+- Extraction failures.
+- Page-range selection where useful.
+- Splitting documents into manageable segments.
+
+The student should not be forced to manually screenshot every page of a document that can be processed automatically.
+
+---
+
+5. AI TUTOR
+
+Build a course-aware AI Tutor.
+
+The Tutor should understand the student's active course and be able to use the student's Library materials to answer questions.
+
+It should support:
+
+- Asking academic questions.
+- Explaining difficult concepts.
+- Simplifying explanations.
+- Giving examples.
+- Defining terminology.
+- Summarizing topics.
+- Comparing concepts.
+- Explaining differences.
+- Connecting related topics.
+- Breaking down complex sentences.
+- Helping the student understand rather than merely memorize.
+- Answering follow-up questions naturally.
+
+Source modes
+
+Provide clear source modes:
+
+1. My Materials Only
+
+The AI must answer using the student's uploaded materials.
+
+If the answer is not supported by the materials, it should say so instead of inventing information.
+
+2. My Materials + AI Explanation
+
+Use the student's materials as the foundation, while allowing additional AI explanations, examples, clarification, and context.
+
+The AI should distinguish information from the student's materials and supplementary explanation where necessary.
+
+3. General AI Knowledge
+
+Allow the AI to answer using its general knowledge.
+
+Retrieval system
+
+Implement a lightweight retrieval system first.
+
+- Search relevant sources within the active course.
+- Identify relevant sections.
+- Retrieve relevant chunks.
+- Use page, slide, section, or source metadata.
+- Provide the AI with the relevant context rather than dumping the entire library into every request.
+- Preserve source traceability.
+
+Start with practical text search and relevance ranking.
+
+Keep the retrieval architecture modular so embeddings and vector retrieval can be added later if needed, without rebuilding the entire Tutor system.
+
+AI reliability
+
+The Tutor must:
+
+- Avoid hallucinated citations.
+- Avoid claiming a source says something it does not say.
+- Clearly indicate when information is unsupported.
+- Respect the selected source mode.
+- Maintain the current course context.
+- Handle follow-up questions.
+- Give meaningful explanations rather than generic answers.
+
+Tutor conversations
+
+Students should be able to:
+
+- Start a conversation.
+- Continue a conversation.
+- Create multiple conversations.
+- Rename conversations.
+- Delete conversations.
+- View previous conversations.
+- Search or find previous conversations where practical.
+- Save useful AI responses.
+- Listen to responses using voice playback.
+
+Persist Tutor conversations in Firestore.
+
+---
+
+6. AI VOICE AND AUDIO
+
+Add voice playback to AI responses.
+
+Students should be able to tap an audio icon on an AI response to listen to it.
+
+Implement browser-based text-to-speech where supported.
+
+Playback controls
+
+Provide:
+
+- Play.
+- Pause.
+- Resume.
+- Stop.
+- Replay.
+- Interrupt playback when needed.
+
+The voice feature must not prevent the student from reading, typing, navigating, or interacting with the application.
+
+Avoid reading technical metadata, raw source identifiers, or unnecessary citation information aloud.
+
+Handle browser capability differences gracefully.
+
+The basic voice playback experience should not depend on purchasing an external speech service.
+
+---
+
+7. PRACTICE
+
+The Practice section should contain exactly four primary learning methods:
+
+1. Flashcards.
+2. CBT.
+3. Fill in the Gap.
+4. Exam Prep.
+
+All practice activities must use the student's selected course materials where applicable.
+
+Practice setup
+
+Before generating a practice activity, the student should be able to configure:
+
+- Course.
+- Topic or topics.
+- Entire course.
+- Custom instructions.
+- Number of questions or cards.
+- Difficulty level.
+
+The student should be able to select a single topic, multiple topics, all topics, or provide custom instructions.
+
+Avoid generating poor-quality questions just to satisfy a requested quantity.
+
+---
+
+7.1 FLASHCARDS
+
+Generate meaningful flashcards from selected study materials.
+
+Each flashcard contains:
+
+- Front: question, term, concept, or prompt.
+- Back: answer, explanation, or definition.
+
+Flashcard experience
+
+Implement:
+
+- Reveal/flip answer.
+- Next card.
+- Previous card.
+- Shuffle.
+- Mark as known.
+- Mark as difficult.
+- Repeat difficult cards.
+- Track progress through the deck.
+- Review the entire deck.
+- Save deck.
+- Reopen deck later.
+- Record review history.
+
+Flashcards should focus on understanding, definitions, important facts, concepts, distinctions, and relationships.
+
+Do not create useless cards with vague questions or excessively long answers.
+
+---
+
+7.2 CBT — MULTIPLE-CHOICE TESTS
+
+Generate structured CBT questions based on the selected materials.
+
+Each question should normally contain four answer options.
+
+Quality requirements
+
+- One clearly correct answer by default.
+- Plausible distractors.
+- No ambiguous questions.
+- No duplicated questions.
+- No misleading wording.
+- No answer leakage.
+- No meaningless filler.
+- Appropriate difficulty.
+- Material-grounded questions.
+
+CBT modes
+
+Practice Mode
+
+- Student answers a question.
+- Feedback can appear immediately.
+- Explain why the answer is correct or incorrect.
+- Allow the student to continue.
+
+Exam Mode
+
+- Student answers without immediate feedback.
+- Navigate between questions.
+- Change answers.
+- Flag questions.
+- Track unanswered questions.
+- Submit the test at the end.
+
+CBT results
+
+Show:
+
+- Total score.
+- Percentage.
+- Correct answers.
+- Incorrect answers.
+- Questions skipped.
+- Explanations.
+- Weak topics.
+- Areas needing improvement.
+
+Allow:
+
+- Retry.
+- Retry missed questions.
+- Review all questions.
+- Save the test.
+- Revisit previous results.
+
+---
+
+7.3 FILL-IN-THE-GAP
+
+Generate fill-in-the-gap exercises from course materials.
+
+The AI should remove an important word, phrase, concept, or part of a sentence and ask the student to complete it.
+
+Features
+
+- Display the sentence with the missing portion.
+- Allow typed answers.
+- Submit answer.
+- Evaluate answer.
+- Accept reasonable synonyms or equivalent answers where appropriate.
+- Show the correct answer.
+- Explain the concept.
+- Track correct and incorrect answers.
+- Retry.
+- Save exercises.
+- Revisit later.
+
+Avoid ambiguous gaps where several answers could reasonably be correct unless the evaluation explicitly accommodates them.
+
+---
+
+7.4 EXAM PREP — AI ORAL EXAMINER
+
+Build an interactive AI examination environment.
+
+The AI acts like a lecturer or examiner and tests the student's understanding progressively.
+
+Questions may include:
+
+- Definitions.
+- Explain how.
+- Explain why.
+- Comparisons.
+- Applications.
+- Scenarios.
+- Reasoning.
+- Connections between topics.
+- Defending an argument.
+- Identifying misconceptions.
+- Explaining a concept in the student's own words.
+
+Interaction
+
+The AI asks one question at a time.
+
+The student answers through:
+
+- Typing.
+- Voice recording, where supported.
+
+The AI evaluates the answer based on the question and a relevant assessment rubric.
+
+Do not grade answers using keyword matching alone.
+
+Evaluation
+
+Each answer should receive an AI assessment out of 10.
+
+Evaluate:
+
+- Accuracy.
+- Conceptual understanding.
+- Reasoning.
+- Explanation quality.
+- Relevance.
+- Examples, where appropriate.
+
+The AI should provide:
+
+- Score out of 10.
+- What the student got right.
+- What was incomplete.
+- What was incorrect.
+- What could be improved.
+- A corrected or improved explanation.
+- A follow-up question when appropriate.
+
+Scores should be presented as AI assessments, not falsely claimed to be objectively authoritative.
+
+Session controls
+
+Students can:
+
+- Pause.
+- Resume.
+- Skip a question.
+- Request clarification.
+- End an exam.
+- Review feedback.
+- Continue later.
+
+The AI should adapt question difficulty and follow-up depth based on the student's performance without endlessly interrogating them.
+
+Voice support
+
+Where supported, allow:
+
+- Recording an answer.
+- Stopping recording.
+- Reviewing recording.
+- Submitting audio.
+- Typed alternative answers.
+
+Evaluate browser speech recognition capability.
+
+If direct speech recognition is unavailable, use a supported audio-processing approach through Gemini when available, or provide a graceful fallback.
+
+Voice playback should also be available for examiner questions and feedback.
+
+---
+
+8. AUTOMATIC STUDY — THE FLAGSHIP LEARNING EXPERIENCE
+
+Automatic Study is one of the most important features of SOTAL Study.
+
+Do not treat it as another chatbot.
+
+It should function like a personal AI lecturer that creates a structured learning plan, teaches one learning unit at a time, tests understanding, evaluates responses, adapts its teaching, and continues through the course.
+
+The AI should be capable of teaching the student rather than simply generating a summary.
+
+Session setup
+
+The student selects:
+
+- One topic.
+- Multiple topics.
+- All topics within a course.
+- Custom instructions.
+- Desired difficulty, where appropriate.
+
+The AI analyzes the selected study materials and creates a structured lesson plan.
+
+Break the content into manageable learning units.
+
+Avoid overwhelming the student with a giant lesson.
+
+Learning unit structure
+
+Each unit should contain:
+
+- Lesson title.
+- Concept or topic.
+- Learning objective.
+- Relevant source context.
+- Explanation.
+- Academic definition.
+- Plain-language interpretation.
+- Breakdown of difficult wording.
+- Examples.
+- Practical or real-world applications where relevant.
+- Common misunderstandings.
+- Check-understanding question.
+- Suggested next step.
+
+The AI should teach the student progressively.
+
+Teaching loop
+
+For each learning unit:
+
+Step 1 — Introduce the concept
+
+Tell the student what they are learning and why it matters.
+
+Step 2 — Explain it clearly
+
+Teach the concept in understandable language.
+
+Step 3 — Give the academic definition
+
+Provide the proper course-level definition.
+
+Step 4 — Simplify it
+
+Explain the definition in ordinary language.
+
+Step 5 — Break down difficult wording
+
+Explain key words, phrases, and the meaning of the definition.
+
+Step 6 — Give an example
+
+Provide a relevant example.
+
+Step 7 — Show application
+
+Where appropriate, connect the concept to practical situations.
+
+Step 8 — Address misconceptions
+
+Explain common mistakes or ways students misunderstand the concept.
+
+Step 9 — Ask a question
+
+Ask the student a meaningful question to test understanding.
+
+Do not automatically reveal the answer.
+
+Step 10 — Wait for the student's response
+
+Allow the student to type or submit a voice answer.
+
+Step 11 — Evaluate
+
+Evaluate the student's response according to the question.
+
+Step 12 — Score
+
+Provide a score out of 10, with clear reasoning.
+
+Step 13 — Give feedback
+
+Explain:
+
+- What was correct.
+- What the student understood.
+- What was missing.
+- What was wrong.
+- How to improve the answer.
+
+Step 14 — Adapt
+
+Based on the answer, determine whether to advance, ask a follow-up, reteach, simplify, or provide another example.
+
+Step 15 — Continue
+
+Move to the next learning unit when the student demonstrates sufficient understanding.
+
+Adaptive teaching behavior
+
+Automatic Study must adapt to the student's performance.
+
+If the student demonstrates strong understanding:
+
+- Advance to the next concept.
+- Increase complexity gradually where appropriate.
+- Ask deeper questions.
+
+If understanding is partial:
+
+- Clarify the missing portion.
+- Give a focused follow-up question.
+- Provide another example.
+
+If the student has a misconception:
+
+- Identify the misconception.
+- Explain the concept differently.
+- Give a contrasting example.
+- Retest understanding.
+
+If the student repeatedly struggles:
+
+- Simplify the explanation.
+- Break the concept into smaller pieces.
+- Reduce unnecessary academic language temporarily.
+- Rebuild understanding progressively.
+
+The AI should not repeat the exact same explanation over and over.
+
+Student controls
+
+The student must be able to:
+
+- Ask questions during a lesson.
+- Request a simpler explanation.
+- Request a more detailed explanation.
+- Request another example.
+- Skip a learning unit.
+- Pause.
+- Continue.
+- End the session.
+- Change the teaching approach.
+- Answer by voice or text.
+
+Automatic Study should remain interactive, not rigid.
+
+Progress display
+
+Display meaningful progress information:
+
+- Course.
+- Selected topics.
+- Current lesson.
+- Lesson number.
+- Current objective.
+- Completed units.
+- Topics covered.
+- Topics requiring review.
+- Current question.
+- Next learning unit.
+
+Do not display fake progress percentages when the lesson plan or completion state does not support them.
+
+---
+
+9. AUTOMATIC STUDY — PERSISTENCE AND CONTINUATION
+
+This is a critical requirement.
+
+Automatic Study sessions may become long. Do not depend on the chat transcript or the AI model's conversational memory to remember the session.
+
+The application must maintain a persistent structured session state.
+
+Study session state
+
+Store information such as:
+
+- Session ID.
+- User ID.
+- Course ID.
+- Selected topics.
+- Custom instructions.
+- Study plan.
+- Current lesson/unit.
+- Completed units.
+- Current objective.
+- Current question.
+- Latest student answer.
+- Evaluation feedback.
+- Scores.
+- Topic mastery estimates.
+- Topics requiring review.
+- Session status.
+- Last checkpoint.
+- Next action.
+- Created timestamp.
+- Updated timestamp.
+
+This session object must be the source of truth.
+
+Checkpoint system
+
+Create checkpoints after meaningful events, such as:
+
+- Lesson completed.
+- Question answered.
+- Evaluation completed.
+- Feedback delivered.
+- Topic completed.
+- Student pauses.
+- Session is interrupted.
+- Context approaches its limit.
+
+Context compaction and continuation
+
+When a session becomes too long or the AI context approaches its limit:
+
+1. Generate a structured summary of the current study session.
+2. Preserve the lesson plan.
+3. Preserve completed units.
+4. Preserve student answers.
+5. Preserve scores and evaluations.
+6. Preserve identified weaknesses.
+7. Preserve mastery estimates.
+8. Preserve the exact current stopping point.
+9. Preserve the next action.
+10. Save a checkpoint.
+11. Create a new conversation segment linked to the same study session.
+12. Load the checkpoint into the new segment.
+13. Continue seamlessly.
+
+The student should not have to repeat completed lessons.
+
+The system must not accidentally restart the session from lesson one.
+
+Resume behavior
+
+When the student returns to the application:
+
+- Show unfinished study sessions.
+- Display course and selected topics.
+- Display meaningful progress.
+- Display the last checkpoint.
+- Provide a Continue Study action.
+
+When continued, resume from the exact stopping point.
+
+Explicit structured session state must override assumptions made from the conversation transcript.
+
+---
+
+10. SAVED STUDY MATERIALS
+
+Generated content must not disappear after a session ends.
+
+Students should be able to save and revisit:
+
+- Flashcard decks.
+- CBT question sets.
+- Fill-in-the-gap exercises.
+- Exam Prep results.
+- Useful Tutor responses.
+- Summaries.
+- Study guides.
+- AI explanations.
+- Custom notes.
+- Other useful generated learning content.
+
+Saved materials management
+
+Implement:
+
+- Save.
+- Open.
+- Rename.
+- Edit where appropriate.
+- Reuse.
+- Continue practising.
+- Delete.
+- Search.
+- Organize by course.
+- Organize by topic.
+
+Each saved material should contain:
+
+- ID.
+- Title.
+- Course.
+- Optional topic.
+- Type.
+- Content.
+- Creation timestamp.
+- Updated timestamp.
+- Relevant source references.
+
+---
+
+11. STUDY HISTORY
+
+Implement a study history system per course.
+
+Record activities such as:
+
+- Tutor conversations.
+- Flashcard sessions.
+- CBT sessions.
+- Fill-in-the-gap sessions.
+- Exam Prep sessions.
+- Automatic Study sessions.
+
+History records
+
+Where applicable, record:
+
+- Session type.
+- Course.
+- Topic or topics.
+- Date.
+- Duration, where available.
+- Questions.
+- Student answers.
+- Score.
+- Percentage.
+- Correct answers.
+- Incorrect answers.
+- Weaknesses.
+- Feedback.
+- Summary.
+- Completion status.
+
+History interface
+
+Students should be able to:
+
+- View recent activities.
+- Open previous sessions.
+- Review mistakes.
+- View previous scores.
+- Compare attempts.
+- See improvements.
+- Revisit completed lessons.
+- Continue unfinished sessions.
+
+Keep this simple and useful.
+
+Do not turn study history into an unnecessarily complicated analytics dashboard.
+
+---
+
+12. AUTHENTICATION AND USER SETTINGS
+
+Use Firebase Authentication.
+
+Support:
+
+- Google sign-in.
+- Email authentication where feasible.
+- Persistent authentication.
+- Logout.
+- User profile.
+- Account management.
+
+Settings
+
+Create a clean settings page that includes:
+
+- Profile information.
+- Gemini API key management.
+- API key labels.
+- API key testing.
+- API key removal.
+- Default AI model.
+- Tutor source mode.
+- Voice preferences.
+- Learning preferences.
+- Difficulty preferences.
+- Data management.
+- Account deletion.
+
+---
+
+13. GEMINI API — BYOK SYSTEM
+
+Students provide their own Gemini API keys obtained through Google AI Studio.
+
+This is a BYOK (Bring Your Own Key) architecture.
+
+Do not require the platform to pay for all AI usage centrally.
+
+API key management
+
+Implement:
+
+- Add API key.
+- Label key.
+- Mask key in the UI.
+- Test key.
+- Show key status.
+- Remove key.
+- Replace key.
+- Manage multiple keys.
+- Select preferred key.
+- Configure fallback behavior.
+
+API keys must remain local to the user's device.
+
+Never store API keys in Firestore, Firebase Storage, backend logs, analytics, URLs, or publicly accessible files.
+
+Do not synchronize API keys between devices.
+
+If a student uses a different device, they should configure their API key on that device.
+
+Key rotation and fallback
+
+Create a modular Gemini client and key manager.
+
+Handle:
+
+- Rate limits.
+- Quota errors.
+- HTTP 429.
+- Invalid keys.
+- Temporary server errors.
+- Network failures.
+- Model unavailability.
+- Cooldown periods.
+- Controlled retries.
+
+If one eligible key fails due to an appropriate quota or transient error, the system may try another eligible key.
+
+Do not endlessly retry requests.
+
+Do not bypass safety restrictions or rotate keys for invalid requests.
+
+Be aware that multiple API keys from the same Google Cloud project share project-level quota limits. Multiple keys are a reliability/fallback mechanism, not a way to multiply quota.
+
+AI architecture
+
+Build a modular AI service that supports:
+
+- Model selection.
+- Model configuration.
+- Structured output.
+- JSON/schema validation.
+- Text generation.
+- Question generation.
+- Evaluation.
+- Summarization.
+- Vision.
+- Audio processing where supported.
+- Error classification.
+- Key management.
+- Retry/fallback policies.
+
+Avoid hardcoding the entire AI logic into components.
+
+---
+
+14. FIREBASE AND CLOUD SYNCHRONIZATION
+
+Use Firebase Authentication and Cloud Firestore.
+
+Cloud data should synchronize across devices.
+
+The Library should be cloud-synced by default. Do not make the core product local-only.
+
+Firestore is the cloud source of truth
+
+Persist:
+
+- Courses.
+- Topics.
+- Study sources.
+- Extracted content.
+- Tutor conversations.
+- Messages.
+- Saved AI responses.
+- Generated study materials.
+- Study sessions.
+- Session segments.
+- Checkpoints.
+- Study history.
+- Preferences.
+
+Suggested data structure
+
+Use a user-scoped structure such as:
+
+users/{userId}
+
+users/{userId}/courses/{courseId}
+
+users/{userId}/courses/{courseId}/topics/{topicId}
+
+users/{userId}/courses/{courseId}/sources/{sourceId}
+
+users/{userId}/courses/{courseId}/conversations/{conversationId}
+
+users/{userId}/courses/{courseId}/conversations/{conversationId}/messages/{messageId}
+
+users/{userId}/courses/{courseId}/studyMaterials/{materialId}
+
+users/{userId}/courses/{courseId}/studySessions/{sessionId}
+
+users/{userId}/courses/{courseId}/studySessions/{sessionId}/segments/{segmentId}
+
+users/{userId}/courses/{courseId}/studySessions/{sessionId}/checkpoints/{checkpointId}
+
+users/{userId}/courses/{courseId}/studyHistory/{historyId}
+
+Refine this structure where necessary based on scalability, indexing, data size, and security requirements.
+
+Local storage
+
+Use IndexedDB for:
+
+- Local caching.
+- Offline-readable content.
+- Drafts.
+- Unsaved edits.
+- Temporary document extraction.
+- Temporary processing state.
+- Recovery of interrupted workflows.
+
+Local storage complements Firestore; it does not replace cloud synchronization.
+
+Synchronization
+
+Implement:
+
+- Initial cloud loading.
+- Local caching.
+- Cloud updates.
+- Create/update/delete synchronization.
+- Offline handling.
+- Recovery.
+- Conflict handling where appropriate.
+- Loading states.
+- Error states.
+- Retry mechanisms.
+
+Do not create a fragile synchronization system that silently loses data.
+
+Firestore security
+
+Implement proper Firebase security rules.
+
+Users must only access their own data.
+
+Security must be enforced at the Firebase security-rule level, not merely by filtering data in frontend components.
+
+Validate user ownership and access to nested records.
+
+---
+
+15. PWA AND INSTALLABLE WEB APPLICATION
+
+SOTAL Study is a web application that should behave like an installable application.
+
+Implement an advanced PWA experience.
+
+Requirements
+
+- Web app manifest.
+- App icons.
+- Standalone installation.
+- Service worker.
+- Application shell caching.
+- Offline-friendly navigation.
+- IndexedDB caching.
+- Responsive mobile experience.
+- Desktop compatibility.
+- Update handling.
+- Online/offline indicators where appropriate.
+
+The student should be able to install SOTAL Study to their device without needing a traditional app store.
+
+Offline behavior
+
+Allow cached content to remain readable offline where practical.
+
+The student should be able to access cached notes and previously loaded materials.
+
+AI functionality requires an internet connection. Do not pretend the AI Tutor or Gemini generation works offline.
+
+Handle offline states honestly and gracefully.
+
+---
+
+16. TECHNICAL STACK
+
+Use the following preferred stack unless an existing project has a strong reason to retain another working technology.
+
+Frontend
+
+- React.
+- TypeScript.
+- Vite.
+- Tailwind CSS.
+
+Backend/cloud
+
+- Firebase Authentication.
+- Firebase Firestore.
+
+Local data
+
+- IndexedDB.
+
+AI
+
+- Gemini API.
+- User-provided API keys.
+- Modular AI service layer.
+
+Browser capabilities
+
+- Browser text-to-speech.
+- Speech recognition where supported.
+- Audio capture and supported Gemini audio processing as fallback where practical.
+
+Application architecture
+
+Keep the application modular.
+
+Create distinct modules for:
+
+- UI components.
+- Pages.
+- Navigation.
+- Authentication.
+- Firebase initialization.
+- Firestore services.
+- Data models.
+- Local storage.
+- Synchronization.
+- Document ingestion.
+- OCR.
+- Retrieval.
+- Gemini API client.
+- API key management.
+- Tutor.
+- Flashcards.
+- CBT.
+- Fill-in-the-gap.
+- Exam Prep.
+- Automatic Study.
+- Study session orchestration.
+- Session checkpoints.
+- Context continuation.
+- Audio.
+- Voice recording.
+- PWA.
+- Validation.
+- Utilities.
+
+Do not build the entire application inside a single massive React component.
+
+Avoid unnecessary dependencies.
+
+Use reusable components and clear types.
+
+Use structured AI outputs where appropriate.
+
+Validate AI-generated data before using it.
+
+Handle errors properly.
+
+Implement loading, empty, success, and failure states.
+
+Do not fake AI functionality.
+
+Do not use mock data to make an unfinished feature appear functional.
+
+---
+
+17. BUILD STRATEGY
+
+Do not attempt to generate the entire application in one uncontrolled implementation.
+
+Build the product in phases while designing the architecture from the beginning to support all the features.
+
+Automatic Study must be considered a first-class architectural feature from the start, even if its implementation comes in a later phase.
+
+PHASE 1 — FOUNDATION
+
+Inspect the existing project before modifying it.
+
+Implement:
+
+- Design system.
+- Responsive application shell.
+- Main navigation.
+- Course selector.
+- Course management foundation.
+- Firebase configuration.
+- Authentication.
+- Firestore architecture.
+- User-scoped data model.
+- Firestore security rules.
+- IndexedDB foundation.
+- Application routing.
+- Loading and error states.
+
+Do not unnecessarily overwrite working files.
+
+Run the application.
+
+Verify authentication and navigation.
+
+Resolve TypeScript errors, runtime errors, and foundational issues before moving forward.
+
+PHASE 2 — LIBRARY
+
+Implement:
+
+- Course organization.
+- Topic management.
+- Material import.
+- PDF extraction.
+- PowerPoint extraction.
+- Image OCR.
+- Handwriting interpretation.
+- Text preview.
+- Editing.
+- Metadata.
+- Cloud saving.
+- Local caching.
+- Searching.
+- Moving.
+- Renaming.
+- Deleting.
+- Source organization.
+
+Test the ingestion pipeline with real documents and images.
+
+PHASE 3 — AI INFRASTRUCTURE
+
+Implement:
+
+- Gemini client.
+- BYOK key manager.
+- Key testing.
+- Multiple keys.
+- Fallback.
+- Cooldown.
+- Retry.
+- Error handling.
+- Model configuration.
+- Structured outputs.
+- Schema validation.
+- Course retrieval.
+- Source ranking.
+- Context construction.
+
+Verify that API keys remain device-local and never enter Firestore.
+
+PHASE 4 — AI TUTOR
+
+Implement:
+
+- Course-aware chat.
+- Source modes.
+- Retrieval.
+- Material-grounded answers.
+- Source references.
+- Conversation creation.
+- Message persistence.
+- Conversation reopening.
+- Rename.
+- Delete.
+- Save responses.
+
+Test actual questions using uploaded materials.
+
+PHASE 5 — SAVED MATERIALS
+
+Implement:
+
+- Saved Tutor responses.
+- Summaries.
+- Study guides.
+- Custom notes.
+- Generated materials.
+- Search.
+- Rename.
+- Edit.
+- Reuse.
+- Delete.
+
+PHASE 6 — FLASHCARDS
+
+Implement the complete flashcard experience.
+
+Test:
+
+- Generation.
+- Card quality.
+- Reveal.
+- Navigation.
+- Shuffle.
+- Known/difficult tracking.
+- Retry difficult cards.
+- Save.
+- Reopen.
+- Review history.
+
+PHASE 7 — CBT
+
+Implement:
+
+- Question generation.
+- Practice mode.
+- Exam mode.
+- Question navigation.
+- Answer selection.
+- Flagging.
+- Submission.
+- Scoring.
+- Explanations.
+- Weakness analysis.
+- Retry.
+- Saved tests.
+- History.
+
+Test that answer keys are not leaked before appropriate feedback.
+
+PHASE 8 — FILL-IN-THE-GAP
+
+Implement:
+
+- Generation.
+- Answer submission.
+- Evaluation.
+- Synonym handling.
+- Explanations.
+- Scoring.
+- Retry.
+- Saving.
+- History.
+
+PHASE 9 — STUDY HISTORY
+
+Implement:
+
+- Activity tracking.
+- Course-specific history.
+- Scores.
+- Attempts.
+- Previous sessions.
+- Review mistakes.
+- Improvement comparisons.
+- Resume unfinished sessions.
+
+PHASE 10 — EXAM PREP
+
+Implement:
+
+- Adaptive AI examiner.
+- Question progression.
+- Difficulty adaptation.
+- Typed answers.
+- Voice answers.
+- Evaluation.
+- Scoring.
+- Feedback.
+- Follow-up questions.
+- Pause/resume.
+- Session persistence.
+- Review.
+
+PHASE 11 — AUTOMATIC STUDY
+
+Implement the flagship adaptive teaching system.
+
+Implement:
+
+- Topic selection.
+- Material analysis.
+- Lesson planning.
+- Learning units.
+- Teaching loop.
+- Academic definitions.
+- Simple explanations.
+- Examples.
+- Practical applications.
+- Misconceptions.
+- Questions.
+- Typed responses.
+- Voice responses.
+- Grading.
+- Adaptive feedback.
+- Reteaching.
+- Advancement.
+- Progress tracking.
+- Session controls.
+- Persistence.
+- Checkpoints.
+- Resume.
+
+Test the full experience from the beginning to completion of a multi-topic session.
+
+PHASE 12 — SESSION CONTINUATION AND CONTEXT COMPACTION
+
+Implement and test:
+
+- Persistent session state.
+- Structured checkpoints.
+- Session summaries.
+- Linked conversation segments.
+- Context compaction.
+- Exact resume position.
+- Preservation of completed units.
+- Preservation of scores.
+- Preservation of student answers.
+- Preservation of weaknesses.
+- Continuation without repetition.
+
+This must work reliably even when the original AI conversation becomes too long.
+
+PHASE 13 — VOICE
+
+Implement:
+
+- AI response playback.
+- Lesson playback.
+- Question playback.
+- Feedback playback.
+- Pause.
+- Resume.
+- Stop.
+- Replay.
+- Voice recording.
+- Recording controls.
+- Audio submission.
+- Speech capability detection.
+- Graceful fallbacks.
+
+PHASE 14 — PWA AND FINAL POLISH
+
+Implement:
+
+- Installation.
+- Manifest.
+- Icons.
+- Service worker.
+- Cache strategy.
+- Offline-friendly behavior.
+- Cross-device synchronization.
+- Mobile optimization.
+- Desktop optimization.
+- Accessibility.
+- Error handling.
+- Update handling.
+
+---
+
+18. TESTING AND QUALITY CONTROL
+
+Do not assume a feature works because the code has been generated.
+
+Test actual workflows.
+
+Authentication
+
+- Sign up.
+- Sign in.
+- Refresh.
+- Persistence.
+- Logout.
+
+Library
+
+- Upload a PDF.
+- Extract text.
+- Correct extracted text.
+- Save.
+- Refresh.
+- Confirm cloud persistence.
+- Open on another device or session.
+- Edit.
+- Delete.
+
+Tutor
+
+- Ask a question based on uploaded content.
+- Verify retrieval.
+- Verify source mode.
+- Verify unsupported answers are handled.
+- Save a conversation.
+- Reopen it.
+
+Practice
+
+- Generate flashcards.
+- Complete a deck.
+- Generate CBT.
+- Complete and submit.
+- Retry missed questions.
+- Complete gap-fill exercises.
+- Save and reopen materials.
+
+Exam Prep
+
+- Answer multiple questions.
+- Receive evaluations.
+- Verify adaptation.
+- Pause.
+- Resume.
+
+Automatic Study
+
+- Start a multi-topic study session.
+- Complete several lessons.
+- Answer questions.
+- Receive scores and feedback.
+- Trigger adaptation.
+- Pause.
+- Leave.
+- Return.
+- Resume exactly where stopped.
+- Test checkpoint loading.
+- Test context compaction.
+- Verify that completed lessons are not repeated.
+
+Voice
+
+- Play responses.
+- Pause.
+- Resume.
+- Stop.
+- Record an answer.
+- Submit.
+- Test fallback behavior.
+
+Synchronization
+
+- Create data.
+- Update data.
+- Delete data.
+- Refresh.
+- Verify cloud synchronization.
+- Test offline cache.
+- Recover after interruption.
+
+Quality requirements
+
+Fix:
+
+- TypeScript errors.
+- Runtime errors.
+- Broken navigation.
+- Invalid AI outputs.
+- Missing persistence.
+- Synchronization bugs.
+- Mobile layout issues.
+- Accessibility problems.
+- Loading states.
+- Error states.
+- API failure handling.
+
+---
+
+19. DEVELOPMENT RULES
+
+Follow these rules throughout development:
+
+1. Inspect existing files before changing them.
+2. Reuse working code where appropriate.
+3. Do not unnecessarily rewrite the entire application.
+4. Do not build fake buttons.
+5. Do not create placeholder functionality and claim it is complete.
+6. Do not silently discard user data.
+7. Do not store API keys in cloud databases.
+8. Do not expose user data across accounts.
+9. Do not rely exclusively on chat transcripts for study-session continuation.
+10. Do not generate low-quality learning questions.
+11. Do not overload the student with excessively long lessons.
+12. Do not implement Automatic Study as an ordinary chat conversation.
+13. Do not fake progress metrics.
+14. Do not pretend AI features work offline.
+15. Do not begin the next phase while the current phase has unresolved foundational issues.
+16. Keep architecture modular and maintainable.
+17. Validate AI outputs.
+18. Test real workflows.
+19. Be honest about what is implemented and what remains unfinished.
+20. Prioritize correctness, functionality, user experience, and reliable persistence over visual appearance alone.
+
+---
+
+20. DEFINITION OF SUCCESS
+
+SOTAL Study is successful when a student can complete the following end-to-end workflow without broken functionality:
+
+1. Sign up or sign in.
+2. Create a course.
+3. Create topics if desired.
+4. Upload a PDF, presentation, image, or handwritten note.
+5. Extract and review its content.
+6. Correct the content.
+7. Save it to the cloud.
+8. Open it later.
+9. Ask the AI Tutor questions based on the source.
+10. Receive useful, grounded explanations.
+11. Save a conversation.
+12. Generate flashcards.
+13. Complete and review flashcards.
+14. Generate and complete a CBT.
+15. Review mistakes and explanations.
+16. Complete a fill-in-the-gap exercise.
+17. Participate in an AI oral examination.
+18. Start Automatic Study.
+19. Learn progressively through structured lessons.
+20. Answer questions using text or voice.
+21. Receive evaluation and scores.
+22. Experience adaptive teaching when struggling.
+23. Pause and leave a session.
+24. Return later and resume exactly where they stopped.
+25. Continue across conversation segments when necessary without repeating lessons.
+26. View study history.
+27. Reopen saved study materials.
+28. Use voice playback.
+29. Install the PWA.
+30. Access synced data across devices.
+
+The application must be genuinely functional, persistent, responsive, reliable, and designed for real students.
+
+---
+
+FINAL INSTRUCTION
+
+Begin by inspecting the existing project and determining its current architecture and state.
+
+Do not rush into building every feature simultaneously.
+
+Establish a stable foundation first, then progress phase by phase.
+
+At the end of every phase, provide a concise report covering:
+
+- What was implemented.
+- Files created or modified.
+- What is genuinely working.
+- What was tested.
+- Any unresolved bugs.
+- What remains unfinished.
+- Any decisions requiring approval.
+
+Do not proceed to the next phase until the current phase has been tested and stabilized.
+
+Build SOTAL Study as a complete AI-powered learning platform—not merely a frontend demonstration.
+
+Start with Phase 1: Foundation.
