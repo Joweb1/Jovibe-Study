@@ -98,7 +98,7 @@ const PREVIEW_STATES: Array<{ id: LiveVoiceState; label: string }> = [
 ];
 
 export const SotalLivePage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, isOnline } = useAuth();
   const { recordLearningActivity } = useStreak();
   const { theme, toggleTheme } = useTheme();
   const { activeCourse, activeContentOwnerId, topics } = useCourses();
@@ -217,16 +217,33 @@ export const SotalLivePage: React.FC = () => {
       studentEngagedInLiveRef.current = false;
       setWalkthroughPlaying(false);
       setPreviewOverrideMode(false);
+
+      if (liveClientRef.current) {
+        liveClientRef.current.disconnect(true);
+        liveClientRef.current = null;
+      }
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setVoiceState('disconnected');
+        setAudioLevel(0.08);
+        setStatusDetail('Offline');
+        setNetworkStatus({ quality: 'offline', rttMs: null });
+        setErrorMessage(
+          'SOTAL Live needs an internet connection for real-time voice conversations. Turn on your internet to reconnect, or study your cached notes and chat history in Library and Tutor.'
+        );
+        setSubtitle({
+          speaker: 'system',
+          text: 'You are currently offline. Turn on your internet connection to start SOTAL Live.',
+        });
+        return;
+      }
+
       setErrorMessage(null);
       setStatusDetail('Connecting...');
       setSubtitle({
         speaker: 'system',
         text: `Joining SOTAL Live for "${targetLesson.lessonTitle}"...`,
       });
-
-      if (liveClientRef.current) {
-        liveClientRef.current.disconnect(true);
-      }
 
       const sessionQualificationKey = `${targetLesson.courseCode}:${targetLesson.sourceId || targetLesson.lessonTitle}`;
 
@@ -312,7 +329,7 @@ export const SotalLivePage: React.FC = () => {
       liveClientRef.current?.disconnect(true);
       liveClientRef.current = null;
     };
-  }, [lessonSessionKey, waitingForInitialSources, preferredVoice, connectLiveSession]);
+  }, [lessonSessionKey, waitingForInitialSources, preferredVoice, isOnline, connectLiveSession]);
 
   // Automatically resume suspended input/output AudioContexts on the first pointer or key gesture
   useEffect(() => {

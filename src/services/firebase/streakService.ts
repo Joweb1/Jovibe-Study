@@ -33,7 +33,7 @@ import {
   isValidDateKey,
   reconcileMissedDays,
 } from '../streak/streakEngine';
-import { db } from './config';
+import { auth, db } from './config';
 import { handleFirestoreError, OperationType } from './errors';
 
 function streakProfileRef(userId: string) {
@@ -510,6 +510,7 @@ export async function flushAppTimeSeconds(
 ): Promise<void> {
   const safeDelta = clampInt(deltaSeconds, 0, 3600);
   if (safeDelta <= 0) return;
+  if (!auth.currentUser || auth.currentUser.uid !== userId) return;
 
   const path = `users/${userId}/appUsage/summary`;
   try {
@@ -555,6 +556,8 @@ export async function flushAppTimeSeconds(
       }
     });
   } catch (error) {
+    // If the user signed out while the background timer flush was in-flight, abort quietly
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -570,6 +573,7 @@ export async function addActiveLearningSeconds(
 ): Promise<void> {
   const safeDelta = clampInt(deltaSeconds, 0, 86400);
   if (safeDelta <= 0) return;
+  if (!auth.currentUser || auth.currentUser.uid !== userId) return;
 
   const path = `users/${userId}/appUsageDays/${todayKey}`;
   try {

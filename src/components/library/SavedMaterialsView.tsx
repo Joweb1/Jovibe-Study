@@ -87,7 +87,7 @@ export const SavedMaterialsView: React.FC<SavedMaterialsViewProps> = ({
   onClearExternalFilters,
   onReaderOpenChange,
 }) => {
-  const { user, profile } = useAuth();
+  const { user, profile, isOnline } = useAuth();
   const prefs = profile?.preferences ?? DEFAULT_USER_PREFERENCES;
 
   const isControlledSearch = externalSearchQuery !== undefined;
@@ -270,14 +270,21 @@ export const SavedMaterialsView: React.FC<SavedMaterialsViewProps> = ({
                 variant="secondary"
                 size="sm"
                 loading={isLoadingAudio}
-                onClick={() =>
+                onClick={() => {
+                  if (!isOnline && !isPlaying && !isPaused) {
+                    setError(
+                      "You're offline. Turn on your internet connection to generate voice audio. You can continue reading your saved resources offline."
+                    );
+                    return;
+                  }
+                  setError(null);
                   void geminiAudioPlayer.playMessage({
                     id: playId,
                     text: extractReadableTextForSpeech(activeMaterial),
                     voiceName: prefs.ttsVoice,
                     playbackRate: prefs.voiceRate,
-                  })
-                }
+                  });
+                }}
               >
                 {isPlaying ? (
                   <>
@@ -309,6 +316,8 @@ export const SavedMaterialsView: React.FC<SavedMaterialsViewProps> = ({
             </Button>
           </div>
         </div>
+
+        {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
         <div className="max-w-3xl space-y-6">
           <div>

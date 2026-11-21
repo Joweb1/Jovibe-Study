@@ -16,6 +16,7 @@ import type {
   StudyActivityType,
 } from '../types/models';
 import { useAuth } from './AuthContext';
+import { auth } from '../services/firebase/config';
 import { getLocalDateKey } from '../services/streak/streakEngine';
 import {
   claimTodayStreakTransaction,
@@ -78,12 +79,43 @@ interface StreakContextValue {
 const StreakContext = createContext<StreakContextValue | null>(null);
 
 const PENDING_APP_TIME_PREFIX = 'sotal_pending_app_time_v1:';
+const PENDING_OFFLINE_ACTIVITIES_PREFIX = 'sotal_pending_offline_activities_v1:';
 const ACTIVE_TAB_LEASE_KEY = 'sotal_active_tab_lease_v1';
 const FLUSH_INTERVAL_MS = 30_000;
 
 interface StoredPendingSeconds {
   dateKey: string;
   seconds: number;
+}
+
+interface QueuedOfflineActivity extends RecordLearningActivityInput {
+  dateKey: string;
+}
+
+function readQueuedOfflineActivities(userId: string): QueuedOfflineActivity[] {
+  if (typeof window === 'undefined' || !userId) return [];
+  try {
+    const raw = window.localStorage.getItem(`${PENDING_OFFLINE_ACTIVITIES_PREFIX}${userId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as QueuedOfflineActivity[]).slice(0, 30) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeQueuedOfflineActivities(userId: string, items: QueuedOfflineActivity[]): void {
+  if (typeof window === 'undefined' || !userId) return;
+  try {
+    const key = `${PENDING_OFFLINE_ACTIVITIES_PREFIX}${userId}`;
+    if (items.length === 0) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, JSON.stringify(items.slice(0, 30)));
+    }
+  } catch {
+    // Ignore storage quota issues
+  }
 }
 
 function readPendingLocalSeconds(userId: string): StoredPendingSeconds | null {
@@ -116,7 +148,7 @@ function writePendingLocalSeconds(userId: string, data: StoredPendingSeconds | n
 }
 
 export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, isOnline } = useAuth();
   const userId = user?.uid ?? '';
 
   const [todayKey, setTodayKey] = useState<string>(() => getLocalDateKey());
@@ -160,9 +192,11 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setStreakLoading(true);
     setActivitiesLoading(true);
 
-    void ensureAndReconcileStreak(userId, getLocalDateKey()).catch((err) => {
-      console.warn('Streak reconciliation deferred:', err);
-    });
+    if (auth.currentUser?.uid === userId && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+      void ensureAndReconcileStreak(userId, getLocalDateKey()).catch((err) => {
+        console.warn('Streak reconciliation deferred:', err);
+      });
+    }
 
     const unsubProfile = subscribeStreakProfile(
       userId,
@@ -240,6 +274,24 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const targetDateKey = unsavedDateKeyRef.current || getLocalDateKey();
     if (secondsToFlush <= 0) return;
 
+    // Never attempt a Firestore transaction if signed out or offline.
+    // Keep accumulated seconds in localStorage so they sync automatically when online.
+    if (
+      !auth.currentUser ||
+      auth.currentUser.uid !== userId ||
+      (typeof navigator !== 'undefined' && navigator.onLine === false)
+    ) {
+      writePendingLocalSeconds(userId, {
+        dateKey: targetDateKey,
+        seconds: secondsToFlush,
+      });
+      if (!auth.currentUser || auth.currentUser.uid !== userId) {
+        unsavedSecondsRef.current = 0;
+        setLiveUnsavedSeconds(0);
+      }
+      return;
+    }
+
     flushingRef.current = true;
     unsavedSecondsRef.current = 0;
     setLiveUnsavedSeconds(0);
@@ -248,13 +300,20 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       await flushAppTimeSeconds(userId, secondsToFlush, targetDateKey);
     } catch {
-      // Restore locally so time is not lost on temporary network blip
-      unsavedSecondsRef.current += secondsToFlush;
-      setLiveUnsavedSeconds(unsavedSecondsRef.current);
-      writePendingLocalSeconds(userId, {
-        dateKey: targetDateKey,
-        seconds: unsavedSecondsRef.current,
-      });
+      // Restore locally so time is not lost on temporary network blip or mid-flight sign-out
+      if (auth.currentUser?.uid === userId) {
+        unsavedSecondsRef.current += secondsToFlush;
+        setLiveUnsavedSeconds(unsavedSecondsRef.current);
+        writePendingLocalSeconds(userId, {
+          dateKey: targetDateKey,
+          seconds: unsavedSecondsRef.current,
+        });
+      } else {
+        writePendingLocalSeconds(userId, {
+          dateKey: targetDateKey,
+          seconds: secondsToFlush,
+        });
+      }
     } finally {
       flushingRef.current = false;
     }
@@ -266,7 +325,12 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     // Recover any unsaved foreground seconds persisted right before a previous reload/close
     const recovered = readPendingLocalSeconds(userId);
-    if (recovered && recovered.seconds > 0) {
+    if (
+      recovered &&
+      recovered.seconds > 0 &&
+      auth.currentUser?.uid === userId &&
+      (typeof navigator === 'undefined' || navigator.onLine !== false)
+    ) {
       writePendingLocalSeconds(userId, null);
       void flushAppTimeSeconds(userId, recovered.seconds, recovered.dateKey).catch(() => {
         // Ignore transient offline recovery error
@@ -309,7 +373,9 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         void flushAccumulatedAppTime();
         unsavedDateKeyRef.current = currentDateKey;
         setTodayKey(currentDateKey);
-        void ensureAndReconcileStreak(userId, currentDateKey).catch(() => {});
+        if (auth.currentUser?.uid === userId) {
+          void ensureAndReconcileStreak(userId, currentDateKey).catch(() => {});
+        }
       }
 
       if (isForeground && document.visibilityState === 'visible') {
@@ -339,7 +405,9 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setTodayKey(nextDay);
           unsavedDateKeyRef.current = nextDay;
         }
-        void ensureAndReconcileStreak(userId, nextDay).catch(() => {});
+        if (auth.currentUser?.uid === userId) {
+          void ensureAndReconcileStreak(userId, nextDay).catch(() => {});
+        }
       }
     };
 
@@ -382,17 +450,74 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pagehide', handlePageHide);
-      void flushAccumulatedAppTime();
+      if (auth.currentUser?.uid === userId) {
+        void flushAccumulatedAppTime();
+      } else if (unsavedSecondsRef.current > 0) {
+        writePendingLocalSeconds(userId, {
+          dateKey: unsavedDateKeyRef.current || getLocalDateKey(),
+          seconds: Math.floor(unsavedSecondsRef.current),
+        });
+        unsavedSecondsRef.current = 0;
+        setLiveUnsavedSeconds(0);
+      }
     };
   }, [userId, flushAccumulatedAppTime]);
 
+  // Auto-sync queued offline activities, foreground time, and streak state upon reconnecting
+  useEffect(() => {
+    if (!isOnline || !userId || auth.currentUser?.uid !== userId) return;
+
+    void ensureAndReconcileStreak(userId, getLocalDateKey()).catch(() => {});
+    void flushAccumulatedAppTime();
+
+    const pendingActivities = readQueuedOfflineActivities(userId);
+    if (pendingActivities.length > 0) {
+      writeQueuedOfflineActivities(userId, []);
+      void (async () => {
+        for (const item of pendingActivities) {
+          try {
+            const res = await recordQualifyingLearningActivity(userId, {
+              activityType: item.activityType,
+              title: item.title,
+              courseId: item.courseId || 'global',
+              courseCode: item.courseCode || 'COURSE',
+              isSharedCourse: Boolean(item.isSharedCourse),
+              durationSeconds: item.durationSeconds ?? 0,
+              score: item.score ?? null,
+              maxScore: item.maxScore ?? null,
+              summary: item.summary || '',
+              todayKey: item.dateKey || getLocalDateKey(),
+            });
+            if (res.shouldShowClaimModal) {
+              autoOpenedPendingDateRef.current = item.dateKey || getLocalDateKey();
+              setClaimModalStreakCount(res.pendingStreakCount);
+              setClaimModalActivityTitle(item.title);
+              setClaimModalOpen(true);
+            }
+          } catch {
+            // Non-fatal sync skip
+          }
+        }
+      })();
+    }
+  }, [isOnline, userId, flushAccumulatedAppTime]);
+
   const recordLearningActivity = useCallback(
     async (input: RecordLearningActivityInput) => {
-      if (!userId) return;
+      if (!userId || auth.currentUser?.uid !== userId) return;
       const currentDayKey = getLocalDateKey();
       if (currentDayKey !== todayKey) {
         setTodayKey(currentDayKey);
       }
+
+      // Queue offline learning completions locally so they sync automatically once online
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        const queued = readQueuedOfflineActivities(userId);
+        queued.push({ ...input, dateKey: currentDayKey });
+        writeQueuedOfflineActivities(userId, queued);
+        return;
+      }
+
       try {
         const result = await recordQualifyingLearningActivity(userId, {
           activityType: input.activityType,
@@ -421,7 +546,8 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const claimTodayStreak = useCallback(async () => {
-    if (!userId || claiming) return;
+    if (!userId || auth.currentUser?.uid !== userId || claiming) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     setClaiming(true);
     try {
       await claimTodayStreakTransaction(userId, getLocalDateKey());

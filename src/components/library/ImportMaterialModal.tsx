@@ -266,6 +266,13 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
       return;
     }
 
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setError(
+        "You're offline. Turn on your internet connection to extract text from PDFs, slides, or photos with AI. You can still paste or type plain text notes offline."
+      );
+      return;
+    }
+
     const controller = new AbortController();
     abortRef.current = controller;
     setStep('extracting');

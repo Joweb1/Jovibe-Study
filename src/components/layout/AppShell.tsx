@@ -16,6 +16,7 @@ import {
   Moon,
   Settings,
   Sun,
+  Wifi,
   WifiOff,
   X,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ import { CourseModal } from '../courses/CourseModal';
 import { CourseSelector } from '../courses/CourseSelector';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { StreakHeaderIndicator } from '../streak/StreakHeaderIndicator';
+import { SotalLogo } from '../ui/SotalLogo';
 import { ErrorBanner } from '../ui/StateViews';
 
 const DESKTOP_NAV_ITEMS: Array<{
@@ -77,7 +79,7 @@ const AI_FEATURE_ROUTES: ReadonlySet<AppRoute> = new Set<AppRoute>([
 ]);
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, profile, isOnline, signOut } = useAuth();
+  const { user, profile, isOnline, justReconnected, signOut } = useAuth();
   const { createCourse, courseError, clearCourseError } = useCourses();
   const {
     needsSetupReminder,
@@ -162,13 +164,14 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       {!effectiveHideHeader && (
         <header className="sticky top-0 z-30 shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
           <div className="mx-auto flex h-14 max-w-[1200px] items-center justify-between gap-4 md:gap-8 px-4 sm:px-6">
-            {/* Zone 1: Brand Wordmark */}
+            {/* Zone 1: Brand Logo & Wordmark */}
             <button
               type="button"
               onClick={() => navigate('/courses')}
-              className="font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-2 font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              SOTAL Study
+              <SotalLogo size="md" />
+              <span>SOTAL Study</span>
             </button>
 
             {/* Zone 2: Primary Desktop Navigation */}
@@ -345,14 +348,30 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         </header>
       )}
 
-      {/* Honest offline notice — shown ONLY when offline and header is visible */}
-      {!isOnline && !effectiveHideHeader && (
-        <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300">
+      {/* Calm offline study notice — shown across workspace routes when offline (SOTAL Live renders its own dedicated view) */}
+      {!isOnline && !isLiveRoute && (
+        <div
+          role="status"
+          className="shrink-0 border-b border-amber-200/80 dark:border-amber-900/50 bg-amber-50/90 dark:bg-amber-950/35 px-4 py-2 text-xs text-amber-950 dark:text-amber-100"
+        >
           <div className="mx-auto flex max-w-[1200px] items-center gap-2">
-            <WifiOff className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-400" />
+            <WifiOff className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-400" />
             <span>
-              You are offline. Cached courses and topics remain viewable; cloud sync and AI tools require an internet connection.
+              You&apos;re offline. You can browse cached courses, library notes, saved resources, and chat history. Turn on your internet to use AI features or sync changes.
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Brief reconnection confirmation */}
+      {isOnline && justReconnected && !isLiveRoute && (
+        <div
+          role="status"
+          className="shrink-0 border-b border-emerald-200/80 dark:border-emerald-900/50 bg-emerald-50/90 dark:bg-emerald-950/35 px-4 py-2 text-xs text-emerald-950 dark:text-emerald-100"
+        >
+          <div className="mx-auto flex max-w-[1200px] items-center gap-2">
+            <Wifi className="h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
+            <span>Back online — syncing your study data and re-enabling AI features.</span>
           </div>
         </div>
       )}

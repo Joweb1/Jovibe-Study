@@ -33,6 +33,7 @@ import { FillGapSession } from '../components/practice/FillGapSession';
 import { ExamPrepSession } from '../components/practice/ExamPrepSession';
 import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { EmptyState, ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
+import { OfflineFeatureNotice } from '../components/ui/OfflineFeatureNotice';
 
 type PracticeMethodId = 'flashcards' | 'cbt' | 'fill_in_the_gap' | 'exam_prep';
 
@@ -273,7 +274,7 @@ function getActiveSessionStorageKey(userId: string, courseId: string): string {
 }
 
 export const PracticePage: React.FC = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, isOnline } = useAuth();
   const {
     activeCourse,
     activeContentOwnerId,
@@ -371,6 +372,12 @@ export const PracticePage: React.FC = () => {
   }
 
   const handleStartPractice = async (methodId: PracticeMethodId, config: PracticeConfig) => {
+    if (!isOnline) {
+      setError(
+        "You're offline. Turn on your internet connection to generate new AI practice sets. Previously saved flashcards, CBT sets, and gap-fill drills are available in your Library."
+      );
+      return;
+    }
     setGenerating(true);
     setError(null);
     const sessionId = makePracticeSessionId(methodId);
@@ -546,6 +553,14 @@ export const PracticePage: React.FC = () => {
     const methodMeta = PRACTICE_METHODS.find((m) => m.id === selectedMethod)!;
     return (
       <div className="space-y-6">
+        {!isOnline && (
+          <OfflineFeatureNotice
+            title="You're offline — AI practice generation paused"
+            description="Turn on your internet connection to generate new AI drills. Previously saved flashcards, CBT sets, and gap-fill exercises can still be reviewed in your Library."
+            actionLabel="Open Library"
+            onAction={() => navigate('/library')}
+          />
+        )}
         {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
         <PracticeConfigForm
           title={`${methodMeta.title} — ${activeCourse.code}`}
@@ -576,6 +591,15 @@ export const PracticePage: React.FC = () => {
           Practice
         </h1>
       </div>
+
+      {!isOnline && (
+        <OfflineFeatureNotice
+          title="You're offline — study saved sets in Library"
+          description="Generating new AI flashcards, CBT tests, gap-fill drills, or oral exams requires an internet connection. Turn on internet to generate new sets, or open your Library to study previously saved resources offline."
+          actionLabel="View Saved Resources in Library"
+          onAction={() => navigate('/library')}
+        />
+      )}
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 

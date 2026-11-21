@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { onSnapshotsInSync } from 'firebase/firestore';
-import { ArrowLeft, Check, LogOut, Moon, Square, Sun, Trash2, Volume2 } from 'lucide-react';
+import { ArrowLeft, Check, Download, LogOut, Moon, Square, Sun, Trash2, Volume2 } from 'lucide-react';
 import {
   DEFAULT_USER_PREFERENCES,
   type DifficultyLevel,
@@ -9,10 +9,12 @@ import {
   type UserPreferences,
 } from '../types/models';
 import { useAuth } from '../context/AuthContext';
+import { useCourses } from '../context/CourseContext';
 import { useTheme } from '../context/ThemeContext';
 import { useRouter } from '../router/RouterContext';
 import { db } from '../services/firebase/config';
 import { formatReadableError } from '../services/firebase/errors';
+import { syncCoursesForOffline } from '../services/firebase/offlineSyncService';
 import {
   clearLocalCache,
   getLocalCacheStats,
@@ -27,6 +29,7 @@ import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
 
 export const SettingsPage: React.FC = () => {
   const { user, profile, isOnline, savePreferences, signOut } = useAuth();
+  const { courses } = useCourses();
   const { navigate } = useRouter();
   const { theme, toggleTheme } = useTheme();
 
@@ -46,6 +49,8 @@ export const SettingsPage: React.FC = () => {
   });
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheSyncing, setCacheSyncing] = useState(false);
+  const [syncingOffline, setSyncingOffline] = useState(false);
+  const [offlineSyncStatus, setOfflineSyncStatus] = useState<string | null>(null);
   const [playback, setPlayback] = useState<PlaybackState>(() => geminiAudioPlayer.getState());
 
   useEffect(() => {
@@ -131,6 +136,7 @@ export const SettingsPage: React.FC = () => {
 
   const handleClearLocalCache = async () => {
     setClearingCache(true);
+    setOfflineSyncStatus(null);
     try {
       await clearLocalCache();
       geminiAudioPlayer.clearMemoryCache();
@@ -143,6 +149,32 @@ export const SettingsPage: React.FC = () => {
       });
     } finally {
       setClearingCache(false);
+    }
+  };
+
+  const handleSyncForOffline = async () => {
+    if (!user) return;
+    if (!isOnline) {
+      setError('Turn on your internet connection to sync your courses for offline study.');
+      return;
+    }
+    setSyncingOffline(true);
+    setError(null);
+    setOfflineSyncStatus('Starting offline sync...');
+    try {
+      const result = await syncCoursesForOffline(user.uid, courses, (label) => {
+        setOfflineSyncStatus(label);
+      });
+      const stats = await getLocalCacheStats(user.uid);
+      setCacheStats(stats);
+      setOfflineSyncStatus(
+        `Ready for offline study: ${result.coursesSynced} course${result.coursesSynced === 1 ? '' : 's'}, ${result.sourcesSynced} material${result.sourcesSynced === 1 ? '' : 's'}, ${result.savedResourcesSynced} saved resource${result.savedResourcesSynced === 1 ? '' : 's'}, and ${result.conversationsSynced} tutor chat${result.conversationsSynced === 1 ? '' : 's'} cached on this device.`
+      );
+    } catch (err) {
+      setError(formatReadableError(err));
+      setOfflineSyncStatus(null);
+    } finally {
+      setSyncingOffline(false);
     }
   };
 
@@ -462,34 +494,55 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Caches courses, topics, saved tutor audio clips, and unsaved drafts locally for fast startup and offline playback. Clearing local cache does not delete your Cloud Firestore data.
+            Firestore offline persistence and local IndexedDB automatically cache courses, library materials, saved resources, tutor chat history, and audio clips so you can keep studying without internet. Clearing local cache does not delete your Cloud Firestore data.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-4 border-y border-zinc-200 dark:border-zinc-800 py-4">
-          <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-600 dark:text-zinc-400 tabular-nums">
-            <span>Courses cached: {cacheStats.cachedCourses}</span>
-            <span aria-hidden="true">·</span>
-            <span>Topics cached: {cacheStats.cachedTopics}</span>
-            <span aria-hidden="true">·</span>
-            <span>Materials cached: {cacheStats.cachedSources}</span>
-            <span aria-hidden="true">·</span>
-            <span>Audio clips: {cacheStats.cachedAudioClips}</span>
-            <span aria-hidden="true">·</span>
-            <span>Drafts: {cacheStats.cachedDrafts}</span>
+        <div className="space-y-3 border-y border-zinc-200 dark:border-zinc-800 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-600 dark:text-zinc-400 tabular-nums">
+              <span>Courses cached: {cacheStats.cachedCourses}</span>
+              <span aria-hidden="true">·</span>
+              <span>Topics cached: {cacheStats.cachedTopics}</span>
+              <span aria-hidden="true">·</span>
+              <span>Materials cached: {cacheStats.cachedSources}</span>
+              <span aria-hidden="true">·</span>
+              <span>Audio clips: {cacheStats.cachedAudioClips}</span>
+              <span aria-hidden="true">·</span>
+              <span>Drafts: {cacheStats.cachedDrafts}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleSyncForOffline()}
+                loading={syncingOffline}
+                disabled={!isOnline || courses.length === 0}
+                title={
+                  !isOnline
+                    ? 'Turn on internet to download latest updates for offline study'
+                    : 'Download all courses, library notes, saved resources, and recent chats for offline study'
+                }
+              >
+                <Download className="h-3.5 w-3.5" />
+                Save all for offline
+              </Button>
+              <PWAInstallButton variant="button" />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleClearLocalCache()}
+                loading={clearingCache}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Clear local cache
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <PWAInstallButton variant="button" />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void handleClearLocalCache()}
-              loading={clearingCache}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Clear local cache
-            </Button>
-          </div>
+
+          {offlineSyncStatus && (
+            <p className="text-xs text-zinc-700 dark:text-zinc-300">{offlineSyncStatus}</p>
+          )}
         </div>
       </section>
     </div>

@@ -61,6 +61,7 @@ import {
 import { generateDocumentId } from '../utils/validation';
 import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { Button } from '../components/ui/Button';
+import { OfflineFeatureNotice } from '../components/ui/OfflineFeatureNotice';
 import { EmptyState, ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
 import { ConversationSidebar } from '../components/tutor/ConversationSidebar';
 import { MarkdownMessage } from '../components/tutor/MarkdownMessage';
@@ -88,7 +89,7 @@ function formatTimer(seconds: number): string {
 }
 
 export const TutorPage: React.FC = () => {
-  const { user, profile, savePreferences } = useAuth();
+  const { user, profile, isOnline, savePreferences } = useAuth();
   const {
     activeCourse,
     activeContentOwnerId,
@@ -553,6 +554,12 @@ export const TutorPage: React.FC = () => {
 
   const handleSendQuestion = async (overrideText?: string) => {
     if (!user || !activeCourse || messagesLoading) return;
+    if (!isOnline) {
+      setError(
+        "You're offline. Turn on your internet connection to ask the AI Tutor a new question. Your previous conversations remain readable below."
+      );
+      return;
+    }
     const questionText = (overrideText ?? inputRef.current).trim();
     if (!questionText || sending) return;
 
@@ -721,6 +728,12 @@ export const TutorPage: React.FC = () => {
   };
 
   const handleStartVoiceNote = async () => {
+    if (!isOnline) {
+      setError(
+        "You're offline. Turn on your internet connection to record and transcribe voice questions. You can still read your previous chat history offline."
+      );
+      return;
+    }
     setError(null);
     geminiAudioPlayer.stop();
     try {
@@ -799,6 +812,12 @@ export const TutorPage: React.FC = () => {
   };
 
   const handlePlayReply = async (msg: TutorMessage) => {
+    if (!isOnline && !cachedAudioIds.has(msg.id)) {
+      setError(
+        "You're offline. Connect to the internet to generate voice audio for this reply (previously played clips remain playable offline)."
+      );
+      return;
+    }
     const persistMeta =
       user && activeCourse && activeConversationId
         ? {
@@ -1481,7 +1500,7 @@ export const TutorPage: React.FC = () => {
           </div>
 
           {/* Fixed Quick Follow-ups when thread has replies */}
-          {messages.length > 0 && !sending && (
+          {messages.length > 0 && !sending && isOnline && (
             <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 dark:border-zinc-800 pt-2.5 pb-2 shrink-0 bg-white dark:bg-zinc-950">
               {QUICK_FOLLOWUPS.map((prompt) => (
                 <button
@@ -1498,6 +1517,14 @@ export const TutorPage: React.FC = () => {
 
           {/* Fixed Composer & Voice Note Input Row (never scrolls, clears mobile bottom pill nav) */}
           <div className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 pt-3 shrink-0">
+            {!isOnline && (
+              <OfflineFeatureNotice
+                compact
+                className="mb-2.5"
+                description="You're offline. Browse past conversations freely — turn on internet to send new AI questions."
+              />
+            )}
+
             {isRecording && (
               <div className="mb-2.5 flex items-center justify-between rounded-md border border-zinc-900 dark:border-zinc-700 bg-zinc-950 dark:bg-zinc-900 px-3.5 py-2 text-xs text-white dark:text-zinc-200">
                 <div className="flex items-center gap-2.5">
@@ -1557,8 +1584,12 @@ export const TutorPage: React.FC = () => {
                       void handleSendQuestion();
                     }
                   }}
-                  disabled={isBusy || isRecording}
-                  placeholder="Ask your questions..."
+                  disabled={isBusy || isRecording || !isOnline}
+                  placeholder={
+                    isOnline
+                      ? 'Ask your questions...'
+                      : 'Offline — turn on internet to ask new questions'
+                  }
                   className="block h-11 w-full resize-none rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-sm leading-5 text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none disabled:bg-zinc-50 dark:disabled:bg-zinc-900/60 scrollbar-hide"
                 />
               </div>
@@ -1574,9 +1605,15 @@ export const TutorPage: React.FC = () => {
                       void handleStartVoiceNote();
                     }
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || !isOnline}
                   aria-label={isRecording ? 'Stop and send voice note' : 'Record voice note'}
-                  title={isRecording ? 'Stop and send voice note' : 'Record voice note (auto-sends on stop)'}
+                  title={
+                    !isOnline
+                      ? 'Turn on internet to use voice notes'
+                      : isRecording
+                      ? 'Stop and send voice note'
+                      : 'Record voice note (auto-sends on stop)'
+                  }
                   className="h-11 px-3 shrink-0"
                 >
                   {isRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
@@ -1585,7 +1622,7 @@ export const TutorPage: React.FC = () => {
 
               <Button
                 type="submit"
-                disabled={isBusy || messagesLoading || isRecording || !input.trim()}
+                disabled={isBusy || messagesLoading || isRecording || !isOnline || !input.trim()}
                 aria-label={isBusy ? 'Sending message' : 'Send message'}
                 className="h-11 px-3.5 sm:px-4 shrink-0"
               >

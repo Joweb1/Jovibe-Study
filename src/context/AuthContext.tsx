@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -20,6 +20,7 @@ interface AuthContextValue {
   profile: UserProfile | null;
   authReady: boolean;
   isOnline: boolean;
+  justReconnected: boolean;
   authError: string | null;
   signingIn: boolean;
   signInWithGoogle: () => Promise<void>;
@@ -40,15 +41,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
+  const [justReconnected, setJustReconnected] = useState(false);
+  const wasOfflineRef = useRef(!isOnline);
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    let reconnectTimer: number | null = null;
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (wasOfflineRef.current) {
+        setJustReconnected(true);
+        if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+        reconnectTimer = window.setTimeout(() => {
+          setJustReconnected(false);
+        }, 3800);
+      }
+      wasOfflineRef.current = false;
+    };
+
+    const handleOffline = () => {
+      wasOfflineRef.current = true;
+      setIsOnline(false);
+      setJustReconnected(false);
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     };
   }, []);
 
@@ -82,11 +104,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           },
           (err) => {
-            setAuthError(formatReadableError(err));
+            if (typeof navigator === 'undefined' || navigator.onLine) {
+              setAuthError(formatReadableError(err));
+            }
           }
         );
       } catch (err) {
-        setAuthError(formatReadableError(err));
+        if (typeof navigator === 'undefined' || navigator.onLine) {
+          setAuthError(formatReadableError(err));
+        }
       } finally {
         setAuthReady(true);
       }
@@ -98,7 +124,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Re-ensure profile cleanly when coming back online after booting offline
+  useEffect(() => {
+    if (!isOnline || !user) return;
+    void ensureUserProfile(user)
+      .then((ensured) => setProfile(ensured))
+      .catch(() => {
+        // Non-fatal background sync retry
+      });
+  }, [isOnline, user]);
+
   const signInWithGoogle = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setAuthError("You're offline. Turn on your internet connection to sign in with Google.");
+      return;
+    }
     setSigningIn(true);
     setAuthError(null);
     try {
@@ -152,6 +192,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profile,
         authReady,
         isOnline,
+        justReconnected,
         authError,
         signingIn,
         signInWithGoogle,

@@ -7,10 +7,11 @@ import { useRouter } from '../router/RouterContext';
 import { formatReadableError } from '../services/firebase/errors';
 import { fetchCourseShareByToken, joinSharedCourse } from '../services/firebase/sharedCourseService';
 import { Button } from '../components/ui/Button';
+import { OfflineFeatureNotice } from '../components/ui/OfflineFeatureNotice';
 import { ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
 
 export const JoinCoursePage: React.FC = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, isOnline } = useAuth();
   const { courses, selectCourse } = useCourses();
   const { routeParams, navigate } = useRouter();
   const shareToken = routeParams.shareToken || '';
@@ -26,7 +27,7 @@ export const JoinCoursePage: React.FC = () => {
     setError(null);
     setShare(null);
 
-    if (!shareToken) {
+    if (!shareToken || !isOnline) {
       setLoading(false);
       return;
     }
@@ -48,13 +49,17 @@ export const JoinCoursePage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [shareToken]);
+  }, [shareToken, isOnline]);
 
   const isAuthor = Boolean(user && share && share.authorId === user.uid);
   const alreadyJoined = Boolean(share && courses.some((c) => c.id === share.courseId));
 
   const handleJoin = async () => {
     if (!user || !share) return;
+    if (!isOnline) {
+      setError('Turn on your internet connection to join this shared course.');
+      return;
+    }
     setJoining(true);
     setError(null);
     try {
@@ -92,7 +97,14 @@ export const JoinCoursePage: React.FC = () => {
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-      {loading ? (
+      {!isOnline ? (
+        <OfflineFeatureNotice
+          title="Connect to the internet to join a shared course"
+          description="Loading and joining a shared course invite link requires an active internet connection. Turn on your internet and this page will load automatically."
+          actionLabel="Back to Courses"
+          onAction={() => navigate('/courses')}
+        />
+      ) : loading ? (
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
           <LoadingSkeleton lines={4} />
         </div>

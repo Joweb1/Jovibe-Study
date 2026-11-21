@@ -11,6 +11,7 @@ import { AppShell } from './components/layout/AppShell';
 import { ApiKeyLimitModal } from './components/onboarding/ApiKeyLimitModal';
 import { GeminiOnboardingOverlay } from './components/onboarding/GeminiOnboardingOverlay';
 import { ErrorBoundary } from './components/ui/StateViews';
+import { SotalLogo } from './components/ui/SotalLogo';
 import { AuthPage } from './pages/AuthPage';
 import { AutomaticStudyPage } from './pages/AutomaticStudyPage';
 import { CourseManagePage } from './pages/CourseManagePage';
@@ -110,12 +111,15 @@ const AuthenticatedApp: React.FC = () => {
   if (!authReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-white dark:bg-zinc-950 px-6">
-        <div className="flex flex-col items-center gap-3">
-          <div
-            aria-hidden="true"
-            className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-950 dark:border-zinc-200 border-t-transparent"
-          />
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading SOTAL Study...</p>
+        <div className="flex flex-col items-center gap-3.5">
+          <SotalLogo size="lg" />
+          <div className="flex items-center gap-2">
+            <div
+              aria-hidden="true"
+              className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-950 dark:border-zinc-200 border-t-transparent"
+            />
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading SOTAL Study...</p>
+          </div>
         </div>
       </div>
     );

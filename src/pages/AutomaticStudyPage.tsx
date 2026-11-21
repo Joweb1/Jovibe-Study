@@ -70,6 +70,7 @@ import { MarkdownMessage } from '../components/tutor/MarkdownMessage';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { EmptyState, ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
+import { OfflineFeatureNotice } from '../components/ui/OfflineFeatureNotice';
 
 function parseSegmentEntries(segment: StudySessionSegment | undefined): StudySegmentEntry[] {
   if (!segment || !Array.isArray(segment.entries)) return [];
@@ -96,7 +97,7 @@ function parseSegmentEntries(segment: StudySessionSegment | undefined): StudySeg
 }
 
 export const AutomaticStudyPage: React.FC = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, isOnline } = useAuth();
   const { recordLearningActivity } = useStreak();
   const {
     activeCourse,
@@ -317,6 +318,12 @@ export const AutomaticStudyPage: React.FC = () => {
         return;
       }
     }
+    if (!isOnline) {
+      setError(
+        "You're offline. Turn on your internet connection to generate voice playback. You can continue reading your cached lessons offline."
+      );
+      return;
+    }
     await geminiAudioPlayer.playMessage({
       id: entryId,
       text: markdown,
@@ -326,6 +333,12 @@ export const AutomaticStudyPage: React.FC = () => {
   };
 
   const handleStartVoiceAnswer = async () => {
+    if (!isOnline && !recording) {
+      setError(
+        "You're offline. Turn on your internet connection to record and transcribe voice answers."
+      );
+      return;
+    }
     setError(null);
     if (recording) {
       // Stop and transcribe
@@ -387,6 +400,12 @@ export const AutomaticStudyPage: React.FC = () => {
   const handleCreateSession = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !activeCourse) return;
+    if (!isOnline) {
+      setError(
+        "You're offline. Turn on your internet connection to generate a new Automatic Study plan. Previously started sessions below can still be opened and read offline."
+      );
+      return;
+    }
     setCreating(true);
     setError(null);
     setNotice(null);
@@ -544,6 +563,12 @@ export const AutomaticStudyPage: React.FC = () => {
       return;
     }
     if (activeSession.status === 'completed') return;
+    if (!isOnline) {
+      setError(
+        "You're offline. Turn on your internet connection to submit answers for AI evaluation. You can still review all delivered lessons in this session offline."
+      );
+      return;
+    }
 
     setBusyAction('evaluating');
     setError(null);
@@ -723,6 +748,12 @@ export const AutomaticStudyPage: React.FC = () => {
   // Advance to the next sequential unit in the study plan
   const handleAdvanceToNextUnit = async () => {
     if (!user || !activeCourse || !activeSession || !activeSegment || !hasMoreUnits) return;
+    if (!isOnline) {
+      setError(
+        "You're offline. Turn on your internet connection to generate and deliver the next lesson unit."
+      );
+      return;
+    }
     setBusyAction('next_unit');
     setError(null);
     setNotice(null);
@@ -803,6 +834,10 @@ export const AutomaticStudyPage: React.FC = () => {
   // Manual context compaction button
   const handleManualCompact = async () => {
     if (!activeSession || !activeSegment || activeEntries.length === 0) return;
+    if (!isOnline) {
+      setError("You're offline. Turn on your internet connection to compact session context.");
+      return;
+    }
     setBusyAction('compacting');
     setError(null);
     setNotice(null);
@@ -837,6 +872,12 @@ export const AutomaticStudyPage: React.FC = () => {
   // Pause & Checkpoint
   const handlePauseAndCheckpoint = async () => {
     if (!user || !activeCourse || !activeSession || !activeSegment) return;
+    if (!isOnline) {
+      setError(
+        "You're offline. Turn on your internet connection to generate an AI checkpoint summary, or simply go back — your session progress is already saved locally."
+      );
+      return;
+    }
     setBusyAction('pausing');
     setError(null);
     setNotice(null);
@@ -1163,7 +1204,7 @@ export const AutomaticStudyPage: React.FC = () => {
                   size="sm"
                   onClick={() => void handleManualCompact()}
                   loading={busyAction === 'compacting'}
-                  disabled={busyAction !== null || activeEntries.length === 0}
+                  disabled={!isOnline || busyAction !== null || activeEntries.length === 0}
                   title="Compact current conversation into a clean checkpoint and linked segment"
                 >
                   <Layers className="h-3.5 w-3.5" />
@@ -1174,7 +1215,7 @@ export const AutomaticStudyPage: React.FC = () => {
                   size="sm"
                   onClick={() => void handlePauseAndCheckpoint()}
                   loading={busyAction === 'pausing'}
-                  disabled={busyAction !== null}
+                  disabled={!isOnline || busyAction !== null}
                 >
                   <Pause className="h-3.5 w-3.5" />
                   Pause & Checkpoint
@@ -1430,6 +1471,12 @@ export const AutomaticStudyPage: React.FC = () => {
 
             {/* Action / Answer Composer */}
             <div className="mt-6 border-t border-zinc-200 dark:border-zinc-800 pt-5 space-y-3">
+              {!isOnline && !isCompleted && (
+                <OfflineFeatureNotice
+                  compact
+                  description="You're offline. Read previously delivered lessons above freely, and turn on your internet connection when you're ready to submit answers or load the next unit."
+                />
+              )}
               {isCompleted ? (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-3 text-sm">
                   <span className="text-zinc-800 dark:text-zinc-200">
@@ -1457,7 +1504,7 @@ export const AutomaticStudyPage: React.FC = () => {
                     <Button
                       onClick={() => void handleAdvanceToNextUnit()}
                       loading={busyAction === 'next_unit'}
-                      disabled={busyAction !== null}
+                      disabled={!isOnline || busyAction !== null}
                     >
                       Continue to Unit {activeSession.currentUnitIndex + 2}
                       <ArrowRight className="h-4 w-4" />
@@ -1486,7 +1533,7 @@ export const AutomaticStudyPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      disabled={busyAction !== null}
+                      disabled={!isOnline || busyAction !== null}
                       onClick={() =>
                         void handleSubmitAnswer(
                           "I'm not fully confident yet—please explain this concept more simply with an everyday analogy."
@@ -1498,7 +1545,7 @@ export const AutomaticStudyPage: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      disabled={busyAction !== null}
+                      disabled={!isOnline || busyAction !== null}
                       onClick={() =>
                         void handleSubmitAnswer(
                           'Could you walk me through a different concrete worked example before I try again?'
@@ -1511,7 +1558,7 @@ export const AutomaticStudyPage: React.FC = () => {
                     {hasMoreUnits && (
                       <button
                         type="button"
-                        disabled={busyAction !== null}
+                        disabled={!isOnline || busyAction !== null}
                         onClick={() => void handleAdvanceToNextUnit()}
                         className="rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-500 dark:text-zinc-400 hover:border-zinc-400 dark:hover:border-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer disabled:opacity-50 ml-auto"
                       >
@@ -1532,9 +1579,13 @@ export const AutomaticStudyPage: React.FC = () => {
                       rows={3}
                       value={answerText}
                       onChange={(e) => setAnswerText(e.target.value)}
-                      placeholder="Explain your answer in your own words, or record a voice answer..."
-                      disabled={busyAction !== null || transcribing}
-                      className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none resize-y"
+                      placeholder={
+                        isOnline
+                          ? 'Explain your answer in your own words, or record a voice answer...'
+                          : 'Offline — reconnect to submit answers for AI evaluation...'
+                      }
+                      disabled={!isOnline || busyAction !== null || transcribing}
+                      className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none resize-y disabled:opacity-60"
                     />
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -1545,7 +1596,7 @@ export const AutomaticStudyPage: React.FC = () => {
                               variant={recording ? 'danger' : 'secondary'}
                               size="sm"
                               onClick={() => void handleStartVoiceAnswer()}
-                              disabled={busyAction !== null || transcribing}
+                              disabled={(!isOnline && !recording) || busyAction !== null || transcribing}
                             >
                               {recording ? (
                                 <>
@@ -1582,7 +1633,7 @@ export const AutomaticStudyPage: React.FC = () => {
                         type="submit"
                         size="sm"
                         loading={busyAction === 'evaluating'}
-                        disabled={!answerText.trim() || busyAction !== null || recording || transcribing}
+                        disabled={!isOnline || !answerText.trim() || busyAction !== null || recording || transcribing}
                       >
                         <Send className="h-3.5 w-3.5" />
                         Submit answer
@@ -1621,6 +1672,13 @@ export const AutomaticStudyPage: React.FC = () => {
           {launcherOpen ? 'Close setup' : 'New study session'}
         </Button>
       </div>
+
+      {!isOnline && (
+        <OfflineFeatureNotice
+          title="You're offline — review previous study sessions"
+          description="Starting a new AI-guided Automatic Study plan requires an internet connection. You can still open and review any previously cached study sessions below."
+        />
+      )}
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
       {notice && (
@@ -1710,7 +1768,7 @@ export const AutomaticStudyPage: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
-            <Button type="submit" loading={creating}>
+            <Button type="submit" loading={creating} disabled={!isOnline}>
               <GraduationCap className="h-4 w-4" />
               Begin guided study
             </Button>
