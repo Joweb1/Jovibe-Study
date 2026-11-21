@@ -41,6 +41,12 @@ export function subscribeCourses(
           code: String(data.code ?? ''),
           name: String(data.name ?? ''),
           description: String(data.description ?? ''),
+          isPublic: Boolean(data.isPublic),
+          shareToken: typeof data.shareToken === 'string' ? data.shareToken : '',
+          authorName: typeof data.authorName === 'string' ? data.authorName : '',
+          isOwner: true,
+          isShared: false,
+          authorId: String(data.userId ?? userId),
           createdAt: data.createdAt ?? null,
           updatedAt: data.updatedAt ?? null,
         };
@@ -61,7 +67,7 @@ export function subscribeCourses(
 
 export async function createCourse(
   userId: string,
-  input: { code: string; name: string; description: string }
+  input: { code: string; name: string; description: string; authorName?: string }
 ): Promise<Course> {
   const { valid, error, sanitized } = validateCourseInput(input);
   if (!valid) {
@@ -71,6 +77,7 @@ export async function createCourse(
   const courseId = generateDocumentId('course');
   const path = `users/${userId}/courses/${courseId}`;
   const ref = doc(db, 'users', userId, 'courses', courseId);
+  const safeAuthorName = (input.authorName || '').trim().slice(0, 120);
 
   try {
     await setDoc(ref, {
@@ -78,6 +85,9 @@ export async function createCourse(
       code: sanitized.code,
       name: sanitized.name,
       description: sanitized.description,
+      isPublic: false,
+      shareToken: '',
+      authorName: safeAuthorName,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -91,6 +101,12 @@ export async function createCourse(
     code: sanitized.code,
     name: sanitized.name,
     description: sanitized.description,
+    isPublic: false,
+    shareToken: '',
+    authorName: safeAuthorName,
+    isOwner: true,
+    isShared: false,
+    authorId: userId,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -121,50 +137,81 @@ export async function updateCourse(
   }
 }
 
-export async function deleteCourse(userId: string, courseId: string): Promise<void> {
+export async function deleteCourse(
+  userId: string,
+  courseId: string,
+  shareToken?: string
+): Promise<void> {
   const coursePath = `users/${userId}/courses/${courseId}`;
 
   try {
-    // Clean up nested topics, sources, saved materials, conversations/messages, history, and studySessions
-    const [topicSnap, sourceSnap, materialSnap, convSnap, historySnap, sessionSnap] =
-      await Promise.all([
-        getDocs(
-          query(
-            collection(db, 'users', userId, 'courses', courseId, 'topics'),
-            where('userId', '==', userId)
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'users', userId, 'courses', courseId, 'sources'),
-            where('userId', '==', userId)
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'users', userId, 'courses', courseId, 'studyMaterials'),
-            where('userId', '==', userId)
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'users', userId, 'courses', courseId, 'conversations'),
-            where('userId', '==', userId)
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'users', userId, 'courses', courseId, 'studyHistory'),
-            where('userId', '==', userId)
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'users', userId, 'courses', courseId, 'studySessions'),
-            where('userId', '==', userId)
-          )
-        ),
-      ]);
+    // Clean up nested topics, sources, sourceNotes, members, groups, saved materials, conversations/messages, history, and studySessions
+    const [
+      topicSnap,
+      sourceSnap,
+      sourceNoteSnap,
+      memberSnap,
+      groupSnap,
+      materialSnap,
+      convSnap,
+      historySnap,
+      sessionSnap,
+    ] = await Promise.all([
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'topics'),
+          where('userId', '==', userId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'sources'),
+          where('userId', '==', userId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'sourceNotes'),
+          where('userId', '==', userId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'members'),
+          where('authorId', '==', userId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'groups'),
+          where('authorId', '==', userId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'studyMaterials'),
+          where('userId', '==', userId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'conversations'),
+          where('userId', '==', userId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'studyHistory'),
+          where('userId', '==', userId)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', userId, 'courses', courseId, 'studySessions'),
+          where('userId', '==', userId)
+        )
+      ),
+    ]);
 
     const [messageSnaps, segmentSnaps, checkpointSnaps] = await Promise.all([
       Promise.all(
@@ -234,8 +281,11 @@ export async function deleteCourse(userId: string, courseId: string): Promise<vo
       ...sessionSnap.docs.map((d) => d.ref),
       ...historySnap.docs.map((d) => d.ref),
       ...materialSnap.docs.map((d) => d.ref),
+      ...sourceNoteSnap.docs.map((d) => d.ref),
       ...sourceSnap.docs.map((d) => d.ref),
       ...topicSnap.docs.map((d) => d.ref),
+      ...memberSnap.docs.map((d) => d.ref),
+      ...groupSnap.docs.map((d) => d.ref),
     ];
 
     for (let i = 0; i < refsToDelete.length; i += 400) {
@@ -245,6 +295,15 @@ export async function deleteCourse(userId: string, courseId: string): Promise<vo
     }
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `${coursePath}/subcollections`);
+  }
+
+  // Delete public share lookup doc if present
+  if (shareToken && shareToken.trim()) {
+    try {
+      await deleteDoc(doc(db, 'courseShares', shareToken.trim()));
+    } catch {
+      // Ignore if already removed
+    }
   }
 
   try {

@@ -24,7 +24,7 @@ export const EmptyState: React.FC<{
   onAction?: () => void;
 }> = ({ title, description, actionLabel, onAction }) => (
   <div className="border-t border-zinc-200 dark:border-zinc-800 py-14 text-left">
-    <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">{title}</h2>
+    <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-200">{title}</h2>
     <p className="mt-2 max-w-xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">{description}</p>
     {actionLabel && onAction && (
       <div className="mt-5">
@@ -86,9 +86,9 @@ export class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex min-h-screen items-center justify-center bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 px-6">
-          <div className="w-full max-w-md border-t border-zinc-900 dark:border-zinc-100 pt-6">
-            <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">Something went wrong</h1>
+        <div className="flex min-h-screen items-center justify-center bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-200 px-6">
+          <div className="w-full max-w-md border-t border-zinc-900 dark:border-zinc-200 pt-6">
+            <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-200">Something went wrong</h1>
             <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
               {this.state.errorMessage || 'An unexpected runtime error interrupted the workspace.'}
             </p>

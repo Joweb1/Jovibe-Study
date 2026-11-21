@@ -6,7 +6,7 @@ import { cacheCourseSources, getCachedSources } from '../services/local/indexedD
 
 export function useCourseSources(userId: string | undefined, courseId: string | undefined) {
   const [sources, setSources] = useState<StudySource[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => Boolean(userId && courseId));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {

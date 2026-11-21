@@ -78,7 +78,10 @@ export interface ProviderKeyTestResult {
 export async function testProviderApiKey(params: {
   provider: NonGeminiProvider;
   rawKey: string;
+  keyId?: string;
 }): Promise<ProviderKeyTestResult> {
+  const { recordApiKeyFailure, recordApiKeySuccess } = await import('./keyManager');
+
   try {
     const response = await fetchWithTimeout(
       `/api/providers/${params.provider}/test-key`,
@@ -99,9 +102,13 @@ export async function testProviderApiKey(params: {
       latencyMs?: number;
       error?: string;
       code?: string;
+      cooldownMs?: number;
     };
 
     if (response.ok && json.ok) {
+      if (params.keyId) {
+        recordApiKeySuccess(params.keyId);
+      }
       return {
         ok: true,
         provider: params.provider,
@@ -110,21 +117,36 @@ export async function testProviderApiKey(params: {
       };
     }
 
+    const code = json.code || (response.status === 429 ? 'RATE_LIMIT' : 'INVALID_KEY');
+    const errorMsg = json.error || `Key test failed (HTTP ${response.status}).`;
+    if (params.keyId) {
+      recordApiKeyFailure(
+        params.keyId,
+        code,
+        errorMsg,
+        typeof json.cooldownMs === 'number' ? json.cooldownMs : 0
+      );
+    }
+
     return {
       ok: false,
       provider: params.provider,
       model: json.model || 'unknown',
       latencyMs: 0,
-      error: json.error || `Key test failed (HTTP ${response.status}).`,
-      code: json.code || (response.status === 429 ? 'RATE_LIMIT' : 'INVALID_KEY'),
+      error: errorMsg,
+      code,
     };
   } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Timed out while testing the key.';
+    if (params.keyId) {
+      recordApiKeyFailure(params.keyId, 'TIMEOUT', errorMsg, 0);
+    }
     return {
       ok: false,
       provider: params.provider,
       model: 'unknown',
       latencyMs: 0,
-      error: err instanceof Error ? err.message : 'Timed out while testing the key.',
+      error: errorMsg,
       code: 'TIMEOUT',
     };
   }

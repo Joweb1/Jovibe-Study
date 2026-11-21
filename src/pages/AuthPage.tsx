@@ -37,10 +37,10 @@ export const AuthPage: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 flex flex-col transition-colors">
+    <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-200 flex flex-col transition-colors">
       <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
         <div className="mx-auto flex h-14 max-w-[1100px] items-center justify-between px-6">
-          <span className="font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+          <span className="font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
             SOTAL Study
           </span>
           <div className="flex items-center gap-3">
@@ -64,7 +64,7 @@ export const AuthPage: React.FC = () => {
         <div className="grid grid-cols-1 gap-16 lg:grid-cols-12 lg:items-start">
           {/* Primary focal column */}
           <div className="lg:col-span-6">
-            <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 leading-[1.15]">
+            <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 leading-[1.15]">
               A focused academic workspace built for real understanding.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
@@ -99,7 +99,7 @@ export const AuthPage: React.FC = () => {
                   {item.index}
                 </div>
                 <div className="col-span-10">
-                  <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">{item.title}</h2>
+                  <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-200">{item.title}</h2>
                   <p className="mt-1 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">{item.detail}</p>
                 </div>
               </div>

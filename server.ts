@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import express from 'express';
 import fs from 'fs';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { attachLiveWebSocketServer } from './server/liveBridge.ts';
 import {
   checkSafetyBlock,
   classifyAiError,
@@ -107,7 +109,7 @@ async function startServer() {
       serverFallbackAvailable: Boolean((process.env.GEMINI_API_KEY || '').trim()),
       visionConfigured: Boolean((process.env.GEMINI_API_KEY || '').trim()),
       serverProviderKeysEnabled: (process.env.ALLOW_SERVER_PROVIDER_KEYS || '').trim() === 'true',
-      supportedProviders: ['gemini', 'cerebras', 'nvidia_nim', 'openrouter'],
+      supportedProviders: ['gemini', 'cerebras', 'nvidia_nim', 'openrouter', 'groq'],
     });
   });
 
@@ -982,7 +984,10 @@ export class ErrorOverlay extends HTMLElement {}
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  attachLiveWebSocketServer(httpServer);
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`SOTAL Study server listening on http://0.0.0.0:${PORT}`);
   });
 }

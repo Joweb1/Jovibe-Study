@@ -68,8 +68,8 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-zinc-200 pb-3 mb-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+      <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3 mb-3">
+        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
           Conversations
         </span>
         <Button variant="secondary" size="sm" onClick={onNewConversation}>
@@ -80,15 +80,15 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
 
       {loading ? (
         <div className="space-y-3 py-2">
-          <div className="h-10 rounded bg-zinc-100 animate-pulse" />
-          <div className="h-10 rounded bg-zinc-100 animate-pulse" />
+          <div className="h-10 rounded bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
+          <div className="h-10 rounded bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
         </div>
       ) : conversations.length === 0 ? (
-        <div className="py-6 text-xs leading-relaxed text-zinc-500">
+        <div className="py-6 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
           No conversations in this course yet. Ask a question to start a persistent study thread.
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto scrollbar-hide divide-y divide-zinc-200/80">
+        <div className="flex-1 overflow-y-auto scrollbar-hide divide-y divide-zinc-200/80 dark:divide-zinc-800/80">
           {conversations.map((conv) => {
             const isActive = conv.id === activeConversationId;
             const isEditing = editingId === conv.id;
@@ -102,8 +102,10 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                     onSelect(conv.id);
                   }
                 }}
-                className={`group py-2.5 px-2 transition-colors cursor-pointer ${
-                  isActive ? 'bg-zinc-100 text-zinc-950' : 'hover:bg-zinc-50 text-zinc-700'
+                className={`group py-2.5 px-2 rounded-md transition-colors cursor-pointer ${
+                  isActive
+                    ? 'bg-zinc-100 dark:bg-zinc-800/90 text-zinc-950 dark:text-zinc-200'
+                    : 'hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300'
                 }`}
               >
                 {isEditing ? (
@@ -121,14 +123,14 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                       }}
                       autoFocus
                       maxLength={160}
-                      className="min-w-0 flex-1 rounded border border-zinc-400 bg-white px-2 py-1 text-xs text-zinc-950 focus:border-zinc-950 focus:outline-none"
+                      className="min-w-0 flex-1 rounded border border-zinc-400 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-2 py-1 text-xs text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
                     />
                     <button
                       type="button"
                       disabled={busyId === conv.id}
                       onClick={() => void commitRename(conv.id)}
                       aria-label="Save conversation name"
-                      className="p-1 text-zinc-700 hover:text-zinc-950"
+                      className="p-1 text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer"
                     >
                       <Check className="h-3.5 w-3.5" />
                     </button>
@@ -136,7 +138,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                       type="button"
                       onClick={() => setEditingId(null)}
                       aria-label="Cancel rename"
-                      className="p-1 text-zinc-500 hover:text-zinc-900"
+                      className="p-1 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 cursor-pointer"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -146,20 +148,20 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                     className="flex items-center justify-between gap-2 text-xs"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <span className="text-zinc-700 truncate">Delete thread?</span>
+                    <span className="text-zinc-700 dark:text-zinc-300 truncate">Delete thread?</span>
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
                         disabled={busyId === conv.id}
                         onClick={() => void commitDelete(conv.id)}
-                        className="font-medium text-red-700 underline underline-offset-2"
+                        className="font-medium text-red-700 dark:text-red-400 underline underline-offset-2 cursor-pointer"
                       >
                         Delete
                       </button>
                       <button
                         type="button"
                         onClick={() => setConfirmDeleteId(null)}
-                        className="text-zinc-500 hover:text-zinc-900"
+                        className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -170,12 +172,14 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                     <div className="min-w-0 flex-1">
                       <div
                         className={`truncate text-xs ${
-                          isActive ? 'font-semibold text-zinc-950' : 'font-medium text-zinc-900'
+                          isActive
+                            ? 'font-semibold text-zinc-950 dark:text-zinc-200'
+                            : 'font-medium text-zinc-900 dark:text-zinc-300'
                         }`}
                       >
                         {conv.title || 'Untitled conversation'}
                       </div>
-                      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-zinc-500 tabular-nums">
+                      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
                         <span>{MODE_SHORT_LABEL[conv.sourceMode] ?? 'Materials + AI'}</span>
                         <span aria-hidden="true">·</span>
                         <span>{conv.messageCount ?? 0} msg</span>
@@ -192,7 +196,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                         type="button"
                         onClick={(e) => startEdit(conv, e)}
                         aria-label={`Rename ${conv.title}`}
-                        className="rounded p-1 text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-900"
+                        className="rounded p-1 text-zinc-400 dark:text-zinc-500 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60 hover:text-zinc-900 dark:hover:text-zinc-200 cursor-pointer"
                       >
                         <Pencil className="h-3 w-3" />
                       </button>
@@ -200,7 +204,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                         type="button"
                         onClick={() => setConfirmDeleteId(conv.id)}
                         aria-label={`Delete ${conv.title}`}
-                        className="rounded p-1 text-zinc-400 hover:bg-zinc-200/60 hover:text-red-700"
+                        className="rounded p-1 text-zinc-400 dark:text-zinc-500 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60 hover:text-red-700 dark:hover:text-red-400 cursor-pointer"
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>

@@ -53,7 +53,7 @@ export const Modal: React.FC<ModalProps> = ({
           >
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <h2 id="modal-title" className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+                <h2 id="modal-title" className="text-lg font-semibold text-zinc-950 dark:text-zinc-200">
                   {title}
                 </h2>
                 {description && (
@@ -64,7 +64,7 @@ export const Modal: React.FC<ModalProps> = ({
                 type="button"
                 onClick={onClose}
                 aria-label="Close dialog"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-50 cursor-pointer transition-colors"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>

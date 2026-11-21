@@ -2,9 +2,16 @@ import type { Course, MaterialType, ProcessingStatus, StudySection, StudySource,
 import { timestampToMillis } from '../../utils/validation';
 
 const DB_NAME = 'sotal_study_local_v1';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
-export type LocalStoreName = 'courses' | 'topics' | 'sources' | 'studySessions' | 'drafts' | 'meta';
+export type LocalStoreName =
+  | 'courses'
+  | 'topics'
+  | 'sources'
+  | 'studySessions'
+  | 'drafts'
+  | 'meta'
+  | 'tutorAudio';
 
 export interface CachedCourse {
   id: string;
@@ -50,6 +57,22 @@ export interface LocalDraft {
   payload: Record<string, unknown>;
   updatedAtMs: number;
 }
+
+export interface CachedTutorAudio {
+  messageId: string;
+  userId: string;
+  courseId: string;
+  conversationId: string;
+  voiceName: string;
+  mimeType: string;
+  audioBlob: Blob;
+  byteLength: number;
+  createdAtMs: number;
+  lastAccessedAtMs: number;
+}
+
+const MAX_CACHED_AUDIO_CLIPS = 200;
+const MAX_CACHED_AUDIO_BYTES = 120 * 1024 * 1024; // 120 MB browser cap with LRU pruning
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 let lastCacheSyncAt: number | null = null;
@@ -119,6 +142,12 @@ function openDatabase(): Promise<IDBDatabase | null> {
         }
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('tutorAudio')) {
+          const store = db.createObjectStore('tutorAudio', { keyPath: 'messageId' });
+          store.createIndex('userId', 'userId', { unique: false });
+          store.createIndex('conversationId', 'conversationId', { unique: false });
+          store.createIndex('lastAccessedAtMs', 'lastAccessedAtMs', { unique: false });
         }
       };
 
@@ -421,21 +450,194 @@ export async function deleteLocalDraft(key: string): Promise<void> {
   });
 }
 
+export async function saveCachedTutorAudio(params: {
+  messageId: string;
+  userId: string;
+  courseId: string;
+  conversationId: string;
+  voiceName: string;
+  mimeType: string;
+  audioBlob: Blob;
+}): Promise<void> {
+  const db = await openDatabase();
+  if (!db || !params.messageId) return;
+
+  const now = Date.now();
+  const record: CachedTutorAudio = {
+    messageId: params.messageId,
+    userId: params.userId,
+    courseId: params.courseId,
+    conversationId: params.conversationId,
+    voiceName: params.voiceName,
+    mimeType: params.mimeType || params.audioBlob.type || 'audio/wav',
+    audioBlob: params.audioBlob,
+    byteLength: params.audioBlob.size,
+    createdAtMs: now,
+    lastAccessedAtMs: now,
+  };
+
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction('tutorAudio', 'readwrite');
+      tx.objectStore('tutorAudio').put(record);
+      tx.oncomplete = () => {
+        notifyCacheSync();
+        resolve();
+      };
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+
+  void pruneCachedTutorAudio(db);
+}
+
+async function pruneCachedTutorAudio(db: IDBDatabase): Promise<void> {
+  try {
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction('tutorAudio', 'readwrite');
+      const store = tx.objectStore('tutorAudio');
+      const req = store.getAll();
+
+      req.onsuccess = () => {
+        const rows = (req.result as CachedTutorAudio[]) || [];
+        let totalBytes = rows.reduce((sum, r) => sum + (r.byteLength || r.audioBlob?.size || 0), 0);
+        if (rows.length <= MAX_CACHED_AUDIO_CLIPS && totalBytes <= MAX_CACHED_AUDIO_BYTES) {
+          return;
+        }
+        // Evict least-recently-accessed clips first
+        const sorted = [...rows].sort((a, b) => (a.lastAccessedAtMs || 0) - (b.lastAccessedAtMs || 0));
+        let remainingCount = rows.length;
+        for (const item of sorted) {
+          if (remainingCount <= MAX_CACHED_AUDIO_CLIPS && totalBytes <= MAX_CACHED_AUDIO_BYTES) {
+            break;
+          }
+          store.delete(item.messageId);
+          remainingCount -= 1;
+          totalBytes -= item.byteLength || item.audioBlob?.size || 0;
+        }
+      };
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch {
+    // Non-fatal LRU cleanup error
+  }
+}
+
+export async function getCachedTutorAudio(messageId: string): Promise<CachedTutorAudio | null> {
+  const db = await openDatabase();
+  if (!db || !messageId) return null;
+
+  const record = await new Promise<CachedTutorAudio | null>((resolve) => {
+    try {
+      const tx = db.transaction('tutorAudio', 'readonly');
+      const req = tx.objectStore('tutorAudio').get(messageId);
+      req.onsuccess = () => resolve((req.result as CachedTutorAudio) ?? null);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+
+  if (record && record.audioBlob instanceof Blob && record.audioBlob.size > 0) {
+    // Refresh LRU timestamp asynchronously without delaying playback
+    try {
+      const tx = db.transaction('tutorAudio', 'readwrite');
+      tx.objectStore('tutorAudio').put({
+        ...record,
+        lastAccessedAtMs: Date.now(),
+      });
+    } catch {
+      // Ignore non-fatal LRU update error
+    }
+    return record;
+  }
+
+  return null;
+}
+
+export async function getCachedTutorAudioIdsForConversation(
+  conversationId: string
+): Promise<Set<string>> {
+  const db = await openDatabase();
+  if (!db || !conversationId) return new Set();
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('tutorAudio', 'readonly');
+      const index = tx.objectStore('tutorAudio').index('conversationId');
+      const req = index.getAllKeys(IDBKeyRange.only(conversationId));
+      req.onsuccess = () => {
+        const keys = (req.result as string[]) || [];
+        resolve(new Set(keys));
+      };
+      req.onerror = () => resolve(new Set());
+    } catch {
+      resolve(new Set());
+    }
+  });
+}
+
+export async function deleteCachedTutorAudioByConversation(
+  conversationId: string
+): Promise<void> {
+  const db = await openDatabase();
+  if (!db || !conversationId) return;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('tutorAudio', 'readwrite');
+      const store = tx.objectStore('tutorAudio');
+      const index = store.index('conversationId');
+      const req = index.getAllKeys(IDBKeyRange.only(conversationId));
+      req.onsuccess = () => {
+        for (const key of req.result) {
+          store.delete(key);
+        }
+      };
+      tx.oncomplete = () => {
+        notifyCacheSync();
+        resolve();
+      };
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 export async function getLocalCacheStats(userId: string): Promise<{
   cachedCourses: number;
   cachedTopics: number;
   cachedSources: number;
   cachedDrafts: number;
+  cachedAudioClips: number;
 }> {
   const db = await openDatabase();
-  if (!db) return { cachedCourses: 0, cachedTopics: 0, cachedSources: 0, cachedDrafts: 0 };
+  if (!db) {
+    return {
+      cachedCourses: 0,
+      cachedTopics: 0,
+      cachedSources: 0,
+      cachedDrafts: 0,
+      cachedAudioClips: 0,
+    };
+  }
 
   return new Promise((resolve) => {
-    const tx = db.transaction(['courses', 'topics', 'sources', 'drafts'], 'readonly');
+    const tx = db.transaction(
+      ['courses', 'topics', 'sources', 'drafts', 'tutorAudio'],
+      'readonly'
+    );
     let cachedCourses = 0;
     let cachedTopics = 0;
     let cachedSources = 0;
     let cachedDrafts = 0;
+    let cachedAudioClips = 0;
 
     const cReq = tx.objectStore('courses').index('userId').count(IDBKeyRange.only(userId));
     cReq.onsuccess = () => {
@@ -460,8 +662,24 @@ export async function getLocalCacheStats(userId: string): Promise<{
       cachedDrafts = dReq.result;
     };
 
-    tx.oncomplete = () => resolve({ cachedCourses, cachedTopics, cachedSources, cachedDrafts });
-    tx.onerror = () => resolve({ cachedCourses: 0, cachedTopics: 0, cachedSources: 0, cachedDrafts: 0 });
+    const aStore = tx.objectStore('tutorAudio');
+    const aReq = aStore.indexNames.contains('userId')
+      ? aStore.index('userId').count(IDBKeyRange.only(userId))
+      : aStore.count();
+    aReq.onsuccess = () => {
+      cachedAudioClips = aReq.result;
+    };
+
+    tx.oncomplete = () =>
+      resolve({ cachedCourses, cachedTopics, cachedSources, cachedDrafts, cachedAudioClips });
+    tx.onerror = () =>
+      resolve({
+        cachedCourses: 0,
+        cachedTopics: 0,
+        cachedSources: 0,
+        cachedDrafts: 0,
+        cachedAudioClips: 0,
+      });
   });
 }
 
@@ -470,7 +688,15 @@ export async function clearLocalCache(): Promise<void> {
   if (!db) return;
 
   return new Promise((resolve) => {
-    const storeNames: LocalStoreName[] = ['courses', 'topics', 'sources', 'studySessions', 'drafts', 'meta'];
+    const storeNames: LocalStoreName[] = [
+      'courses',
+      'topics',
+      'sources',
+      'studySessions',
+      'drafts',
+      'meta',
+      'tutorAudio',
+    ];
     const tx = db.transaction(storeNames, 'readwrite');
     for (const name of storeNames) {
       tx.objectStore(name).clear();

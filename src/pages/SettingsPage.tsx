@@ -42,6 +42,7 @@ export const SettingsPage: React.FC = () => {
     cachedTopics: 0,
     cachedSources: 0,
     cachedDrafts: 0,
+    cachedAudioClips: 0,
   });
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheSyncing, setCacheSyncing] = useState(false);
@@ -132,7 +133,14 @@ export const SettingsPage: React.FC = () => {
     setClearingCache(true);
     try {
       await clearLocalCache();
-      setCacheStats({ cachedCourses: 0, cachedTopics: 0, cachedSources: 0, cachedDrafts: 0 });
+      geminiAudioPlayer.clearMemoryCache();
+      setCacheStats({
+        cachedCourses: 0,
+        cachedTopics: 0,
+        cachedSources: 0,
+        cachedDrafts: 0,
+        cachedAudioClips: 0,
+      });
     } finally {
       setClearingCache(false);
     }
@@ -146,11 +154,11 @@ export const SettingsPage: React.FC = () => {
           onClick={() => navigate('/library')}
           aria-label="Back to Library"
           title="Back to Library"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
           Settings
         </h1>
       </div>
@@ -159,7 +167,7 @@ export const SettingsPage: React.FC = () => {
 
       {/* Profile Section */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">Account profile</h2>
+        <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-200">Account profile</h2>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-y border-zinc-200 dark:border-zinc-800 py-5">
           <div className="flex items-center gap-3.5 min-w-0">
             {user?.photoURL ? (
@@ -170,12 +178,12 @@ export const SettingsPage: React.FC = () => {
                 className="h-11 w-11 rounded-md border border-zinc-200 dark:border-zinc-700 object-cover shrink-0"
               />
             ) : (
-              <div className="flex h-11 w-11 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0">
+              <div className="flex h-11 w-11 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-sm font-semibold text-zinc-900 dark:text-zinc-200 shrink-0">
                 {(profile?.displayName || user?.email || 'S').slice(0, 1).toUpperCase()}
               </div>
             )}
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-zinc-950 dark:text-zinc-50">
+              <div className="truncate text-sm font-medium text-zinc-950 dark:text-zinc-200">
                 {profile?.displayName || user?.displayName || 'Student'}
               </div>
               <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
@@ -194,14 +202,14 @@ export const SettingsPage: React.FC = () => {
       {/* Appearance */}
       <section className="space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-8">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">Appearance</h2>
+          <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-200">Appearance</h2>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
             Stored locally on this device — not synced to the cloud.
           </p>
         </div>
         <div className="flex items-center justify-between gap-4 border-y border-zinc-200 dark:border-zinc-800 py-4">
           <div>
-            <div className="text-sm text-zinc-900 dark:text-zinc-100">Theme</div>
+            <div className="text-sm text-zinc-900 dark:text-zinc-200">Theme</div>
             <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
               {theme === 'dark' ? 'Dark mode is on' : 'Light mode is on'}
             </div>
@@ -210,7 +218,7 @@ export const SettingsPage: React.FC = () => {
             type="button"
             onClick={toggleTheme}
             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="inline-flex items-center gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2 text-sm font-medium text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2 text-sm font-medium text-zinc-900 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             {theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}
@@ -222,7 +230,7 @@ export const SettingsPage: React.FC = () => {
       <section>
         <form onSubmit={handleSavePreferences} className="space-y-6">
           <div>
-            <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">Learning preferences</h2>
+            <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-200">Learning preferences</h2>
             <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
               Synchronized to your private Firestore profile across devices.
             </p>
@@ -230,7 +238,7 @@ export const SettingsPage: React.FC = () => {
 
           <div className="space-y-5 border-t border-zinc-200 dark:border-zinc-800 pt-5">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-start">
-              <label htmlFor="pref-default-model" className="sm:col-span-5 sm:pt-2 text-sm text-zinc-900 dark:text-zinc-100">
+              <label htmlFor="pref-default-model" className="sm:col-span-5 sm:pt-2 text-sm text-zinc-900 dark:text-zinc-200">
                 Default Gemini model
               </label>
               <div className="sm:col-span-7 space-y-1.5">
@@ -243,7 +251,7 @@ export const SettingsPage: React.FC = () => {
                       defaultModel: e.target.value,
                     }))
                   }
-                  className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-50 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+                  className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                 >
                   {AVAILABLE_AI_MODELS.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -259,7 +267,7 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
-              <label htmlFor="pref-source-mode" className="sm:col-span-5 text-sm text-zinc-900 dark:text-zinc-100">
+              <label htmlFor="pref-source-mode" className="sm:col-span-5 text-sm text-zinc-900 dark:text-zinc-200">
                 Default Tutor source mode
               </label>
               <select
@@ -271,7 +279,7 @@ export const SettingsPage: React.FC = () => {
                     tutorSourceMode: e.target.value as TutorSourceMode,
                   }))
                 }
-                className="sm:col-span-7 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-50 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+                className="sm:col-span-7 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
               >
                 <option value="materials_only">My Materials Only</option>
                 <option value="materials_plus_ai">My Materials + AI Explanation</option>
@@ -280,7 +288,7 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
-              <label htmlFor="pref-difficulty" className="sm:col-span-5 text-sm text-zinc-900 dark:text-zinc-100">
+              <label htmlFor="pref-difficulty" className="sm:col-span-5 text-sm text-zinc-900 dark:text-zinc-200">
                 Default difficulty level
               </label>
               <select
@@ -292,7 +300,7 @@ export const SettingsPage: React.FC = () => {
                     defaultDifficulty: e.target.value as DifficultyLevel,
                   }))
                 }
-                className="sm:col-span-7 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-50 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+                className="sm:col-span-7 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
               >
                 <option value="foundational">Foundational</option>
                 <option value="standard">Standard</option>
@@ -301,7 +309,7 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
-              <label htmlFor="pref-voice-enabled" className="sm:col-span-5 text-sm text-zinc-900 dark:text-zinc-100">
+              <label htmlFor="pref-voice-enabled" className="sm:col-span-5 text-sm text-zinc-900 dark:text-zinc-200">
                 Voice playback for AI replies
               </label>
               <div className="sm:col-span-7 flex items-center gap-3">
@@ -312,7 +320,7 @@ export const SettingsPage: React.FC = () => {
                   onChange={(e) =>
                     setPrefs((prev) => ({ ...prev, voiceEnabled: e.target.checked }))
                   }
-                  className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-950 dark:accent-zinc-100 cursor-pointer"
+                  className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-950 dark:accent-zinc-200 cursor-pointer"
                 />
                 <span className="text-sm text-zinc-600 dark:text-zinc-300">
                   Enable voice playback controls on AI responses (Gemini with Groq fallback)
@@ -321,7 +329,7 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-start">
-              <label htmlFor="pref-tts-voice" className="sm:col-span-5 sm:pt-2 text-sm text-zinc-900 dark:text-zinc-100">
+              <label htmlFor="pref-tts-voice" className="sm:col-span-5 sm:pt-2 text-sm text-zinc-900 dark:text-zinc-200">
                 Gemini 3.8 voice
               </label>
               <div className="sm:col-span-7 space-y-1.5">
@@ -335,7 +343,7 @@ export const SettingsPage: React.FC = () => {
                         ttsVoice: e.target.value as GeminiTtsVoice,
                       }))
                     }
-                    className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-50 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+                    className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                   >
                     {AVAILABLE_TTS_VOICES.map((voice) => (
                       <option key={voice.id} value={voice.id}>
@@ -379,7 +387,7 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
-              <label htmlFor="pref-voice-rate" className="sm:col-span-5 text-sm text-zinc-900 dark:text-zinc-100">
+              <label htmlFor="pref-voice-rate" className="sm:col-span-5 text-sm text-zinc-900 dark:text-zinc-200">
                 Playback speed ({prefs.voiceRate.toFixed(1)}x)
               </label>
               <div className="sm:col-span-7 flex items-center gap-3">
@@ -396,7 +404,7 @@ export const SettingsPage: React.FC = () => {
                       voiceRate: Number(e.target.value),
                     }))
                   }
-                  className="w-full accent-zinc-950 dark:accent-zinc-100 cursor-pointer"
+                  className="w-full accent-zinc-950 dark:accent-zinc-200 cursor-pointer"
                 />
                 <span className="w-10 text-right font-mono text-xs text-zinc-600 dark:text-zinc-400 tabular-nums">
                   {prefs.voiceRate.toFixed(1)}x
@@ -426,7 +434,7 @@ export const SettingsPage: React.FC = () => {
       <section className="space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-8">
         <div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">Local device cache (IndexedDB)</h2>
+            <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-200">Local device cache (IndexedDB)</h2>
             <div
               role="status"
               aria-live="polite"
@@ -454,7 +462,7 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Caches courses, topics, and unsaved drafts locally for fast startup and offline reading. Clearing local cache does not delete your Cloud Firestore data.
+            Caches courses, topics, saved tutor audio clips, and unsaved drafts locally for fast startup and offline playback. Clearing local cache does not delete your Cloud Firestore data.
           </p>
         </div>
 
@@ -465,6 +473,8 @@ export const SettingsPage: React.FC = () => {
             <span>Topics cached: {cacheStats.cachedTopics}</span>
             <span aria-hidden="true">·</span>
             <span>Materials cached: {cacheStats.cachedSources}</span>
+            <span aria-hidden="true">·</span>
+            <span>Audio clips: {cacheStats.cachedAudioClips}</span>
             <span aria-hidden="true">·</span>
             <span>Drafts: {cacheStats.cachedDrafts}</span>
           </div>

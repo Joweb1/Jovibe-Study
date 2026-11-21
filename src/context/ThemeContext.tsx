@@ -26,6 +26,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } else {
       root.classList.remove('dark');
     }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute('content', theme === 'dark' ? '#09090b' : '#ffffff');
+    }
     try { localStorage.setItem('sotal_theme', theme); } catch {}
   }, [theme]);
 

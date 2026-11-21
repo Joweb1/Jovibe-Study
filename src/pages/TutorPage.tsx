@@ -27,6 +27,7 @@ import {
 } from '../types/models';
 import { useAuth } from '../context/AuthContext';
 import { useCourses } from '../context/CourseContext';
+import { useStreak } from '../context/StreakContext';
 import { useWorkspaceUi } from '../context/WorkspaceUiContext';
 import { useRouter } from '../router/RouterContext';
 import { useCourseSources } from '../hooks/useCourseSources';
@@ -53,7 +54,12 @@ import {
   VoiceNoteRecorder,
   type PlaybackState,
 } from '../services/ai/audioService';
+import {
+  deleteCachedTutorAudioByConversation,
+  getCachedTutorAudioIdsForConversation,
+} from '../services/local/indexedDb';
 import { generateDocumentId } from '../utils/validation';
+import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { Button } from '../components/ui/Button';
 import { EmptyState, ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
 import { ConversationSidebar } from '../components/tutor/ConversationSidebar';
@@ -83,10 +89,20 @@ function formatTimer(seconds: number): string {
 
 export const TutorPage: React.FC = () => {
   const { user, profile, savePreferences } = useAuth();
-  const { activeCourse, topics, coursesLoading } = useCourses();
+  const {
+    activeCourse,
+    activeContentOwnerId,
+    activeCourseAccessRevoked,
+    topics,
+    coursesLoading,
+  } = useCourses();
+  const { recordLearningActivity } = useStreak();
   const { setHideHeader, setHideBottomNav, setLockViewport } = useWorkspaceUi();
   const { navigate } = useRouter();
-  const { sources, loading: sourcesLoading } = useCourseSources(user?.uid, activeCourse?.id);
+  const { sources, loading: sourcesLoading } = useCourseSources(
+    activeContentOwnerId,
+    activeCourse?.id
+  );
 
   const prefs = profile?.preferences ?? DEFAULT_USER_PREFERENCES;
 
@@ -124,6 +140,7 @@ export const TutorPage: React.FC = () => {
 
   // Gemini 3.8 TTS audio playback state
   const [playback, setPlayback] = useState<PlaybackState>(() => geminiAudioPlayer.getState());
+  const [cachedAudioIds, setCachedAudioIds] = useState<Set<string>>(() => new Set());
 
   // Gemini 3.5 Transcribe voice-note recorder state
   const [isRecording, setIsRecording] = useState(false);
@@ -215,6 +232,23 @@ export const TutorPage: React.FC = () => {
       geminiAudioPlayer.stop();
     };
   }, []);
+
+  // Load IDs of messages in the active conversation that already have saved local audio
+  useEffect(() => {
+    if (!activeConversationId) {
+      setCachedAudioIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    void getCachedTutorAudioIdsForConversation(activeConversationId).then((ids) => {
+      if (!cancelled) {
+        setCachedAudioIds(ids);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversationId]);
 
   // Cleanup recorder & inflight requests on unmount
   useEffect(() => {
@@ -505,6 +539,7 @@ export const TutorPage: React.FC = () => {
     if (!user || !activeCourse) return;
     try {
       await deleteConversation(user.uid, activeCourse.id, id);
+      void deleteCachedTutorAudioByConversation(id);
       if (activeConversationId === id) {
         explicitNewThreadRef.current = false;
         writeStoredConversationId(lastConvStorageKey, null);
@@ -577,6 +612,12 @@ export const TutorPage: React.FC = () => {
 
       const assistantMsgId = generateDocumentId('msg');
 
+      const persistMeta = {
+        userId: user.uid,
+        courseId: activeCourse.id,
+        conversationId,
+      };
+
       if (prefs.voiceEnabled) {
         // Show "Generating audio..." BEFORE revealing the reply text in chat
         setSendPhase('generating_audio');
@@ -590,9 +631,15 @@ export const TutorPage: React.FC = () => {
             voiceName: prefs.ttsVoice,
             style: 'Clear, calm, articulate academic tutor',
             signal: abortController.signal,
+            persist: persistMeta,
           });
           preloadedDuration = preloaded.durationSeconds;
           audioReady = true;
+          setCachedAudioIds((prev) => {
+            const next = new Set(prev);
+            next.add(assistantMsgId);
+            return next;
+          });
         } catch (audioErr) {
           if (abortController.signal.aborted) {
             throw audioErr;
@@ -634,6 +681,7 @@ export const TutorPage: React.FC = () => {
             voiceName: prefs.ttsVoice,
             playbackRate: prefs.voiceRate,
             style: 'Clear, calm, articulate academic tutor',
+            persist: persistMeta,
           });
         }
       } else {
@@ -643,6 +691,19 @@ export const TutorPage: React.FC = () => {
           content: turn.answer,
           sourceReferences: turn.sourceReferences,
           nextMessageCount: baseCount + 2,
+        });
+      }
+
+      // Record genuine completed AI Tutor exchange for daily streak & study dashboard
+      if (questionText.trim().length >= 4 && turn.answer.trim().length >= 20) {
+        void recordLearningActivity({
+          activityType: 'tutor',
+          title: activeConversation?.title || deriveConversationTitle(questionText),
+          courseId: activeCourse.id,
+          courseCode: activeCourse.code,
+          isSharedCourse: Boolean(activeCourse.isShared),
+          durationSeconds: 45,
+          summary: questionText.trim().slice(0, 140),
         });
       }
     } catch (err) {
@@ -738,13 +799,32 @@ export const TutorPage: React.FC = () => {
   };
 
   const handlePlayReply = async (msg: TutorMessage) => {
-    await geminiAudioPlayer.playMessage({
+    const persistMeta =
+      user && activeCourse && activeConversationId
+        ? {
+            userId: user.uid,
+            courseId: activeCourse.id,
+            conversationId: activeConversationId,
+          }
+        : undefined;
+
+    const played = await geminiAudioPlayer.playMessage({
       id: msg.id,
       text: msg.content,
       voiceName: prefs.ttsVoice,
       playbackRate: prefs.voiceRate,
       style: 'Clear, calm, articulate academic tutor',
+      persist: persistMeta,
     });
+
+    if (played && persistMeta) {
+      setCachedAudioIds((prev) => {
+        if (prev.has(msg.id)) return prev;
+        const next = new Set(prev);
+        next.add(msg.id);
+        return next;
+      });
+    }
   };
 
   const handleCopyMessage = async (msg: TutorMessage) => {
@@ -805,8 +885,8 @@ export const TutorPage: React.FC = () => {
   if (!activeCourse) {
     return (
       <div>
-        <div className="border-b border-zinc-200 pb-6">
-          <h1 className="font-display text-2xl font-bold tracking-tight text-zinc-950">
+        <div className="border-b border-zinc-200 dark:border-zinc-800 pb-6">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-zinc-950 dark:text-zinc-200">
             SOTAL AI Tutor
           </h1>
         </div>
@@ -820,27 +900,31 @@ export const TutorPage: React.FC = () => {
     );
   }
 
+  if (activeCourseAccessRevoked) {
+    return <RevokedCourseNotice course={activeCourse} pageTitle="SOTAL AI Tutor" />;
+  }
+
   const isBusy = sending || transcribing;
 
   return (
     <div className="flex h-full flex-col flex-1 min-h-0 overflow-hidden">
       {/* Fixed Top Tutor Header Row (no breadcrumbs, never scrolls) */}
-      <div className="shrink-0 flex items-center justify-between gap-3 border-b border-zinc-200 pb-3">
+      <div className="shrink-0 flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-3">
         <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={() => setMobileDrawerOpen(true)}
             aria-label="Open conversations"
-            className="lg:hidden inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-zinc-950 text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="lg:hidden inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-zinc-200 dark:text-zinc-950 dark:hover:bg-zinc-300 transition-colors cursor-pointer"
           >
             <Menu className="h-4 w-4" />
           </button>
           <div className="min-w-0">
-            <h1 className="font-display text-lg sm:text-xl font-bold leading-tight tracking-tight text-zinc-950 truncate">
+            <h1 className="font-display text-lg sm:text-xl font-bold leading-tight tracking-tight text-zinc-950 dark:text-zinc-200 truncate">
               SOTAL AI Tutor
             </h1>
             {activeConversation?.title && (
-              <p className="truncate text-xs text-zinc-500">
+              <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
                 {activeConversation.title}
               </p>
             )}
@@ -858,8 +942,8 @@ export const TutorPage: React.FC = () => {
             title="Tutor settings"
             className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors cursor-pointer ${
               settingsMenuOpen
-                ? 'border-zinc-950 bg-zinc-950 text-white'
-                : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-950'
+                ? 'border-zinc-950 bg-zinc-950 text-white dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-950'
+                : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-950 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
             }`}
           >
             <SettingsIcon className="h-4 w-4" />
@@ -874,21 +958,21 @@ export const TutorPage: React.FC = () => {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -6, scale: 0.97 }}
                 transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-                className="absolute right-0 top-full z-40 mt-2.5 w-72 sm:w-80 rounded-xl border border-zinc-200 bg-white p-4 shadow-lg"
+                className="absolute right-0 top-full z-40 mt-2.5 w-72 sm:w-80 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-lg dark:shadow-black/40"
               >
                 {/* Tooltip Caret Pointer */}
                 <span
                   aria-hidden="true"
-                  className="absolute -top-1.5 right-3 h-3 w-3 rotate-45 border-l border-t border-zinc-200 bg-white"
+                  className="absolute -top-1.5 right-3 h-3 w-3 rotate-45 border-l border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
                 />
 
                 <div className="relative space-y-4">
-                  <div className="flex items-center justify-between border-b border-zinc-100 pb-2.5">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                  <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2.5">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                       Tutor Settings
                     </span>
                     {savingPref && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400 dark:text-zinc-500">
                         <Loader2 className="h-3 w-3 animate-spin" />
                         Saving
                       </span>
@@ -899,7 +983,7 @@ export const TutorPage: React.FC = () => {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="tutor-popup-source-mode"
-                      className="block text-xs font-medium text-zinc-700"
+                      className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
                     >
                       Source Mode
                     </label>
@@ -907,7 +991,7 @@ export const TutorPage: React.FC = () => {
                       id="tutor-popup-source-mode"
                       value={sourceMode}
                       onChange={(e) => void handleSourceModeChange(e.target.value as TutorSourceMode)}
-                      className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-2 text-xs font-medium text-zinc-950 focus:border-zinc-950 focus:outline-none"
+                      className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-2 text-xs font-medium text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                     >
                       {SOURCE_MODE_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>
@@ -921,7 +1005,7 @@ export const TutorPage: React.FC = () => {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="tutor-popup-topic"
-                      className="block text-xs font-medium text-zinc-700"
+                      className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
                     >
                       Topic Focus
                     </label>
@@ -930,7 +1014,7 @@ export const TutorPage: React.FC = () => {
                       value={selectedTopicId}
                       onChange={(e) => setSelectedTopicId(e.target.value)}
                       disabled={sourceMode === 'general_ai'}
-                      className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-2 text-xs text-zinc-900 focus:border-zinc-950 focus:outline-none disabled:bg-zinc-50 disabled:text-zinc-400"
+                      className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-2 text-xs text-zinc-900 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none disabled:bg-zinc-50 dark:disabled:bg-zinc-900 disabled:text-zinc-400 dark:disabled:text-zinc-600"
                     >
                       <option value="">All course topics</option>
                       {topics.map((t) => (
@@ -946,18 +1030,18 @@ export const TutorPage: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <label
                         htmlFor="tutor-popup-voice"
-                        className="text-xs font-medium text-zinc-700"
+                        className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
                       >
                         Voice (Gemini 3.8)
                       </label>
-                      <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-600 cursor-pointer">
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-600 dark:text-zinc-400 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={prefs.voiceEnabled}
                           onChange={(e) =>
                             void handleQuickPrefUpdate({ voiceEnabled: e.target.checked })
                           }
-                          className="h-3.5 w-3.5 rounded border-zinc-300 accent-zinc-950 cursor-pointer"
+                          className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-950 dark:accent-zinc-200 cursor-pointer"
                         />
                         Enabled
                       </label>
@@ -970,7 +1054,7 @@ export const TutorPage: React.FC = () => {
                           ttsVoice: e.target.value as GeminiTtsVoice,
                         })
                       }
-                      className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-2 text-xs text-zinc-900 focus:border-zinc-950 focus:outline-none"
+                      className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-2 text-xs text-zinc-900 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                     >
                       {AVAILABLE_TTS_VOICES.map((voice) => (
                         <option key={voice.id} value={voice.id}>
@@ -984,7 +1068,7 @@ export const TutorPage: React.FC = () => {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="tutor-popup-model"
-                      className="block text-xs font-medium text-zinc-700"
+                      className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
                     >
                       AI Model
                     </label>
@@ -994,7 +1078,7 @@ export const TutorPage: React.FC = () => {
                       onChange={(e) =>
                         void handleQuickPrefUpdate({ defaultModel: e.target.value })
                       }
-                      className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-2 text-xs text-zinc-900 focus:border-zinc-950 focus:outline-none"
+                      className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-2 text-xs text-zinc-900 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                     >
                       {AVAILABLE_AI_MODELS.map((model) => (
                         <option key={model.id} value={model.id}>
@@ -1005,14 +1089,14 @@ export const TutorPage: React.FC = () => {
                   </div>
 
                   {/* Footer Shortcuts */}
-                  <div className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-3">
+                  <div className="flex items-center justify-between gap-2 border-t border-zinc-100 dark:border-zinc-800 pt-3">
                     <button
                       type="button"
                       onClick={() => {
                         setSettingsMenuOpen(false);
                         navigate('/library');
                       }}
-                      className="inline-flex items-center gap-1.5 text-xs text-zinc-600 hover:text-zinc-950 cursor-pointer"
+                      className="inline-flex items-center gap-1.5 text-xs text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer"
                     >
                       <BookOpen className="h-3.5 w-3.5" />
                       <span className="tabular-nums">
@@ -1028,7 +1112,7 @@ export const TutorPage: React.FC = () => {
                         setSettingsMenuOpen(false);
                         navigate('/settings');
                       }}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-950 hover:underline underline-offset-2 cursor-pointer"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-950 dark:text-zinc-200 hover:underline underline-offset-2 cursor-pointer"
                     >
                       <SlidersHorizontal className="h-3.5 w-3.5" />
                       All AI Settings
@@ -1044,7 +1128,7 @@ export const TutorPage: React.FC = () => {
       {/* Main Split Workspace (non-scrolling outer wrapper) */}
       <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)] gap-0 lg:gap-8 pt-3 overflow-hidden">
         {/* Desktop Conversation Sidebar */}
-        <aside className="hidden lg:block h-full border-r border-zinc-200 pr-5 min-h-0 overflow-hidden">
+        <aside className="hidden lg:block h-full border-r border-zinc-200 dark:border-zinc-800 pr-5 min-h-0 overflow-hidden">
           <ConversationSidebar
             conversations={conversations}
             activeConversationId={activeConversationId}
@@ -1068,7 +1152,7 @@ export const TutorPage: React.FC = () => {
               className="fixed inset-0 z-50 flex lg:hidden"
             >
               <div
-                className="fixed inset-0 bg-zinc-950/35 backdrop-blur-[2px]"
+                className="fixed inset-0 bg-zinc-950/35 dark:bg-black/65 backdrop-blur-[2px]"
                 onClick={() => setMobileDrawerOpen(false)}
               />
               <motion.div
@@ -1076,17 +1160,17 @@ export const TutorPage: React.FC = () => {
                 animate={{ x: 0 }}
                 exit={{ x: '-100%' }}
                 transition={{ type: 'spring', stiffness: 400, damping: 36 }}
-                className="relative z-10 flex w-72 max-w-[85vw] flex-col bg-white p-4 shadow-xl border-r border-zinc-200"
+                className="relative z-10 flex w-72 max-w-[85vw] flex-col bg-white dark:bg-zinc-950 p-4 shadow-xl border-r border-zinc-200 dark:border-zinc-800"
               >
-                <div className="flex items-center justify-between pb-3 mb-2 border-b border-zinc-200">
-                  <span className="font-display text-sm font-semibold text-zinc-950">
+                <div className="flex items-center justify-between pb-3 mb-2 border-b border-zinc-200 dark:border-zinc-800">
+                  <span className="font-display text-sm font-semibold text-zinc-950 dark:text-zinc-200">
                     {activeCourse.code} Threads
                   </span>
                   <button
                     type="button"
                     onClick={() => setMobileDrawerOpen(false)}
                     aria-label="Close conversations"
-                    className="p-1 text-zinc-500 hover:text-zinc-950 cursor-pointer"
+                    className="p-1 text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -1116,7 +1200,7 @@ export const TutorPage: React.FC = () => {
           )}
 
           {savedNotice && (
-            <div className="mb-3 shrink-0 flex items-center justify-between rounded-md border border-zinc-300 bg-zinc-50 px-3.5 py-2.5 text-xs text-zinc-900">
+            <div className="mb-3 shrink-0 flex items-center justify-between rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3.5 py-2.5 text-xs text-zinc-900 dark:text-zinc-200">
               <span className="inline-flex items-center gap-2">
                 <Check className="h-3.5 w-3.5" />
                 {savedNotice}
@@ -1124,7 +1208,7 @@ export const TutorPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSavedNotice(null)}
-                className="text-zinc-500 hover:text-zinc-950 cursor-pointer"
+                className="text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer"
               >
                 Dismiss
               </button>
@@ -1138,15 +1222,15 @@ export const TutorPage: React.FC = () => {
             ) : messages.length === 0 ? (
               <div className="py-6 max-w-2xl space-y-6">
                 <div>
-                  <h2 className="font-display text-base font-semibold text-zinc-950">
+                  <h2 className="font-display text-base font-semibold text-zinc-950 dark:text-zinc-200">
                     Study {activeCourse.code} with grounded explanations
                   </h2>
                 </div>
 
                 {sourceMode === 'materials_only' && scopedSourcesCount === 0 && (
-                  <div className="border-y border-zinc-200 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <p className="text-xs text-zinc-600">
-                      <strong className="font-medium text-zinc-900">My Materials Only</strong> is
+                  <div className="border-y border-zinc-200 dark:border-zinc-800 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                      <strong className="font-medium text-zinc-900 dark:text-zinc-200">My Materials Only</strong> is
                       active, but no sources match your current scope yet.
                     </p>
                     <Button
@@ -1160,17 +1244,17 @@ export const TutorPage: React.FC = () => {
                 )}
 
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-zinc-500">Suggested starting prompts</div>
-                  <div className="divide-y divide-zinc-200 border-y border-zinc-200">
+                  <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Suggested starting prompts</div>
+                  <div className="divide-y divide-zinc-200 dark:divide-zinc-800 border-y border-zinc-200 dark:border-zinc-800">
                     {starterPrompts.map((prompt) => (
                       <button
                         key={prompt}
                         type="button"
                         onClick={() => void handleSendQuestion(prompt)}
-                        className="w-full py-3 text-left text-sm text-zinc-800 hover:text-zinc-950 hover:bg-zinc-50 transition-colors flex items-center justify-between gap-3 px-2 cursor-pointer"
+                        className="w-full py-3 text-left text-sm text-zinc-800 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors flex items-center justify-between gap-3 px-2 cursor-pointer"
                       >
                         <span>{prompt}</span>
-                        <Send className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                        <Send className="h-3.5 w-3.5 text-zinc-400 dark:text-zinc-500 shrink-0" />
                       </button>
                     ))}
                   </div>
@@ -1188,40 +1272,46 @@ export const TutorPage: React.FC = () => {
                 const audioErrorForMsg =
                   playback.activeId === msg.id ? playback.error : null;
 
+                const hasCachedAudio = cachedAudioIds.has(msg.id);
+
                 return (
                   <article
                     key={msg.id}
-                    className={`border-b border-zinc-200/80 pb-5 last:border-b-0 ${
-                      isUser ? 'bg-zinc-50/70 px-3 py-3 rounded-md border-b-0' : ''
+                    className={`border-b border-zinc-200/80 dark:border-zinc-800/80 pb-5 last:border-b-0 ${
+                      isUser ? 'bg-zinc-50/70 dark:bg-zinc-900/90 px-3 py-3 rounded-md border-b-0' : ''
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-semibold text-zinc-950">
+                      <span className="text-xs font-semibold text-zinc-950 dark:text-zinc-200">
                         {isUser ? 'You' : 'SOTAL AI Tutor'}
                       </span>
                       {!isUser && (
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                          {prefs.voiceEnabled && (
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          {(prefs.voiceEnabled || hasCachedAudio) && (
                             <button
                               type="button"
                               onClick={() => void handlePlayReply(msg)}
-                              className="inline-flex items-center gap-1 hover:text-zinc-950 transition-colors cursor-pointer"
-                              title={`Play with Gemini 3.8 voice (${prefs.ttsVoice})`}
+                              className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                              title={
+                                hasCachedAudio
+                                  ? 'Play saved audio from this device'
+                                  : `Generate and play audio (${prefs.ttsVoice})`
+                              }
                             >
                               {isThisLoadingAudio ? (
                                 <>
-                                  <Volume2 className="h-3.5 w-3.5 animate-pulse text-zinc-900" />
-                                  <span className="text-zinc-900">Generating audio...</span>
+                                  <Volume2 className="h-3.5 w-3.5 animate-pulse text-zinc-900 dark:text-zinc-200" />
+                                  <span className="text-zinc-900 dark:text-zinc-200">Generating audio...</span>
                                 </>
                               ) : isThisPlaying ? (
                                 <>
-                                  <Pause className="h-3.5 w-3.5 text-zinc-950" />
-                                  <span className="text-zinc-950 font-medium">Pause</span>
+                                  <Pause className="h-3.5 w-3.5 text-zinc-950 dark:text-zinc-200" />
+                                  <span className="text-zinc-950 dark:text-zinc-200 font-medium">Pause</span>
                                 </>
                               ) : isThisPaused ? (
                                 <>
-                                  <Play className="h-3.5 w-3.5 text-zinc-950" />
-                                  <span className="text-zinc-950 font-medium">Resume</span>
+                                  <Play className="h-3.5 w-3.5 text-zinc-950 dark:text-zinc-200" />
+                                  <span className="text-zinc-950 dark:text-zinc-200 font-medium">Resume</span>
                                 </>
                               ) : (
                                 <>
@@ -1236,24 +1326,24 @@ export const TutorPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => geminiAudioPlayer.stop()}
-                              className="inline-flex items-center gap-1 text-zinc-500 hover:text-zinc-950 cursor-pointer"
+                              className="inline-flex items-center gap-1 text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer"
                             >
                               <Square className="h-3 w-3" />
                               <span>Stop</span>
                             </button>
                           )}
 
-                          <span aria-hidden="true">·</span>
+                          {(prefs.voiceEnabled || hasCachedAudio) && <span aria-hidden="true">·</span>}
 
                           <button
                             type="button"
                             onClick={() => setSaveTargetMessage(msg)}
-                            className="inline-flex items-center gap-1 hover:text-zinc-950 transition-colors cursor-pointer"
+                            className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-zinc-200 transition-colors cursor-pointer"
                           >
                             {msg.saved ? (
                               <>
-                                <BookmarkCheck className="h-3.5 w-3.5 text-zinc-950" />
-                                <span className="text-zinc-950 font-medium">Saved</span>
+                                <BookmarkCheck className="h-3.5 w-3.5 text-zinc-950 dark:text-zinc-200" />
+                                <span className="text-zinc-950 dark:text-zinc-200 font-medium">Saved</span>
                               </>
                             ) : (
                               <>
@@ -1268,12 +1358,12 @@ export const TutorPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void handleCopyMessage(msg)}
-                            className="inline-flex items-center gap-1 hover:text-zinc-950 transition-colors cursor-pointer"
+                            className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-zinc-200 transition-colors cursor-pointer"
                           >
                             {copiedId === msg.id ? (
                               <>
-                                <Check className="h-3.5 w-3.5 text-zinc-950" />
-                                <span className="text-zinc-950">Copied</span>
+                                <Check className="h-3.5 w-3.5 text-zinc-950 dark:text-zinc-200" />
+                                <span className="text-zinc-950 dark:text-zinc-200">Copied</span>
                               </>
                             ) : (
                               <>
@@ -1290,7 +1380,7 @@ export const TutorPage: React.FC = () => {
                       const safeContent = typeof msg.content === 'string' ? msg.content : '';
                       if (isUser) {
                         return (
-                          <p className="text-sm leading-relaxed text-zinc-900 whitespace-pre-wrap">
+                          <p className="text-sm leading-relaxed text-zinc-900 dark:text-zinc-200 whitespace-pre-wrap">
                             {safeContent}
                           </p>
                         );
@@ -1303,7 +1393,7 @@ export const TutorPage: React.FC = () => {
                             />
                             <span
                               aria-hidden="true"
-                              className="inline-block h-3.5 w-1.5 rounded-sm bg-zinc-900 animate-pulse align-middle"
+                              className="inline-block h-3.5 w-1.5 rounded-sm bg-zinc-900 dark:bg-zinc-200 animate-pulse align-middle"
                             />
                           </div>
                         );
@@ -1312,18 +1402,18 @@ export const TutorPage: React.FC = () => {
                     })()}
 
                     {audioErrorForMsg && (
-                      <p className="mt-2 text-xs text-red-700">{audioErrorForMsg}</p>
+                      <p className="mt-2 text-xs text-red-700 dark:text-red-400">{audioErrorForMsg}</p>
                     )}
 
                     {!isUser &&
                       (!streamingReply || streamingReply.messageId !== msg.id) &&
                       Array.isArray(msg.sourceReferences) &&
                       msg.sourceReferences.length > 0 && (
-                        <div className="mt-4 border-t border-zinc-200 pt-2.5">
-                          <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500 mb-1.5">
+                        <div className="mt-4 border-t border-zinc-200 dark:border-zinc-800 pt-2.5">
+                          <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
                             Referenced course materials
                           </div>
-                          <ul className="space-y-1 text-xs text-zinc-600">
+                          <ul className="space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
                             {msg.sourceReferences.map((ref, idx) => (
                               <li
                                 key={`${ref.sourceId}_${idx}`}
@@ -1332,7 +1422,7 @@ export const TutorPage: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => navigate('/library')}
-                                  className="font-medium text-zinc-900 hover:underline underline-offset-2 text-left cursor-pointer"
+                                  className="font-medium text-zinc-900 dark:text-zinc-200 hover:underline underline-offset-2 text-left cursor-pointer"
                                 >
                                   {ref.sourceTitle}
                                 </button>
@@ -1362,26 +1452,26 @@ export const TutorPage: React.FC = () => {
 
             {sending && (
               <div className="py-3 space-y-2.5">
-                <div className="flex items-center justify-between text-xs text-zinc-500">
-                  <span className="font-semibold text-zinc-950">SOTAL AI Tutor</span>
+                <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className="font-semibold text-zinc-950 dark:text-zinc-200">SOTAL AI Tutor</span>
                   <button
                     type="button"
                     onClick={() => generationAbortRef.current?.abort()}
-                    className="underline underline-offset-2 hover:text-zinc-950 cursor-pointer"
+                    className="underline underline-offset-2 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer"
                   >
                     Stop
                   </button>
                 </div>
                 {sendPhase === 'generating_audio' ? (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3.5 py-1.5 text-xs font-medium text-zinc-800">
-                    <Volume2 className="h-3.5 w-3.5 animate-pulse text-zinc-950" />
+                  <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3.5 py-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                    <Volume2 className="h-3.5 w-3.5 animate-pulse text-zinc-950 dark:text-zinc-200" />
                     <span>Generating audio...</span>
-                    <Loader2 className="h-3 w-3 animate-spin text-zinc-500" />
+                    <Loader2 className="h-3 w-3 animate-spin text-zinc-500 dark:text-zinc-400" />
                   </div>
                 ) : (
                   <div className="space-y-2 max-w-xl">
-                    <div className="h-3 w-3/4 rounded bg-zinc-100 animate-pulse" />
-                    <div className="h-3 w-1/2 rounded bg-zinc-100 animate-pulse" />
+                    <div className="h-3 w-3/4 rounded bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
+                    <div className="h-3 w-1/2 rounded bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
                   </div>
                 )}
               </div>
@@ -1392,13 +1482,13 @@ export const TutorPage: React.FC = () => {
 
           {/* Fixed Quick Follow-ups when thread has replies */}
           {messages.length > 0 && !sending && (
-            <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-2.5 pb-2 shrink-0 bg-white">
+            <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 dark:border-zinc-800 pt-2.5 pb-2 shrink-0 bg-white dark:bg-zinc-950">
               {QUICK_FOLLOWUPS.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
                   onClick={() => void handleSendQuestion(prompt)}
-                  className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:border-zinc-400 hover:text-zinc-950 transition-colors cursor-pointer"
+                  className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-600 hover:text-zinc-950 dark:hover:text-zinc-200 transition-colors cursor-pointer"
                 >
                   {prompt}
                 </button>
@@ -1407,13 +1497,13 @@ export const TutorPage: React.FC = () => {
           )}
 
           {/* Fixed Composer & Voice Note Input Row (never scrolls, clears mobile bottom pill nav) */}
-          <div className="border-t border-zinc-200 bg-white pt-3 shrink-0">
+          <div className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 pt-3 shrink-0">
             {isRecording && (
-              <div className="mb-2.5 flex items-center justify-between rounded-md border border-zinc-900 bg-zinc-950 px-3.5 py-2 text-xs text-white">
+              <div className="mb-2.5 flex items-center justify-between rounded-md border border-zinc-900 dark:border-zinc-700 bg-zinc-950 dark:bg-zinc-900 px-3.5 py-2 text-xs text-white dark:text-zinc-200">
                 <div className="flex items-center gap-2.5">
                   <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
                   <span>Recording voice note</span>
-                  <span className="font-mono tabular-nums text-zinc-300">
+                  <span className="font-mono tabular-nums text-zinc-300 dark:text-zinc-400">
                     {formatTimer(recordingSeconds)}
                   </span>
                 </div>
@@ -1421,14 +1511,14 @@ export const TutorPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleCancelVoiceNote}
-                    className="text-zinc-300 hover:text-white cursor-pointer"
+                    className="text-zinc-300 hover:text-white dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleStopAndSendVoiceNote()}
-                    className="rounded bg-white px-2.5 py-1 font-medium text-zinc-950 hover:bg-zinc-200 cursor-pointer"
+                    className="rounded bg-white dark:bg-zinc-200 px-2.5 py-1 font-medium text-zinc-950 hover:bg-zinc-200 dark:hover:bg-zinc-300 cursor-pointer"
                   >
                     Stop &amp; send
                   </button>
@@ -1437,8 +1527,8 @@ export const TutorPage: React.FC = () => {
             )}
 
             {transcribing && (
-              <div className="mb-2.5 flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3.5 py-2 text-xs text-zinc-700">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-900" />
+              <div className="mb-2.5 flex items-center gap-2 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3.5 py-2 text-xs text-zinc-700 dark:text-zinc-300">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-900 dark:text-zinc-200" />
                 <span>Transcribing and sending voice note...</span>
               </div>
             )}
@@ -1469,7 +1559,7 @@ export const TutorPage: React.FC = () => {
                   }}
                   disabled={isBusy || isRecording}
                   placeholder="Ask your questions..."
-                  className="block h-11 w-full resize-none rounded-lg border border-zinc-300 bg-white px-3.5 py-2.5 text-sm leading-5 text-zinc-950 placeholder:text-zinc-400 focus:border-zinc-950 focus:outline-none disabled:bg-zinc-50 scrollbar-hide"
+                  className="block h-11 w-full resize-none rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-sm leading-5 text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none disabled:bg-zinc-50 dark:disabled:bg-zinc-900/60 scrollbar-hide"
                 />
               </div>
 

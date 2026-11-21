@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  BookOpen,
   Check,
   ChevronDown,
   ChevronUp,
@@ -19,9 +20,11 @@ import {
   addStoredApiKey,
   buildExecutionCandidates,
   buildProviderCandidates,
+  canUseServerFallbackKey,
   clearAllLocalApiKeys,
   clearKeyCooldown,
   getByokConfig,
+  hasUserEnteredOwnKey,
   listStoredApiKeys,
   removeStoredApiKey,
   saveByokConfig,
@@ -43,6 +46,7 @@ import {
   type AiProvider,
   type AiTask,
 } from '../../services/ai/providers';
+import { useGeminiOnboarding } from '../../context/GeminiOnboardingContext';
 import { Button } from '../ui/Button';
 import { ErrorBanner } from '../ui/StateViews';
 
@@ -56,6 +60,21 @@ interface ConnectionTestResult {
   model: string;
   latencyMs: number;
   message: string;
+  code?: string;
+  retryKeyId?: string;
+}
+
+function formatGeminiValidationError(code: string | undefined, fallback?: string): string {
+  if (code === 'INVALID_KEY') {
+    return 'This API key was rejected by Google Gemini. Double-check that you copied the full key from Google AI Studio, or create a new key and try again.';
+  }
+  if (code === 'NETWORK_ERROR' || code === 'TIMEOUT') {
+    return 'Could not reach Google Gemini right now due to a network issue. Your key is saved locally — check your connection and retry verification.';
+  }
+  if (code === 'RATE_LIMITED' || code === 'QUOTA_EXCEEDED') {
+    return 'This Gemini key hit a temporary rate or quota limit during verification. Wait a moment to retry, or add another Gemini key from a separate Google account for rotation.';
+  }
+  return fallback || 'Key verification failed. Please check the key and try again.';
 }
 
 const PROVIDER_ORDER: AiProvider[] = ['gemini', 'cerebras', 'nvidia_nim', 'openrouter', 'groq'];
@@ -66,6 +85,42 @@ const PROVIDER_POSITION_LABELS: Record<AiProvider, string> = {
   openrouter: '4th fallback',
   groq: 'Audio / 5th fallback',
 };
+const PROVIDER_DIRECT_LINK_META: Record<
+  AiProvider,
+  { name: string; action: string; dotClass: string; hoverClass: string }
+> = {
+  gemini: {
+    name: 'Google Gemini',
+    action: 'AI Studio',
+    dotClass: 'bg-sky-500',
+    hoverClass: 'hover:border-sky-300 dark:hover:border-sky-700',
+  },
+  nvidia_nim: {
+    name: 'NVIDIA NIM',
+    action: 'build.nvidia.com',
+    dotClass: 'bg-emerald-500',
+    hoverClass: 'hover:border-emerald-300 dark:hover:border-emerald-700',
+  },
+  cerebras: {
+    name: 'Cerebras',
+    action: 'cloud.cerebras.ai',
+    dotClass: 'bg-violet-500',
+    hoverClass: 'hover:border-violet-300 dark:hover:border-violet-700',
+  },
+  openrouter: {
+    name: 'OpenRouter',
+    action: 'openrouter.ai/keys',
+    dotClass: 'bg-amber-500',
+    hoverClass: 'hover:border-amber-300 dark:hover:border-amber-700',
+  },
+  groq: {
+    name: 'Groq',
+    action: 'console.groq.com',
+    dotClass: 'bg-rose-500',
+    hoverClass: 'hover:border-rose-300 dark:hover:border-rose-700',
+  },
+};
+const QUICK_LINK_ORDER: AiProvider[] = ['gemini', 'nvidia_nim', 'cerebras', 'openrouter', 'groq'];
 const ALL_TASKS: AiTask[] = ['chat', 'structured_json', 'vision', 'transcription', 'tts'];
 
 function formatStatusLabel(key: StoredApiKey): string {
@@ -96,7 +151,7 @@ function formatRelativeTime(timestampMs: number | null): string {
 }
 
 function statusColorClass(status: ApiKeyStatus): string {
-  if (status === 'active') return 'font-medium text-zinc-900 dark:text-zinc-100';
+  if (status === 'active') return 'font-medium text-zinc-900 dark:text-zinc-200';
   if (status === 'invalid') return 'font-medium text-red-700 dark:text-red-400';
   if (status === 'cooldown' || status === 'quota_exceeded') return 'text-amber-700 dark:text-amber-400';
   return 'text-zinc-500 dark:text-zinc-400';
@@ -140,6 +195,53 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
   const [testingActive, setTestingActive] = useState(false);
   const [connectionResult, setConnectionResult] = useState<ConnectionTestResult | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // ── Guided onboarding integration ────────────────────────────────────────
+  const {
+    state: onboardingState,
+    focusRequestTick,
+    openSettingsKeyGuide,
+    reopenKeyInstructions,
+    notifyGeminiKeyVerified,
+    notifyGeminiKeysChanged,
+  } = useGeminiOnboarding();
+  const geminiSectionRef = useRef<HTMLDivElement>(null);
+  const geminiSecretInputRef = useRef<HTMLInputElement>(null);
+  const isPasteStepActive =
+    onboardingState.status === 'in_progress' && onboardingState.step === 'paste_key';
+
+  // Auto-expand, scroll to, and focus the existing Gemini API key section during guided setup
+  useEffect(() => {
+    if (
+      onboardingState.status !== 'in_progress' ||
+      (onboardingState.step !== 'get_key_popup' && onboardingState.step !== 'paste_key')
+    ) {
+      return;
+    }
+
+    setCollapsedProviders((prev) => {
+      if (!prev.has('gemini')) return prev;
+      const next = new Set(prev);
+      next.delete('gemini');
+      return next;
+    });
+
+    const scrollTimer = window.setTimeout(() => {
+      geminiSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+
+    let focusTimer: number | null = null;
+    if (onboardingState.step === 'paste_key') {
+      focusTimer = window.setTimeout(() => {
+        geminiSecretInputRef.current?.focus({ preventScroll: true });
+      }, 260);
+    }
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      if (focusTimer !== null) window.clearTimeout(focusTimer);
+    };
+  }, [onboardingState.status, onboardingState.step, focusRequestTick]);
 
   // ── Bootstrap ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -192,12 +294,20 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
           sourceLabel: `BYOK: ${created.label}`,
           model: r.model,
           latencyMs: r.latencyMs,
+          code: r.code,
+          retryKeyId: !r.ok ? created.id : undefined,
           message: r.ok
             ? `Key "${created.label}" verified on ${r.model} (${r.latencyMs}ms).`
-            : r.error || 'Key verification failed.',
+            : formatGeminiValidationError(r.code, r.error),
         };
+        refreshState();
+        setConnectionResult(result);
+        notifyGeminiKeysChanged();
+        if (r.ok) {
+          notifyGeminiKeyVerified(created.label);
+        }
       } else {
-        const r = await testProviderApiKey({ provider, rawKey: created.key });
+        const r = await testProviderApiKey({ provider, rawKey: created.key, keyId: created.id });
         result = {
           ok: r.ok,
           sourceLabel: `${PROVIDERS[provider].shortLabel}: ${created.label}`,
@@ -207,9 +317,9 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
             ? `Key "${created.label}" verified on ${r.model} (${r.latencyMs}ms).`
             : r.error || 'Key verification failed.',
         };
+        refreshState();
+        setConnectionResult(result);
       }
-      refreshState();
-      setConnectionResult(result);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Unable to save API key.');
     } finally {
@@ -233,12 +343,19 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
           sourceLabel: `BYOK: ${entry.label}`,
           model: r.model,
           latencyMs: r.latencyMs,
+          code: r.code,
+          retryKeyId: !r.ok ? entry.id : undefined,
           message: r.ok
             ? `Key "${entry.label}" responded on ${r.model} in ${r.latencyMs}ms.`
-            : r.error || 'Key test failed.',
+            : formatGeminiValidationError(r.code, r.error),
         };
+        setConnectionResult(result);
+        notifyGeminiKeysChanged();
+        if (r.ok) {
+          notifyGeminiKeyVerified(entry.label);
+        }
       } else {
-        const r = await testProviderApiKey({ provider: entry.provider, rawKey: entry.key });
+        const r = await testProviderApiKey({ provider: entry.provider, rawKey: entry.key, keyId: entry.id });
         refreshState();
         result = {
           ok: r.ok,
@@ -249,8 +366,8 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
             ? `Key "${entry.label}" responded on ${r.model} in ${r.latencyMs}ms.`
             : r.error || 'Key test failed.',
         };
+        setConnectionResult(result);
       }
-      setConnectionResult(result);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to test API key.');
     } finally {
@@ -319,6 +436,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
       setEditLabel('');
       setEditRawKey('');
       refreshState();
+      notifyGeminiKeysChanged();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Unable to update API key.');
     }
@@ -330,6 +448,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
     setConfirmRemoveId(null);
     if (editingKeyId === id) setEditingKeyId(null);
     refreshState();
+    notifyGeminiKeysChanged();
   };
 
   const handleClearProvider = (provider: AiProvider) => {
@@ -338,6 +457,9 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
     setEditingKeyId(null);
     setConnectionResult(null);
     refreshState();
+    if (provider === 'gemini') {
+      notifyGeminiKeysChanged();
+    }
   };
 
   const handleConfigChange = (patch: Partial<ByokConfig>) => {
@@ -348,6 +470,8 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
   // ── Derived ──────────────────────────────────────────────────────────────
   const geminiCandidates = buildExecutionCandidates();
   const primaryCandidate = geminiCandidates[0] ?? null;
+  const userOwnsKeyMode = hasUserEnteredOwnKey();
+  const serverFallbackEnabledNow = canUseServerFallbackKey();
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -355,7 +479,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
       {/* Section header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-200">
             AI keys & fallback routing
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
@@ -382,27 +506,51 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
         <div
           className={`flex items-start justify-between gap-3 rounded-md border px-3.5 py-3 text-xs ${
             connectionResult.ok
-              ? 'border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100'
+              ? 'border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200'
               : 'border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 text-red-900 dark:text-red-200'
           }`}
         >
           <div className="flex items-start gap-2.5">
             {connectionResult.ok ? (
-              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-900 dark:text-zinc-100" />
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-900 dark:text-zinc-200" />
             ) : (
               <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-700 dark:text-red-400" />
             )}
-            <div className="space-y-0.5">
-              <div className="font-medium">{connectionResult.message}</div>
+            <div className="space-y-1">
+              <div className="font-medium leading-relaxed">{connectionResult.message}</div>
               <div className="font-mono text-[11px] opacity-80">
                 Route: {connectionResult.sourceLabel} · Model: {connectionResult.model}
               </div>
+              {!connectionResult.ok &&
+                connectionResult.retryKeyId &&
+                (connectionResult.code === 'NETWORK_ERROR' ||
+                  connectionResult.code === 'TIMEOUT' ||
+                  connectionResult.code === 'RATE_LIMITED' ||
+                  connectionResult.code === 'QUOTA_EXCEEDED') && (() => {
+                  const retryEntry = providerKeys.gemini.find(
+                    (k) => k.id === connectionResult.retryKeyId
+                  );
+                  if (!retryEntry) return null;
+                  return (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => void handleTestKey(retryEntry)}
+                        disabled={testingKeyId === retryEntry.id}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-red-300 dark:border-red-800 bg-white dark:bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-red-800 dark:text-red-200 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Retry verification
+                      </button>
+                    </div>
+                  );
+                })()}
             </div>
           </div>
           <button
             type="button"
             onClick={() => setConnectionResult(null)}
-            className="text-[11px] underline underline-offset-2 opacity-70 hover:opacity-100 cursor-pointer"
+            className="text-[11px] underline underline-offset-2 opacity-70 hover:opacity-100 cursor-pointer shrink-0"
           >
             Dismiss
           </button>
@@ -435,8 +583,8 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                         <span
                           className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
                             hasKey
-                              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
-                              : 'bg-zinc-100 text-zinc-400 dark:bg-zinc-900 dark:text-zinc-600'
+                              ? 'bg-zinc-900 text-white dark:bg-zinc-200 dark:text-zinc-950'
+                              : 'bg-zinc-100 text-zinc-400 dark:bg-zinc-900 dark:text-zinc-500'
                           }`}
                         >
                           {PROVIDERS[provider]?.shortLabel || provider}
@@ -447,6 +595,57 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                   })}
                 </div>
               </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Direct links to get free API keys ────────────────────────────── */}
+      <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-3.5 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-200">
+              Get your API keys directly
+            </h3>
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+              Add keys from another Google account or any fallback provider below for seamless
+              automatic rotation.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={openSettingsKeyGuide}
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-500 transition-colors cursor-pointer shrink-0"
+          >
+            <BookOpen className="h-3 w-3" />
+            Gemini setup guide
+          </button>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          {QUICK_LINK_ORDER.map((provider) => {
+            const def = PROVIDERS[provider];
+            const meta = PROVIDER_DIRECT_LINK_META[provider];
+            return (
+              <a
+                key={provider}
+                href={def.docsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`group flex items-center justify-between gap-2 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 text-left transition-colors ${meta.hoverClass}`}
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dotClass}`} aria-hidden="true" />
+                    <span className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                      {meta.name}
+                    </span>
+                  </div>
+                  <div className="truncate pl-3.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    {meta.action}
+                  </div>
+                </div>
+                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors" />
+              </a>
             );
           })}
         </div>
@@ -464,37 +663,52 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
           const canAddMore = def.maxKeys === null || keyCount < def.maxKeys;
 
           return (
-            <div key={provider}>
+            <div
+              key={provider}
+              ref={provider === 'gemini' ? geminiSectionRef : undefined}
+              data-onboarding={provider === 'gemini' ? 'gemini-section' : undefined}
+            >
               {/* Panel header */}
-              <button
-                type="button"
-                onClick={() => toggleCollapse(provider)}
-                className="w-full flex items-center justify-between gap-3 px-4 py-3.5 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors text-left cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <KeyRound className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" />
-                  <span className="text-sm font-semibold text-zinc-950 dark:text-zinc-50 truncate">
-                    {def.label}
-                  </span>
-                  <span className="inline-flex items-center rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-300 shrink-0">
-                    {PROVIDER_POSITION_LABELS[provider]}
-                  </span>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0 transition-colors ${
-                      keyCount > 0
-                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
-                        : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
-                    }`}
-                  >
-                    {keyCount > 0 ? `${keyCount} key${keyCount !== 1 ? 's' : ''}` : 'No keys'}
-                  </span>
-                </div>
-                {isCollapsed ? (
-                  <ChevronDown className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
-                ) : (
-                  <ChevronUp className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
-                )}
-              </button>
+              <div className="flex items-center justify-between gap-2 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors pr-3">
+                <button
+                  type="button"
+                  onClick={() => toggleCollapse(provider)}
+                  className="flex flex-1 items-center justify-between gap-3 px-4 py-3.5 text-left cursor-pointer min-w-0"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <KeyRound className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" />
+                    <span className="text-sm font-semibold text-zinc-950 dark:text-zinc-200 truncate">
+                      {def.label}
+                    </span>
+                    <span className="hidden sm:inline-flex items-center rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-300 shrink-0">
+                      {PROVIDER_POSITION_LABELS[provider]}
+                    </span>
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0 transition-colors ${
+                        keyCount > 0
+                          ? 'bg-zinc-900 text-white dark:bg-zinc-200 dark:text-zinc-950'
+                          : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
+                      }`}
+                    >
+                      {keyCount > 0 ? `${keyCount} key${keyCount !== 1 ? 's' : ''}` : 'No keys'}
+                    </span>
+                  </div>
+                  {isCollapsed ? (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
+                  ) : (
+                    <ChevronUp className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
+                  )}
+                </button>
+                <a
+                  href={def.docsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-100 transition-colors"
+                >
+                  Get key
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
 
               {/* Panel body */}
               {!isCollapsed && (
@@ -508,15 +722,27 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                       <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
                         Tasks: {def.tasks.map((t) => TASK_LABELS[t]).join(', ')}
                       </span>
-                      <a
-                        href={def.docsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-100 underline underline-offset-2"
-                      >
-                        Get API key
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
+                      <div className="flex flex-wrap items-center gap-3">
+                        {provider === 'gemini' && (
+                          <button
+                            type="button"
+                            onClick={openSettingsKeyGuide}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-zinc-100 underline underline-offset-2 cursor-pointer"
+                          >
+                            <BookOpen className="h-3 w-3" />
+                            Setup guide
+                          </button>
+                        )}
+                        <a
+                          href={def.docsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200 underline underline-offset-2"
+                        >
+                          Get API key
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
                     </div>
                   </div>
 
@@ -524,10 +750,10 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                   {provider === 'gemini' && (
                     <div className="rounded-md border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800 text-xs">
                       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-zinc-700 dark:text-zinc-300">
-                        <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        <span className="font-medium text-zinc-900 dark:text-zinc-200">
                           Active route priority
                         </span>
-                        <span className="font-mono text-zinc-950 dark:text-zinc-50">
+                        <span className="font-mono text-zinc-950 dark:text-zinc-200">
                           {primaryCandidate
                             ? primaryCandidate.kind === 'byok'
                               ? `BYOK (${primaryCandidate.label})`
@@ -538,10 +764,12 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-zinc-500 dark:text-zinc-400">
                         <span>Server GEMINI_API_KEY status</span>
                         <span className="font-mono">
-                          {serverFallbackAvailable === null
+                          {userOwnsKeyMode
+                            ? 'Disabled (personal BYOK mode active)'
+                            : serverFallbackAvailable === null
                             ? 'Checking...'
                             : serverFallbackAvailable
-                            ? config.fallbackToServerKey
+                            ? serverFallbackEnabledNow
                               ? 'Configured & enabled'
                               : 'Configured (disabled locally)'
                             : 'Not configured on server'}
@@ -553,9 +781,28 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                   {/* Add key form */}
                   {canAddMore && (
                     <form
+                      data-onboarding={provider === 'gemini' ? 'gemini-add-form' : undefined}
                       onSubmit={(e) => void handleAddKey(e, provider)}
-                      className="space-y-3 rounded-md border border-zinc-200 dark:border-zinc-800 p-3.5 bg-zinc-50/50 dark:bg-zinc-900/30"
+                      className={`space-y-3 rounded-md border p-3.5 transition-all ${
+                        provider === 'gemini' && isPasteStepActive
+                          ? 'border-sky-500 dark:border-sky-400 bg-sky-50/40 dark:bg-sky-950/20 ring-2 ring-sky-500/25 dark:ring-sky-400/25'
+                          : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50'
+                      }`}
                     >
+                      {provider === 'gemini' && isPasteStepActive && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200/80 dark:border-sky-800/70 bg-white/90 dark:bg-zinc-900/90 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300">
+                          <span>
+                            Paste your copied Gemini API key below and click <strong className="font-semibold text-zinc-950 dark:text-zinc-100">Add</strong> to verify and save it.
+                          </span>
+                          <button
+                            type="button"
+                            onClick={reopenKeyInstructions}
+                            className="text-[11px] font-medium text-sky-700 dark:text-sky-400 hover:underline underline-offset-2 cursor-pointer shrink-0"
+                          >
+                            View instructions again
+                          </button>
+                        </div>
+                      )}
                       <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
                         Add {def.shortLabel} API key
                       </div>
@@ -571,7 +818,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                             onChange={(e) => setNewLabel(e.target.value)}
                             placeholder="Label (e.g., Personal Key 1)"
                             maxLength={60}
-                            className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-50 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+                            className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                           />
                         </div>
                         <div className="relative sm:col-span-6">
@@ -579,6 +826,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                             API key
                           </label>
                           <input
+                            ref={provider === 'gemini' ? geminiSecretInputRef : undefined}
                             id={`byok-secret-${provider}`}
                             type={showNewKey ? 'text' : 'password'}
                             value={newRawKey}
@@ -586,13 +834,13 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                             placeholder={def.keyPlaceholder}
                             autoComplete="off"
                             spellCheck={false}
-                            className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-2 pl-3 pr-9 font-mono text-sm text-zinc-950 dark:text-zinc-50 placeholder:font-sans placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+                            className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-2 pl-3 pr-9 font-mono text-sm text-zinc-950 dark:text-zinc-200 placeholder:font-sans placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                           />
                           <button
                             type="button"
                             onClick={() => setShowNewKey((prev) => !prev)}
                             aria-label={showNewKey ? 'Hide API key' : 'Show API key'}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200"
                           >
                             {showNewKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                           </button>
@@ -654,7 +902,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                             <button
                               type="button"
                               onClick={() => setConfirmClearProvider(provider)}
-                              className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 underline underline-offset-2"
+                              className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 underline underline-offset-2"
                             >
                               Clear all {def.shortLabel} keys
                             </button>
@@ -698,7 +946,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                                         value={editLabel}
                                         onChange={(e) => setEditLabel(e.target.value)}
                                         maxLength={60}
-                                        className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm text-zinc-950 dark:text-zinc-50 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+                                        className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                                       />
                                     </div>
                                     <div>
@@ -713,13 +961,13 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                                           placeholder={entry.maskedKey}
                                           autoComplete="off"
                                           spellCheck={false}
-                                          className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1.5 pl-3 pr-9 font-mono text-sm text-zinc-950 dark:text-zinc-50 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+                                          className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1.5 pl-3 pr-9 font-mono text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                                         />
                                         <button
                                           type="button"
                                           onClick={() => setShowEditKey((prev) => !prev)}
                                           aria-label={showEditKey ? 'Hide API key' : 'Show API key'}
-                                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200"
                                         >
                                           {showEditKey ? (
                                             <EyeOff className="h-3.5 w-3.5" />
@@ -748,15 +996,15 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                                 <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
                                   <div className="min-w-0 space-y-1">
                                     <div className="flex flex-wrap items-center gap-2">
-                                      <span className="text-sm font-medium text-zinc-950 dark:text-zinc-50 truncate">
+                                      <span className="text-sm font-medium text-zinc-950 dark:text-zinc-200 truncate">
                                         {entry.label}
                                       </span>
                                       <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
                                         {entry.maskedKey}
                                       </span>
                                       {isPreferred && def.supportsRotation && (
-                                        <span className="inline-flex items-center gap-1 text-xs font-medium text-zinc-900 dark:text-zinc-100">
-                                          <Star className="h-3 w-3 fill-zinc-900 text-zinc-900 dark:fill-zinc-100 dark:text-zinc-100" />
+                                        <span className="inline-flex items-center gap-1 text-xs font-medium text-zinc-900 dark:text-zinc-200">
+                                          <Star className="h-3 w-3 fill-zinc-900 text-zinc-900 dark:fill-zinc-200 dark:text-zinc-200" />
                                           Preferred
                                         </span>
                                       )}
@@ -832,89 +1080,100 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                                         >
                                           Delete
                                         </button>
-                                        <button
+                                          <button
+                                            type="button"
+                                            onClick={() => setConfirmRemoveId(null)}
+                                            className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 cursor-pointer"
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <Button
                                           type="button"
-                                          onClick={() => setConfirmRemoveId(null)}
-                                          className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 cursor-pointer"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setConfirmRemoveId(entry.id)}
+                                          aria-label={`Remove ${entry.label}`}
                                         >
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setConfirmRemoveId(entry.id)}
-                                        aria-label={`Remove ${entry.label}`}
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-400" />
-                                      </Button>
-                                    )}
+                                          <Trash2 className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-400" />
+                                        </Button>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── Security disclosure ───────────────────────────────────────────── */}
+        <div className="space-y-1.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+          <p>
+            <strong className="font-medium text-zinc-800 dark:text-zinc-200">Local storage only:</strong> All API keys
+            are stored solely in this browser&apos;s local storage and sent directly per request.
+            They are never written to Firestore, never synced to other devices, and never logged.
+          </p>
+          <p>
+            <strong className="font-medium text-zinc-800 dark:text-zinc-200">Gemini quota note:</strong> Multiple Gemini
+            keys from the same Google Cloud project share the same project-level quota. For
+            independent rotation capacity, use keys from separate projects.
+          </p>
+        </div>
+
+        {/* ── Rotation & fallback controls ─────────────────────────────────── */}
+        <div className="space-y-3 pt-1">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.enableKeyRotation}
+              onChange={(e) => handleConfigChange({ enableKeyRotation: e.target.checked })}
+              className="mt-0.5 h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-950 dark:accent-zinc-200 cursor-pointer"
+            />
+            <span className="text-sm text-zinc-800 dark:text-zinc-200">
+              Automatic BYOK rotation on rate limit or temporary key failure
+              <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                Puts throttled keys in temporary cooldown and tries your next saved key for that
+                provider. Never rotates on safety blocks or invalid prompts.
+              </span>
+            </span>
+          </label>
+
+          {userOwnsKeyMode ? (
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 px-3.5 py-2.5 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+              <strong className="font-medium text-zinc-900 dark:text-zinc-200">
+                Personal API key mode active:
+              </strong>{' '}
+              Once you add your own key, SOTAL never falls back to the app&apos;s default server
+              key. Add another Google account Gemini key or any fallback provider key above if your
+              current key reaches its limit.
             </div>
-          );
-        })}
-      </div>
-
-      {/* ── Security disclosure ───────────────────────────────────────────── */}
-      <div className="space-y-1.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-        <p>
-          <strong className="font-medium text-zinc-800 dark:text-zinc-200">Local storage only:</strong> All API keys
-          are stored solely in this browser&apos;s local storage and sent directly per request.
-          They are never written to Firestore, never synced to other devices, and never logged.
-        </p>
-        <p>
-          <strong className="font-medium text-zinc-800 dark:text-zinc-200">Gemini quota note:</strong> Multiple Gemini
-          keys from the same Google Cloud project share the same project-level quota. For
-          independent rotation capacity, use keys from separate projects.
-        </p>
-      </div>
-
-      {/* ── Rotation & fallback controls ─────────────────────────────────── */}
-      <div className="space-y-3 pt-1">
-        <label className="flex items-start gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={config.enableKeyRotation}
-            onChange={(e) => handleConfigChange({ enableKeyRotation: e.target.checked })}
-            className="mt-0.5 h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-950 dark:accent-zinc-100 cursor-pointer"
-          />
-          <span className="text-sm text-zinc-800 dark:text-zinc-200">
-            Automatic BYOK rotation on rate limit or temporary key failure
-            <span className="block text-xs text-zinc-500 dark:text-zinc-400">
-              Puts throttled keys in temporary cooldown and tries your next saved key for that
-              provider. Never rotates on safety blocks or invalid prompts.
-            </span>
-          </span>
-        </label>
-
-        <label className="flex items-start gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={config.fallbackToServerKey}
-            onChange={(e) => handleConfigChange({ fallbackToServerKey: e.target.checked })}
-            className="mt-0.5 h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-950 dark:accent-zinc-100 cursor-pointer"
-          />
-          <span className="text-sm text-zinc-800 dark:text-zinc-200">
-            Fall back to server <span className="font-mono text-xs">GEMINI_API_KEY</span> when no
-            Gemini BYOK key is available
-            <span className="block text-xs text-zinc-500 dark:text-zinc-400">
-              Ensures uninterrupted AI if no personal Gemini key is saved on this device or all
-              local Gemini keys are in cooldown.
-            </span>
-          </span>
-        </label>
+          ) : (
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config.fallbackToServerKey}
+                onChange={(e) => handleConfigChange({ fallbackToServerKey: e.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-950 dark:accent-zinc-200 cursor-pointer"
+              />
+              <span className="text-sm text-zinc-800 dark:text-zinc-200">
+                Use app default <span className="font-mono text-xs">GEMINI_API_KEY</span> until I
+                add my own key
+                <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                  Allows using SOTAL while skipping setup. Automatically locks off permanently once
+                  you add your own API key.
+                </span>
+              </span>
+            </label>
+          )}
       </div>
     </section>
   );

@@ -127,8 +127,8 @@ export const TopicPickerField: React.FC<TopicPickerFieldProps> = ({
   return (
     <div className={className}>
       <div className="flex items-center justify-between gap-2">
-        <label htmlFor={id} className="block text-xs font-medium text-zinc-700">
-          {label} <span className="font-normal text-zinc-500">(optional)</span>
+        <label htmlFor={id} className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          {label} <span className="font-normal text-zinc-500 dark:text-zinc-400">(optional)</span>
         </label>
         {!creatingMode && !disabled && (
           <button
@@ -137,7 +137,7 @@ export const TopicPickerField: React.FC<TopicPickerFieldProps> = ({
               setError(null);
               setCreatingMode(true);
             }}
-            className="inline-flex items-center gap-1 text-xs font-medium text-zinc-700 hover:text-zinc-950 cursor-pointer"
+            className="inline-flex items-center gap-1 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer"
           >
             <Plus className="h-3 w-3" />
             New topic
@@ -151,7 +151,7 @@ export const TopicPickerField: React.FC<TopicPickerFieldProps> = ({
           value={value}
           disabled={disabled}
           onChange={(e) => handleSelectChange(e.target.value)}
-          className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 focus:border-zinc-950 focus:outline-none disabled:opacity-60"
+          className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none disabled:opacity-60"
         >
           <option value="">{emptyOptionLabel}</option>
           {mergedTopics.map((t) => (
@@ -189,7 +189,7 @@ export const TopicPickerField: React.FC<TopicPickerFieldProps> = ({
                 }
               }}
               placeholder="New topic name (e.g., Week 2: Thermodynamics)"
-              className="min-w-0 flex-1 rounded-md border border-zinc-950 bg-white px-3 py-2 text-sm text-zinc-950 placeholder:text-zinc-400 focus:outline-none"
+              className="min-w-0 flex-1 rounded-md border border-zinc-950 dark:border-zinc-400 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none"
             />
             <Button
               type="button"
@@ -209,12 +209,12 @@ export const TopicPickerField: React.FC<TopicPickerFieldProps> = ({
                 setError(null);
               }}
               aria-label="Cancel new topic"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950 cursor-pointer shrink-0"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer shrink-0"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          {error && <p className="text-xs text-red-700">{error}</p>}
+          {error && <p className="text-xs text-red-700 dark:text-red-400">{error}</p>}
         </div>
       )}
     </div>

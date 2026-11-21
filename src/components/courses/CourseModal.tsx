@@ -66,7 +66,7 @@ export const CourseModal: React.FC<CourseModalProps> = ({
         {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
         <div>
-          <label htmlFor="course-code" className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          <label htmlFor="course-code" className="block text-sm font-medium text-zinc-900 dark:text-zinc-200">
             Course code
           </label>
           <input
@@ -77,12 +77,12 @@ export const CourseModal: React.FC<CourseModalProps> = ({
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="e.g., BUS 115, MGT 101, CS 204"
-            className="mt-1.5 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-50 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+            className="mt-1.5 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
           />
         </div>
 
         <div>
-          <label htmlFor="course-name" className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          <label htmlFor="course-name" className="block text-sm font-medium text-zinc-900 dark:text-zinc-200">
             Course name
           </label>
           <input
@@ -93,13 +93,13 @@ export const CourseModal: React.FC<CourseModalProps> = ({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g., Principles of Microeconomics"
-            className="mt-1.5 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-50 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+            className="mt-1.5 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
           />
         </div>
 
         <div>
           <div className="flex items-center justify-between">
-            <label htmlFor="course-desc" className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            <label htmlFor="course-desc" className="block text-sm font-medium text-zinc-900 dark:text-zinc-200">
               Description <span className="font-normal text-zinc-500 dark:text-zinc-400">(optional)</span>
             </label>
             <span className="text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">
@@ -113,7 +113,7 @@ export const CourseModal: React.FC<CourseModalProps> = ({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Key syllabus focus, semester, or instructor notes..."
-            className="mt-1.5 w-full resize-none rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-50 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-300 focus:outline-none"
+            className="mt-1.5 w-full resize-none rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
           />
         </div>
 

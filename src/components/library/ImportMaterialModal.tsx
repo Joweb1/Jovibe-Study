@@ -385,7 +385,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18, ease: 'easeOut' }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 backdrop-blur-[2px] p-3 sm:p-6"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 dark:bg-black/70 backdrop-blur-[2px] p-3 sm:p-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby="import-material-title"
@@ -396,12 +396,12 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-            className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-zinc-200 bg-white shadow-xl"
+            className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xl"
           >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-6 py-4">
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4">
           <div>
-            <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
               <span className="font-mono">{activeCourse.code}</span>
               <span aria-hidden="true">·</span>
               <span>
@@ -412,7 +412,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                   : 'Step 2 of 2 — Preview, edit & save'}
               </span>
             </div>
-            <h2 id="import-material-title" className="mt-0.5 text-lg font-semibold text-zinc-950">
+            <h2 id="import-material-title" className="mt-0.5 text-lg font-semibold text-zinc-950 dark:text-zinc-200">
               {step === 'preview' ? 'Review extracted content' : 'Add study material'}
             </h2>
           </div>
@@ -421,7 +421,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
             type="button"
             onClick={step === 'extracting' ? handleCancelExtraction : onClose}
             aria-label="Close import dialog"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950 cursor-pointer"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
@@ -439,7 +439,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
           {step === 'input' && (
             <div className="space-y-6">
               {/* Segmented Input Mode Tabs */}
-              <div className="inline-flex flex-wrap gap-1 rounded-md bg-zinc-100 p-1">
+              <div className="inline-flex flex-wrap gap-1 rounded-md bg-zinc-100 dark:bg-zinc-950 p-1">
                 <button
                   type="button"
                   onClick={() => {
@@ -448,8 +448,8 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                   }}
                   className={`inline-flex items-center gap-2 rounded px-3.5 py-2 text-xs font-medium whitespace-nowrap cursor-pointer ${
                     tab === 'document'
-                      ? 'bg-white text-zinc-950 shadow-xs'
-                      : 'text-zinc-600 hover:text-zinc-950'
+                      ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-200'
+                      : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200'
                   }`}
                 >
                   <FileText className="h-3.5 w-3.5" />
@@ -463,8 +463,8 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                   }}
                   className={`inline-flex items-center gap-2 rounded px-3.5 py-2 text-xs font-medium whitespace-nowrap cursor-pointer ${
                     tab === 'photo'
-                      ? 'bg-white text-zinc-950 shadow-xs'
-                      : 'text-zinc-600 hover:text-zinc-950'
+                      ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-200'
+                      : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200'
                   }`}
                 >
                   <Camera className="h-3.5 w-3.5" />
@@ -478,8 +478,8 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                   }}
                   className={`inline-flex items-center gap-2 rounded px-3.5 py-2 text-xs font-medium whitespace-nowrap cursor-pointer ${
                     tab === 'text'
-                      ? 'bg-white text-zinc-950 shadow-xs'
-                      : 'text-zinc-600 hover:text-zinc-950'
+                      ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-200'
+                      : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200'
                   }`}
                 >
                   <TypeIcon className="h-3.5 w-3.5" />
@@ -488,9 +488,9 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
               </div>
 
               {/* Course & Topic selection up front when adding any material or note */}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 border-y border-zinc-200 py-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 border-y border-zinc-200 dark:border-zinc-800 py-4">
                 <div>
-                  <label htmlFor="import-course" className="block text-xs font-medium text-zinc-700">
+                  <label htmlFor="import-course" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                     Course
                   </label>
                   <select
@@ -500,7 +500,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                       setTargetCourseId(e.target.value);
                       setTargetTopicId('');
                     }}
-                    className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 focus:border-zinc-950 focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                   >
                     {courses.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -524,12 +524,12 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
               {/* TAB A: DOCUMENT UPLOAD */}
               {tab === 'document' && (
                 <div className="space-y-5">
-                  <label className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/60 px-6 py-10 text-center hover:border-zinc-500 cursor-pointer">
-                    <Upload className="h-5 w-5 text-zinc-600" />
-                    <span className="mt-3 text-sm font-medium text-zinc-950">
+                  <label className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-950/60 px-6 py-10 text-center hover:border-zinc-500 dark:hover:border-zinc-500 cursor-pointer">
+                    <Upload className="h-5 w-5 text-zinc-600 dark:text-zinc-400" />
+                    <span className="mt-3 text-sm font-medium text-zinc-950 dark:text-zinc-200">
                       {selectedFile ? selectedFile.name : 'Choose a PDF, PowerPoint (.pptx), Markdown, or text file'}
                     </span>
-                    <span className="mt-1 text-xs text-zinc-500">
+                    <span className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                       Selectable PDFs and .pptx slides extract directly without unnecessary vision calls. Original files are discarded after extraction.
                     </span>
                     <input
@@ -541,18 +541,18 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                   </label>
 
                   {inspectingPdf && (
-                    <p className="text-xs text-zinc-600">Inspecting PDF page count...</p>
+                    <p className="text-xs text-zinc-600 dark:text-zinc-400">Inspecting PDF page count...</p>
                   )}
 
                   {pdfTotalPages !== null && (
-                    <div className="space-y-4 border-t border-zinc-200 pt-4">
+                    <div className="space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-zinc-950">
+                        <div className="text-sm font-medium text-zinc-950 dark:text-zinc-200">
                           PDF detected — <span className="font-mono tabular-nums">{pdfTotalPages}</span>{' '}
                           {pdfTotalPages === 1 ? 'page' : 'pages'}
                         </div>
                         {pdfTotalPages > 40 && (
-                          <span className="text-xs text-zinc-600">
+                          <span className="text-xs text-zinc-600 dark:text-zinc-400">
                             Large document: select a chapter or page range for clean, manageable units.
                           </span>
                         )}
@@ -560,7 +560,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
 
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                         <div>
-                          <label htmlFor="pdf-start" className="block text-xs font-medium text-zinc-700">
+                          <label htmlFor="pdf-start" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                             Start page
                           </label>
                           <input
@@ -574,11 +574,11 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                               setPdfStartPage(val);
                               if (val > pdfEndPage) setPdfEndPage(val);
                             }}
-                            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-mono tabular-nums"
+                            className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-1.5 text-sm text-zinc-950 dark:text-zinc-200 font-mono tabular-nums focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                           />
                         </div>
                         <div>
-                          <label htmlFor="pdf-end" className="block text-xs font-medium text-zinc-700">
+                          <label htmlFor="pdf-end" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                             End page
                           </label>
                           <input
@@ -594,16 +594,16 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                               );
                               setPdfEndPage(val);
                             }}
-                            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-mono tabular-nums"
+                            className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-1.5 text-sm text-zinc-950 dark:text-zinc-200 font-mono tabular-nums focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                           />
                         </div>
                         <div className="flex items-end">
-                          <label className="flex items-center gap-2 text-xs text-zinc-700 pb-2 cursor-pointer">
+                          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 pb-2 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={enableScannedOcr}
                               onChange={(e) => setEnableScannedOcr(e.target.checked)}
-                              className="h-4 w-4 accent-zinc-950"
+                              className="h-4 w-4 accent-zinc-950 dark:accent-zinc-200"
                             />
                             Use AI Vision OCR if scanned pages are found
                           </label>
@@ -618,7 +618,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
               {tab === 'photo' && (
                 <div className="space-y-5">
                   <div>
-                    <div className="text-xs font-medium text-zinc-700 mb-2">Material type</div>
+                    <div className="text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-2">Material type</div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       {(
                         [
@@ -637,23 +637,23 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                           onClick={() => setPhotoMode(opt.id)}
                           className={`rounded-md border p-3 text-left cursor-pointer ${
                             photoMode === opt.id
-                              ? 'border-zinc-950 bg-zinc-50'
-                              : 'border-zinc-200 hover:border-zinc-400'
+                              ? 'border-zinc-950 bg-zinc-50 dark:border-zinc-300 dark:bg-zinc-800/80'
+                              : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600'
                           }`}
                         >
-                          <div className="text-sm font-medium text-zinc-950">{opt.label}</div>
-                          <div className="mt-0.5 text-xs text-zinc-500">{opt.desc}</div>
+                          <div className="text-sm font-medium text-zinc-950 dark:text-zinc-200">{opt.label}</div>
+                          <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{opt.desc}</div>
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  <label className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/60 px-6 py-10 text-center hover:border-zinc-500 cursor-pointer">
-                    <Camera className="h-5 w-5 text-zinc-600" />
-                    <span className="mt-3 text-sm font-medium text-zinc-950">
+                  <label className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-950/60 px-6 py-10 text-center hover:border-zinc-500 cursor-pointer">
+                    <Camera className="h-5 w-5 text-zinc-600 dark:text-zinc-400" />
+                    <span className="mt-3 text-sm font-medium text-zinc-950 dark:text-zinc-200">
                       {photoFile ? photoFile.name : 'Upload an image or take a photo'}
                     </span>
-                    <span className="mt-1 text-xs text-zinc-500">
+                    <span className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                       Supports PNG, JPEG, and WebP. Unclear handwriting will be flagged as [unclear: ...] for you to verify.
                     </span>
                     <input
@@ -675,7 +675,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div className="sm:col-span-2">
-                      <label htmlFor="raw-title" className="block text-xs font-medium text-zinc-700">
+                      <label htmlFor="raw-title" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                         Material title
                       </label>
                       <input
@@ -685,11 +685,11 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                         value={rawTitle}
                         onChange={(e) => setRawTitle(e.target.value)}
                         placeholder="e.g., Chapter 4: Contract Formation Notes"
-                        className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                        className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                       />
                     </div>
                     <div>
-                      <label htmlFor="text-type" className="block text-xs font-medium text-zinc-700">
+                      <label htmlFor="text-type" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                         Source type
                       </label>
                       <select
@@ -698,7 +698,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                         onChange={(e) =>
                           setTextInputType(e.target.value as 'typed_notes' | 'pasted_text')
                         }
-                        className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                        className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                       >
                         <option value="pasted_text">Pasted Text</option>
                         <option value="typed_notes">Typed Notes</option>
@@ -708,10 +708,10 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
 
                   <div>
                     <div className="flex items-center justify-between">
-                      <label htmlFor="raw-text" className="block text-xs font-medium text-zinc-700">
+                      <label htmlFor="raw-text" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                         Study content (headings, lists, definitions, or raw text)
                       </label>
-                      <span className="font-mono text-xs text-zinc-400 tabular-nums">
+                      <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">
                         {rawText.length.toLocaleString()} chars
                       </span>
                     </div>
@@ -721,7 +721,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                       value={rawText}
                       onChange={(e) => setRawText(e.target.value)}
                       placeholder="Paste lecture notes, textbook excerpts, or type structured Markdown notes (# Heading, - Bullet, etc.)..."
-                      className="mt-1.5 w-full rounded-md border border-zinc-300 px-3 py-2.5 text-sm leading-relaxed focus:border-zinc-950 focus:outline-none"
+                      className="mt-1.5 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2.5 text-sm leading-relaxed text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -734,16 +734,16 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
             <div className="py-14 text-center space-y-4">
               <div
                 aria-hidden="true"
-                className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-zinc-950 border-t-transparent"
+                className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-zinc-950 dark:border-zinc-200 border-t-transparent dark:border-t-transparent"
               />
-              <div className="text-sm font-medium text-zinc-950">{progressStage}</div>
-              <div className="mx-auto h-1.5 w-full max-w-md overflow-hidden rounded-full bg-zinc-100">
+              <div className="text-sm font-medium text-zinc-950 dark:text-zinc-200">{progressStage}</div>
+              <div className="mx-auto h-1.5 w-full max-w-md overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
                 <div
-                  className="h-full bg-zinc-950 transition-all"
+                  className="h-full bg-zinc-950 dark:bg-zinc-200 transition-all"
                   style={{ width: `${Math.max(8, progressPercent)}%` }}
                 />
               </div>
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 Extracting structured headings, paragraphs, and page/slide boundaries...
               </p>
               <div className="pt-2">
@@ -758,13 +758,13 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
           {step === 'preview' && (
             <form id="save-source-form" onSubmit={handleSaveToCloud} className="space-y-6">
               {uncertainCount > 0 && (
-                <div className="flex items-start gap-3 rounded-md border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-800">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-zinc-900" />
+                <div className="flex items-start gap-3 rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-4 py-3 text-sm text-zinc-800 dark:text-zinc-300">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-zinc-900 dark:text-zinc-200" />
                   <div>
-                    <div className="font-medium text-zinc-950">
+                    <div className="font-medium text-zinc-950 dark:text-zinc-200">
                       {uncertainCount} uncertain {uncertainCount === 1 ? 'word or phrase' : 'words or phrases'} marked for review
                     </div>
-                    <p className="mt-0.5 text-xs text-zinc-600">
+                    <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
                       Look for <span className="font-mono">[unclear: ...]</span> or{' '}
                       <span className="font-mono">[illegible]</span> markers below and correct them before saving.
                     </p>
@@ -773,7 +773,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
               )}
 
               {warnings.length > 0 && (
-                <div className="space-y-1 border-y border-zinc-200 py-3 text-xs text-zinc-600">
+                <div className="space-y-1 border-y border-zinc-200 dark:border-zinc-800 py-3 text-xs text-zinc-600 dark:text-zinc-400">
                   {warnings.map((w, idx) => (
                     <div key={idx}>{w}</div>
                   ))}
@@ -783,7 +783,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
               {/* Organize metadata */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="sm:col-span-2">
-                  <label htmlFor="preview-title" className="block text-xs font-medium text-zinc-700">
+                  <label htmlFor="preview-title" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                     Material title
                   </label>
                   <input
@@ -793,19 +793,19 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                     maxLength={SCHEMA_LIMITS.SOURCE_TITLE_MAX}
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="preview-type" className="block text-xs font-medium text-zinc-700">
+                  <label htmlFor="preview-type" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                     Material type
                   </label>
                   <select
                     id="preview-type"
                     value={materialType}
                     onChange={(e) => setMaterialType(e.target.value as MaterialType)}
-                    className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                   >
                     {(Object.keys(MATERIAL_TYPE_LABELS) as MaterialType[]).map((key) => (
                       <option key={key} value={key}>
@@ -816,7 +816,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                 </div>
 
                 <div>
-                  <label htmlFor="preview-course" className="block text-xs font-medium text-zinc-700">
+                  <label htmlFor="preview-course" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                     Course
                   </label>
                   <select
@@ -826,7 +826,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                       setTargetCourseId(e.target.value);
                       setTargetTopicId('');
                     }}
-                    className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-950 focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                   >
                     {courses.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -850,15 +850,15 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
               </div>
 
               {/* Editor Mode Toggle */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 pt-4">
-                <div className="inline-flex gap-1 rounded-md bg-zinc-100 p-1">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-4">
+                <div className="inline-flex gap-1 rounded-md bg-zinc-100 dark:bg-zinc-950 p-1">
                   <button
                     type="button"
                     onClick={() => handleSwitchPreviewMode('sections')}
                     className={`rounded px-3 py-1.5 text-xs font-medium cursor-pointer ${
                       previewMode === 'sections'
-                        ? 'bg-white text-zinc-950 shadow-xs'
-                        : 'text-zinc-600 hover:text-zinc-950'
+                        ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-200'
+                        : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200'
                     }`}
                   >
                     Structured Sections ({sections.length})
@@ -868,15 +868,15 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                     onClick={() => handleSwitchPreviewMode('raw')}
                     className={`rounded px-3 py-1.5 text-xs font-medium cursor-pointer ${
                       previewMode === 'raw'
-                        ? 'bg-white text-zinc-950 shadow-xs'
-                        : 'text-zinc-600 hover:text-zinc-950'
+                        ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-200'
+                        : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200'
                     }`}
                   >
                     Full Text Editor
                   </button>
                 </div>
 
-                <div className="font-mono text-xs text-zinc-500 tabular-nums">
+                <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
                   {fullText.length.toLocaleString()} / {SCHEMA_LIMITS.SOURCE_CONTENT_MAX.toLocaleString()} chars
                 </div>
               </div>
@@ -885,18 +885,18 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
               {previewMode === 'sections' ? (
                 <div className="space-y-4">
                   {sections.length === 0 ? (
-                    <p className="text-sm text-zinc-500 py-4">
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400 py-4">
                       All sections were removed. Switch to Full Text Editor or go back to re-import.
                     </p>
                   ) : (
                     sections.map((sec, idx) => (
                       <div
                         key={sec.id}
-                        className="rounded-md border border-zinc-200 bg-white p-4 space-y-2.5"
+                        className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4 space-y-2.5"
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <span className="font-mono text-xs text-zinc-400 tabular-nums shrink-0">
+                            <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500 tabular-nums shrink-0">
                               {String(idx + 1).padStart(2, '0')}
                             </span>
                             <input
@@ -906,12 +906,12 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                                 handleUpdateSection(idx, { heading: e.target.value })
                               }
                               aria-label={`Section ${idx + 1} heading`}
-                              className="w-full border-b border-transparent bg-transparent py-0.5 text-sm font-semibold text-zinc-950 focus:border-zinc-950 focus:outline-none"
+                              className="w-full border-b border-transparent bg-transparent py-0.5 text-sm font-semibold text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                             />
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             {sec.pageOrSlide && (
-                              <span className="font-mono text-xs text-zinc-400 tabular-nums">
+                              <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">
                                 {materialType === 'slides' ? `Slide ${sec.pageOrSlide}` : `p. ${sec.pageOrSlide}`}
                               </span>
                             )}
@@ -919,7 +919,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                               type="button"
                               onClick={() => handleRemoveSection(idx)}
                               aria-label={`Remove section ${sec.heading}`}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-700 dark:text-zinc-500 dark:hover:bg-red-950/40 dark:hover:text-red-400 cursor-pointer"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -930,7 +930,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                           value={sec.content}
                           onChange={(e) => handleUpdateSection(idx, { content: e.target.value })}
                           aria-label={`Section ${idx + 1} content`}
-                          className="w-full rounded border border-zinc-200 bg-zinc-50/40 px-3 py-2 text-sm leading-relaxed text-zinc-800 focus:border-zinc-950 focus:bg-white focus:outline-none"
+                          className="w-full rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-900 px-3 py-2 text-sm leading-relaxed text-zinc-800 dark:text-zinc-300 focus:border-zinc-950 dark:focus:border-zinc-400 focus:bg-white dark:focus:bg-zinc-950 focus:outline-none"
                         />
                       </div>
                     ))
@@ -941,7 +941,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                   rows={16}
                   value={fullText}
                   onChange={(e) => setFullText(e.target.value)}
-                  className="w-full rounded-md border border-zinc-300 px-3.5 py-3 font-mono text-xs leading-relaxed text-zinc-900 focus:border-zinc-950 focus:outline-none"
+                  className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3.5 py-3 font-mono text-xs leading-relaxed text-zinc-900 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                 />
               )}
             </form>
@@ -949,7 +949,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4">
+        <div className="flex items-center justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 px-6 py-4">
           {step === 'input' && (
             <>
               <Button variant="secondary" onClick={onClose}>
@@ -962,7 +962,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
           )}
 
           {step === 'extracting' && (
-            <div className="w-full text-right text-xs text-zinc-500">
+            <div className="w-full text-right text-xs text-zinc-500 dark:text-zinc-400">
               Processing locally and discarding raw file after save...
             </div>
           )}

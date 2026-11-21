@@ -31,6 +31,7 @@ import { FlashcardsSession } from '../components/practice/FlashcardsSession';
 import { CbtSession } from '../components/practice/CbtSession';
 import { FillGapSession } from '../components/practice/FillGapSession';
 import { ExamPrepSession } from '../components/practice/ExamPrepSession';
+import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { EmptyState, ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
 
 type PracticeMethodId = 'flashcards' | 'cbt' | 'fill_in_the_gap' | 'exam_prep';
@@ -43,7 +44,7 @@ const PracticeCardIllustration: React.FC<{ id: PracticeMethodId }> = ({ id }) =>
           viewBox="0 0 140 120"
           fill="none"
           aria-hidden="true"
-          className="pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 text-zinc-900 opacity-[0.09] transition-all duration-300 group-hover:opacity-[0.16] group-hover:scale-105"
+          className="pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 text-zinc-900 dark:text-zinc-200 opacity-[0.09] dark:opacity-[0.11] transition-all duration-300 group-hover:opacity-[0.16] dark:group-hover:opacity-[0.2] group-hover:scale-105"
         >
           <rect
             x="16"
@@ -90,7 +91,7 @@ const PracticeCardIllustration: React.FC<{ id: PracticeMethodId }> = ({ id }) =>
           viewBox="0 0 140 120"
           fill="none"
           aria-hidden="true"
-          className="pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 text-zinc-900 opacity-[0.09] transition-all duration-300 group-hover:opacity-[0.16] group-hover:scale-105"
+          className="pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 text-zinc-900 dark:text-zinc-200 opacity-[0.09] dark:opacity-[0.11] transition-all duration-300 group-hover:opacity-[0.16] dark:group-hover:opacity-[0.2] group-hover:scale-105"
         >
           <rect x="24" y="14" width="92" height="94" rx="10" stroke="currentColor" strokeWidth="2.5" />
           <circle cx="44" cy="38" r="7" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="2.5" />
@@ -108,7 +109,7 @@ const PracticeCardIllustration: React.FC<{ id: PracticeMethodId }> = ({ id }) =>
           viewBox="0 0 140 120"
           fill="none"
           aria-hidden="true"
-          className="pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 text-zinc-900 opacity-[0.09] transition-all duration-300 group-hover:opacity-[0.16] group-hover:scale-105"
+          className="pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 text-zinc-900 dark:text-zinc-200 opacity-[0.09] dark:opacity-[0.11] transition-all duration-300 group-hover:opacity-[0.16] dark:group-hover:opacity-[0.2] group-hover:scale-105"
         >
           <line x1="20" y1="30" x2="112" y2="30" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
           <line x1="20" y1="52" x2="46" y2="52" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
@@ -142,7 +143,7 @@ const PracticeCardIllustration: React.FC<{ id: PracticeMethodId }> = ({ id }) =>
           viewBox="0 0 140 120"
           fill="none"
           aria-hidden="true"
-          className="pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 text-zinc-900 opacity-[0.09] transition-all duration-300 group-hover:opacity-[0.16] group-hover:scale-105"
+          className="pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 text-zinc-900 dark:text-zinc-200 opacity-[0.09] dark:opacity-[0.11] transition-all duration-300 group-hover:opacity-[0.16] dark:group-hover:opacity-[0.2] group-hover:scale-105"
         >
           <rect
             x="54"
@@ -226,26 +227,33 @@ const PRACTICE_METHODS: Array<{
 type ActiveSessionState =
   | {
       kind: 'flashcards';
+      sessionId: string;
+      timeLimitMinutes: number;
       topicIds: string[];
       cards: FlashcardItem[];
       references: SourceReference[];
     }
   | {
       kind: 'cbt';
+      sessionId: string;
+      timeLimitMinutes: number;
       topicIds: string[];
       mode: 'practice' | 'exam';
-      examMinutes: number;
       questions: CbtQuestionItem[];
       references: SourceReference[];
     }
   | {
       kind: 'fill_in_the_gap';
+      sessionId: string;
+      timeLimitMinutes: number;
       topicIds: string[];
       items: FillGapItem[];
       references: SourceReference[];
     }
   | {
       kind: 'exam_prep';
+      sessionId: string;
+      timeLimitMinutes: number;
       topicIds: string[];
       difficulty: DifficultyLevel;
       totalQuestions: number;
@@ -254,12 +262,28 @@ type ActiveSessionState =
       references: SourceReference[];
     };
 
+const ACTIVE_TIMED_SESSION_PREFIX = 'sotal_active_practice_session_v1:';
+
+function makePracticeSessionId(kind: PracticeMethodId): string {
+  return `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getActiveSessionStorageKey(userId: string, courseId: string): string {
+  return `${ACTIVE_TIMED_SESSION_PREFIX}${userId}:${courseId}`;
+}
+
 export const PracticePage: React.FC = () => {
   const { user, profile } = useAuth();
-  const { activeCourse, topics, coursesLoading } = useCourses();
+  const {
+    activeCourse,
+    activeContentOwnerId,
+    activeCourseAccessRevoked,
+    topics,
+    coursesLoading,
+  } = useCourses();
   const { navigate } = useRouter();
   const { setHideHeader, setHideBottomNav } = useWorkspaceUi();
-  const { sources } = useCourseSources(user?.uid, activeCourse?.id);
+  const { sources } = useCourseSources(activeContentOwnerId, activeCourse?.id);
 
   const prefs = profile?.preferences ?? DEFAULT_USER_PREFERENCES;
 
@@ -267,6 +291,43 @@ export const PracticePage: React.FC = () => {
   const [activeSession, setActiveSession] = useState<ActiveSessionState | null>(null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const clearPersistedTimedSession = () => {
+    if (!user || !activeCourse || typeof window === 'undefined') return;
+    try {
+      window.localStorage.removeItem(getActiveSessionStorageKey(user.uid, activeCourse.id));
+    } catch {
+      // Ignore storage errors
+    }
+  };
+
+  // Restore any in-progress timed session after a browser refresh/reopen so timers cannot be bypassed
+  useEffect(() => {
+    if (!user || !activeCourse || typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(getActiveSessionStorageKey(user.uid, activeCourse.id));
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as ActiveSessionState;
+      if (parsed && parsed.sessionId && parsed.timeLimitMinutes > 0 && parsed.kind) {
+        setActiveSession(parsed);
+      }
+    } catch {
+      // Ignore malformed stored session
+    }
+  }, [user?.uid, activeCourse?.id]);
+
+  // Persist active timed sessions in localStorage
+  useEffect(() => {
+    if (!user || !activeCourse || typeof window === 'undefined') return;
+    const key = getActiveSessionStorageKey(user.uid, activeCourse.id);
+    if (activeSession && activeSession.timeLimitMinutes > 0) {
+      try {
+        window.localStorage.setItem(key, JSON.stringify(activeSession));
+      } catch {
+        // Ignore storage quota errors
+      }
+    }
+  }, [activeSession, user?.uid, activeCourse?.id]);
 
   const hasBackNavView =
     !coursesLoading && Boolean(activeCourse) && Boolean(user) && Boolean(selectedMethod || activeSession);
@@ -287,11 +348,11 @@ export const PracticePage: React.FC = () => {
   if (!activeCourse || !user) {
     return (
       <div>
-        <div className="border-b border-zinc-200 pb-6">
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950">
+        <div className="border-b border-zinc-200 dark:border-zinc-800 pb-6">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
             Practice
           </h1>
-          <p className="mt-1.5 text-sm text-zinc-600">
+          <p className="mt-1.5 text-sm text-zinc-600 dark:text-zinc-400">
             Four focused learning methods grounded in your course materials.
           </p>
         </div>
@@ -305,9 +366,15 @@ export const PracticePage: React.FC = () => {
     );
   }
 
+  if (activeCourseAccessRevoked) {
+    return <RevokedCourseNotice course={activeCourse} pageTitle="Practice" />;
+  }
+
   const handleStartPractice = async (methodId: PracticeMethodId, config: PracticeConfig) => {
     setGenerating(true);
     setError(null);
+    const sessionId = makePracticeSessionId(methodId);
+    const timeLimitMinutes = Math.max(0, Math.round(config.timeLimitMinutes || 0));
     try {
       if (methodId === 'flashcards') {
         const res = await generateFlashcardsDeck({
@@ -321,6 +388,8 @@ export const PracticePage: React.FC = () => {
         });
         setActiveSession({
           kind: 'flashcards',
+          sessionId,
+          timeLimitMinutes,
           topicIds: config.topicIds,
           cards: res.cards,
           references: res.references,
@@ -337,9 +406,10 @@ export const PracticePage: React.FC = () => {
         });
         setActiveSession({
           kind: 'cbt',
+          sessionId,
+          timeLimitMinutes,
           topicIds: config.topicIds,
           mode: config.cbtMode || 'practice',
-          examMinutes: config.examMinutes || 15,
           questions: res.questions,
           references: res.references,
         });
@@ -355,6 +425,8 @@ export const PracticePage: React.FC = () => {
         });
         setActiveSession({
           kind: 'fill_in_the_gap',
+          sessionId,
+          timeLimitMinutes,
           topicIds: config.topicIds,
           items: res.items,
           references: res.references,
@@ -373,6 +445,8 @@ export const PracticePage: React.FC = () => {
         });
         setActiveSession({
           kind: 'exam_prep',
+          sessionId,
+          timeLimitMinutes,
           topicIds: config.topicIds,
           difficulty: config.difficulty,
           totalQuestions: config.count,
@@ -388,22 +462,28 @@ export const PracticePage: React.FC = () => {
     }
   };
 
+  const handleExitSession = () => {
+    clearPersistedTimedSession();
+    setActiveSession(null);
+    setSelectedMethod(null);
+  };
+
   if (activeSession) {
     if (activeSession.kind === 'flashcards') {
       return (
         <FlashcardsSession
           userId={user.uid}
           course={activeCourse}
+          sessionId={activeSession.sessionId}
+          timeLimitMinutes={activeSession.timeLimitMinutes}
           topicIds={activeSession.topicIds}
           initialCards={activeSession.cards}
           references={activeSession.references}
           voiceEnabled={prefs.voiceEnabled}
           ttsVoice={prefs.ttsVoice}
           voiceRate={prefs.voiceRate}
-          onExit={() => {
-            setActiveSession(null);
-            setSelectedMethod(null);
-          }}
+          onSessionComplete={clearPersistedTimedSession}
+          onExit={handleExitSession}
         />
       );
     }
@@ -412,15 +492,14 @@ export const PracticePage: React.FC = () => {
         <CbtSession
           userId={user.uid}
           course={activeCourse}
+          sessionId={activeSession.sessionId}
+          timeLimitMinutes={activeSession.timeLimitMinutes}
           topicIds={activeSession.topicIds}
           mode={activeSession.mode}
-          examMinutes={activeSession.examMinutes}
           questions={activeSession.questions}
           references={activeSession.references}
-          onExit={() => {
-            setActiveSession(null);
-            setSelectedMethod(null);
-          }}
+          onSessionComplete={clearPersistedTimedSession}
+          onExit={handleExitSession}
         />
       );
     }
@@ -429,14 +508,14 @@ export const PracticePage: React.FC = () => {
         <FillGapSession
           userId={user.uid}
           course={activeCourse}
+          sessionId={activeSession.sessionId}
+          timeLimitMinutes={activeSession.timeLimitMinutes}
           topicIds={activeSession.topicIds}
           model={prefs.defaultModel}
           items={activeSession.items}
           references={activeSession.references}
-          onExit={() => {
-            setActiveSession(null);
-            setSelectedMethod(null);
-          }}
+          onSessionComplete={clearPersistedTimedSession}
+          onExit={handleExitSession}
         />
       );
     }
@@ -444,6 +523,8 @@ export const PracticePage: React.FC = () => {
       <ExamPrepSession
         userId={user.uid}
         course={activeCourse}
+        sessionId={activeSession.sessionId}
+        timeLimitMinutes={activeSession.timeLimitMinutes}
         sources={sources}
         topicIds={activeSession.topicIds}
         difficulty={activeSession.difficulty}
@@ -455,10 +536,8 @@ export const PracticePage: React.FC = () => {
         voiceRate={prefs.voiceRate}
         firstQuestion={activeSession.firstQuestion}
         references={activeSession.references}
-        onExit={() => {
-          setActiveSession(null);
-          setSelectedMethod(null);
-        }}
+        onSessionComplete={clearPersistedTimedSession}
+        onExit={handleExitSession}
       />
     );
   }
@@ -492,8 +571,8 @@ export const PracticePage: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <div className="border-b border-zinc-200 pb-5">
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950">
+      <div className="border-b border-zinc-200 dark:border-zinc-800 pb-5">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
           Practice
         </h1>
       </div>
@@ -508,18 +587,18 @@ export const PracticePage: React.FC = () => {
               key={method.id}
               type="button"
               onClick={() => setSelectedMethod(method.id)}
-              className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6 min-h-[152px] sm:min-h-[176px] flex flex-col justify-between text-left transition-all duration-200 hover:border-zinc-900 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99] cursor-pointer"
+              className="group relative overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6 min-h-[152px] sm:min-h-[176px] flex flex-col justify-between text-left transition-all duration-200 hover:border-zinc-900 dark:hover:border-zinc-600 hover:shadow-md dark:hover:shadow-black/30 hover:-translate-y-0.5 active:scale-[0.99] cursor-pointer"
             >
               <PracticeCardIllustration id={method.id} />
 
               <div className="relative z-10 flex items-start justify-between gap-2">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-950 text-white shadow-xs transition-transform duration-200 group-hover:scale-105">
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950 shadow-xs transition-transform duration-200 group-hover:scale-105">
                   <Icon className="h-5 w-5" />
                 </span>
-                <ArrowUpRight className="h-4 w-4 text-zinc-300 transition-all duration-200 group-hover:text-zinc-950 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                <ArrowUpRight className="h-4 w-4 text-zinc-300 dark:text-zinc-600 transition-all duration-200 group-hover:text-zinc-950 dark:group-hover:text-zinc-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
               </div>
 
-              <h2 className="relative z-10 mt-6 font-display text-base sm:text-lg font-semibold tracking-tight text-zinc-950">
+              <h2 className="relative z-10 mt-6 font-display text-base sm:text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
                 {method.title}
               </h2>
             </button>

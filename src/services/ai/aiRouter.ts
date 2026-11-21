@@ -1,12 +1,15 @@
 import {
   buildProviderCandidates,
-  getByokConfig,
+  canUseServerFallbackKey,
+  hasUserEnteredOwnKey,
+  listAllStoredApiKeys,
   listStoredApiKeys,
   listUsableApiKeys,
   recordApiKeyFailure,
   recordApiKeySuccess,
   type StoredApiKey,
 } from './keyManager';
+import { emitApiKeyLimitReached } from './keyLimitBus';
 import {
   AiServiceError,
   isAiServiceError,
@@ -81,8 +84,7 @@ export async function buildRoutePlan(task: AiTask): Promise<RouteAttempt[]> {
       for (const candidate of byok) {
         plan.push(candidate);
       }
-      const config = getByokConfig();
-      if (config.fallbackToServerKey) {
+      if (canUseServerFallbackKey()) {
         const serverAvailable = await checkServerFallbackStatus();
         if (serverAvailable) {
           plan.push({
@@ -139,14 +141,42 @@ export async function runAiTask<T>(
 
   const plan = await buildRoutePlan(params.task);
   if (plan.length === 0) {
-    throw new AiServiceError(unavailableMessage(params.task, true), 'NO_API_KEY', {
-      retryable: false,
-    });
+    const chain = PROVIDER_CHAINS[params.task];
+    const allSavedForTask = listAllStoredApiKeys().filter((k) => chain.includes(k.provider));
+    const hasCoolingOrExhaustedKeys = allSavedForTask.some(
+      (k) =>
+        k.status === 'quota_exceeded' ||
+        k.status === 'cooldown' ||
+        (k.cooldownUntilMs !== null && k.cooldownUntilMs > Date.now())
+    );
+    const msg = unavailableMessage(params.task, !hasCoolingOrExhaustedKeys);
+    if (hasUserEnteredOwnKey() && (hasCoolingOrExhaustedKeys || allSavedForTask.length > 0)) {
+      emitApiKeyLimitReached({
+        provider: allSavedForTask[0]?.provider ?? 'gemini',
+        task: params.task,
+        reason: 'all_keys_cooling_down',
+        message: msg,
+      });
+    }
+    throw new AiServiceError(
+      msg,
+      hasCoolingOrExhaustedKeys ? 'QUOTA_EXHAUSTED' : 'NO_API_KEY',
+      {
+        retryable: hasCoolingOrExhaustedKeys,
+      }
+    );
   }
 
   let lastError: AiServiceError | null = null;
+  let sawLimitError = false;
+  let limitProvider: AiProvider = 'gemini';
+  const skippedProviders = new Set<AiProvider>();
 
   for (const attempt of plan) {
+    if (skippedProviders.has(attempt.provider)) {
+      continue;
+    }
+
     if (params.signal?.aborted) {
       throw new AiServiceError('Request cancelled.', 'ABORTED', {
         provider: attempt.provider,
@@ -188,7 +218,10 @@ export async function runAiTask<T>(
           throw error;
         }
 
-        if (attempt.keyId) {
+        const isProviderLevelFailure =
+          error.code === 'VALIDATION_ERROR' || error.code === 'MODEL_UNAVAILABLE';
+
+        if (attempt.keyId && !isProviderLevelFailure) {
           recordApiKeyFailure(
             attempt.keyId,
             error.code,
@@ -199,11 +232,21 @@ export async function runAiTask<T>(
           );
         }
 
+        if (
+          attempt.kind === 'byok' &&
+          (error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED')
+        ) {
+          sawLimitError = true;
+          limitProvider = attempt.provider;
+        }
+
         lastError = error;
 
-        // Structured-output validation failures are model-level: another key
-        // on the same provider will not help, so advance to the next provider.
-        if (error.code === 'VALIDATION_ERROR') {
+        // Structured-output validation and model-unavailable failures are
+        // provider/model-level: trying sibling keys on the same provider will
+        // not help, so skip the rest of this provider and move to the next.
+        if (isProviderLevelFailure) {
+          skippedProviders.add(attempt.provider);
           break;
         }
 
@@ -216,19 +259,35 @@ export async function runAiTask<T>(
           continue;
         }
 
-        // Invalid key, rate limit, quota, model missing, or transient retries
-        // exhausted → move to the next key/provider.
+        // Invalid key, rate limit, quota, or transient retries exhausted →
+        // move to the next key/provider.
         break;
       }
     }
   }
 
-  throw (
+  const finalError =
     lastError ??
     new AiServiceError(unavailableMessage(params.task, false), 'PROVIDER_EXHAUSTED', {
       retryable: true,
-    })
-  );
+    });
+
+  if (
+    hasUserEnteredOwnKey() &&
+    (sawLimitError ||
+      finalError.code === 'RATE_LIMIT' ||
+      finalError.code === 'QUOTA_EXHAUSTED' ||
+      finalError.code === 'PROVIDER_EXHAUSTED')
+  ) {
+    emitApiKeyLimitReached({
+      provider: limitProvider,
+      task: params.task,
+      reason: finalError.code === 'RATE_LIMIT' ? 'rate_limit' : 'quota_exhausted',
+      message: finalError.message,
+    });
+  }
+
+  throw finalError;
 }
 
 export interface ProviderReadiness {

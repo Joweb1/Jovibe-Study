@@ -1,5 +1,12 @@
 import type { GeminiTtsVoice } from '../../types/models';
+import { getCachedTutorAudio, saveCachedTutorAudio } from '../local/indexedDb';
 import { synthesizeSpeechWithClient } from './geminiClient';
+
+export interface AudioPersistenceMeta {
+  userId: string;
+  courseId: string;
+  conversationId: string;
+}
 
 const MAX_SPEECH_CHARS = 3200;
 
@@ -36,14 +43,13 @@ export function prepareTextForSpeech(markdown: string): string {
     : `${truncated}...`;
 }
 
-function base64ToBlobUrl(base64: string, mimeType = 'audio/wav'): string {
+function base64ToBlob(base64: string, mimeType = 'audio/wav'): Blob {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
   }
-  const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
+  return new Blob([bytes], { type: mimeType });
 }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused';
@@ -97,6 +103,7 @@ class GeminiAudioPlayer {
   private cache = new Map<string, string>();
   private listeners = new Set<PlaybackListener>();
   private abortController: AbortController | null = null;
+  private playbackToken = 0;
   private state: PlaybackState = {
     activeId: null,
     status: 'idle',
@@ -169,6 +176,7 @@ class GeminiAudioPlayer {
   }
 
   stop(): void {
+    this.playbackToken += 1;
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
@@ -194,9 +202,21 @@ class GeminiAudioPlayer {
     }
   }
 
+  clearMemoryCache(): void {
+    this.stop();
+    for (const url of this.cache.values()) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // Ignore revoke errors
+      }
+    }
+    this.cache.clear();
+  }
+
   /**
-   * Pre-synthesizes Gemini 3.8 TTS audio for a message and caches its Blob URL
-   * without starting playback yet, returning the audio duration when available.
+   * Pre-synthesizes TTS audio for a message and caches its Blob URL (and optionally
+   * persists the audio Blob in IndexedDB mapped to `params.id`) without starting playback yet.
    */
   async preloadMessage(params: {
     id: string;
@@ -204,14 +224,27 @@ class GeminiAudioPlayer {
     voiceName: GeminiTtsVoice;
     style?: string;
     signal?: AbortSignal;
+    persist?: AudioPersistenceMeta;
   }): Promise<{ blobUrl: string; durationSeconds: number | null }> {
     const speechText = prepareTextForSpeech(params.text);
     if (!speechText) {
       throw new Error('There is no readable text in this response.');
     }
 
-    const cacheKey = `${params.id}::${params.voiceName}`;
+    const cacheKey = params.persist ? params.id : `${params.id}::${params.voiceName}`;
     let blobUrl = this.cache.get(cacheKey);
+
+    if (!blobUrl && params.persist) {
+      const persisted = await getCachedTutorAudio(params.id);
+      if (params.signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+      if (persisted?.audioBlob) {
+        blobUrl = URL.createObjectURL(persisted.audioBlob);
+        this.cache.set(cacheKey, blobUrl);
+      }
+    }
+
     if (!blobUrl) {
       const res = await synthesizeSpeechWithClient({
         text: speechText,
@@ -224,8 +257,21 @@ class GeminiAudioPlayer {
         throw new DOMException('Aborted', 'AbortError');
       }
 
-      blobUrl = base64ToBlobUrl(res.audioBase64, res.mimeType);
+      const blob = base64ToBlob(res.audioBase64, res.mimeType);
+      blobUrl = URL.createObjectURL(blob);
       this.cache.set(cacheKey, blobUrl);
+
+      if (params.persist) {
+        void saveCachedTutorAudio({
+          messageId: params.id,
+          userId: params.persist.userId,
+          courseId: params.persist.courseId,
+          conversationId: params.persist.conversationId,
+          voiceName: params.voiceName,
+          mimeType: res.mimeType || 'audio/wav',
+          audioBlob: blob,
+        });
+      }
     }
 
     const durationSeconds = await probeBlobDuration(blobUrl);
@@ -238,9 +284,13 @@ class GeminiAudioPlayer {
     voiceName: GeminiTtsVoice;
     playbackRate?: number;
     style?: string;
+    persist?: AudioPersistenceMeta;
   }): Promise<boolean> {
-    // Toggle pause/resume if clicking the currently active item with same voice
-    if (this.state.activeId === params.id && this.state.voiceName === params.voiceName) {
+    // Toggle pause/resume if clicking the currently active item
+    if (
+      this.state.activeId === params.id &&
+      (Boolean(params.persist) || this.state.voiceName === params.voiceName)
+    ) {
       if (this.state.status === 'playing' || this.state.status === 'paused') {
         this.togglePause();
         return this.state.status === 'playing';
@@ -252,22 +302,42 @@ class GeminiAudioPlayer {
     }
 
     this.stop();
+    const currentToken = this.playbackToken;
 
-    const speechText = prepareTextForSpeech(params.text);
-    if (!speechText) {
-      this.emit({
-        activeId: params.id,
-        status: 'idle',
-        voiceName: params.voiceName,
-        error: 'There is no readable text in this response.',
-      });
-      return false;
+    const cacheKey = params.persist ? params.id : `${params.id}::${params.voiceName}`;
+    let blobUrl = this.cache.get(cacheKey);
+    let resolvedVoice: GeminiTtsVoice = params.voiceName;
+
+    // Prime audio element synchronously inside the user click gesture before any async work
+    if (!blobUrl) {
+      this.unlockForAutoplay();
     }
 
-    const cacheKey = `${params.id}::${params.voiceName}`;
-    let blobUrl = this.cache.get(cacheKey);
+    // Check browser-local IndexedDB cache first so refreshed pages replay instantly without regenerating
+    if (!blobUrl && params.persist) {
+      const persisted = await getCachedTutorAudio(params.id);
+      if (currentToken !== this.playbackToken) return false;
+      if (persisted?.audioBlob) {
+        blobUrl = URL.createObjectURL(persisted.audioBlob);
+        this.cache.set(cacheKey, blobUrl);
+        if (persisted.voiceName) {
+          resolvedVoice = persisted.voiceName as GeminiTtsVoice;
+        }
+      }
+    }
 
     if (!blobUrl) {
+      const speechText = prepareTextForSpeech(params.text);
+      if (!speechText) {
+        this.emit({
+          activeId: params.id,
+          status: 'idle',
+          voiceName: params.voiceName,
+          error: 'There is no readable text in this response.',
+        });
+        return false;
+      }
+
       const controller = new AbortController();
       this.abortController = controller;
       this.emit({
@@ -287,8 +357,21 @@ class GeminiAudioPlayer {
 
         if (controller.signal.aborted) return false;
 
-        blobUrl = base64ToBlobUrl(res.audioBase64, res.mimeType);
+        const blob = base64ToBlob(res.audioBase64, res.mimeType);
+        blobUrl = URL.createObjectURL(blob);
         this.cache.set(cacheKey, blobUrl);
+
+        if (params.persist) {
+          void saveCachedTutorAudio({
+            messageId: params.id,
+            userId: params.persist.userId,
+            courseId: params.persist.courseId,
+            conversationId: params.persist.conversationId,
+            voiceName: params.voiceName,
+            mimeType: res.mimeType || 'audio/wav',
+            audioBlob: blob,
+          });
+        }
       } catch (err) {
         if (controller.signal.aborted) return false;
         const message =
@@ -331,7 +414,7 @@ class GeminiAudioPlayer {
       this.emit({
         activeId: params.id,
         status: 'playing',
-        voiceName: params.voiceName,
+        voiceName: resolvedVoice,
         error: null,
       });
       return true;

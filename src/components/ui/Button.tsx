@@ -11,13 +11,13 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    'bg-zinc-950 text-white border border-zinc-950 hover:bg-zinc-800 active:bg-zinc-900 disabled:bg-zinc-300 disabled:border-zinc-300 disabled:text-zinc-500 dark:bg-zinc-100 dark:text-zinc-950 dark:border-zinc-100 dark:hover:bg-zinc-200 dark:active:bg-zinc-300 dark:disabled:bg-zinc-800 dark:disabled:border-zinc-800 dark:disabled:text-zinc-600',
+    'bg-zinc-950 text-white border border-zinc-950 hover:bg-zinc-800 active:bg-zinc-900 disabled:bg-zinc-300 disabled:border-zinc-300 disabled:text-zinc-500 dark:bg-zinc-200 dark:text-zinc-950 dark:border-zinc-200 dark:hover:bg-zinc-300 dark:active:bg-zinc-400 dark:disabled:bg-zinc-800 dark:disabled:border-zinc-800 dark:disabled:text-zinc-500',
   secondary:
-    'bg-white text-zinc-900 border border-zinc-300 hover:bg-zinc-50 hover:border-zinc-400 active:bg-zinc-100 disabled:text-zinc-400 disabled:border-zinc-200 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 dark:hover:border-zinc-600 dark:active:bg-zinc-800 dark:disabled:text-zinc-600 dark:disabled:border-zinc-800',
+    'bg-white text-zinc-900 border border-zinc-300 hover:bg-zinc-50 hover:border-zinc-400 active:bg-zinc-100 disabled:text-zinc-400 disabled:border-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-800 dark:hover:border-zinc-600 dark:active:bg-zinc-800 dark:disabled:text-zinc-600 dark:disabled:border-zinc-800',
   ghost:
-    'bg-transparent text-zinc-700 border border-transparent hover:bg-zinc-100 hover:text-zinc-950 active:bg-zinc-200 disabled:text-zinc-400 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50 dark:active:bg-zinc-700 dark:disabled:text-zinc-600',
+    'bg-transparent text-zinc-700 border border-transparent hover:bg-zinc-100 hover:text-zinc-950 active:bg-zinc-200 disabled:text-zinc-400 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 dark:active:bg-zinc-700 dark:disabled:text-zinc-600',
   danger:
-    'bg-white text-red-700 border border-red-200 hover:bg-red-50 hover:border-red-300 active:bg-red-100 disabled:text-red-300 disabled:border-red-100 dark:bg-zinc-900 dark:text-red-400 dark:border-red-900/60 dark:hover:bg-zinc-800 dark:hover:border-red-800 dark:active:bg-zinc-800 dark:disabled:text-red-950 dark:disabled:border-zinc-800',
+    'bg-white text-red-700 border border-red-200 hover:bg-red-50 hover:border-red-300 active:bg-red-100 disabled:text-red-300 disabled:border-red-100 dark:bg-zinc-900 dark:text-red-400 dark:border-red-900/60 dark:hover:bg-red-950/40 dark:hover:border-red-800 dark:active:bg-red-950/60 dark:disabled:text-red-950 dark:disabled:border-zinc-800',
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

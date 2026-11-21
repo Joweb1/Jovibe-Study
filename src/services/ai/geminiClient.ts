@@ -148,7 +148,6 @@ export async function generateText(params: {
           prompt: params.prompt,
           messages: params.messages,
           systemInstruction: params.systemInstruction,
-          model,
         },
       });
       return { value: { text: body.text || '' }, model: normalizeModel(body.model, 'provider') };
@@ -209,7 +208,6 @@ export async function generateStructuredJson<T>(params: {
           prompt: params.prompt,
           systemInstruction: params.systemInstruction,
           responseSchema: params.responseSchema,
-          model,
         },
       });
 
@@ -271,7 +269,6 @@ export async function extractVisionWithClient(params: {
           mimeType: params.mimeType,
           mode: params.mode,
           pageNumber: params.pageNumber,
-          model,
         },
       });
       return { value: body, model: normalizeModel(body.model, 'provider') };
@@ -331,7 +328,7 @@ export async function synthesizeSpeechWithClient(params: {
   });
 
   if (!value.audioBase64) {
-    throw new AiServiceError('Gemini TTS returned no audio data.', 'SERVER_ERROR', {
+    throw new AiServiceError('TTS provider returned no audio data.', 'SERVER_ERROR', {
       retryable: true,
     });
   }

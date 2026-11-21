@@ -28,6 +28,7 @@ import {
 } from '../types/models';
 import { useAuth } from '../context/AuthContext';
 import { useCourses } from '../context/CourseContext';
+import { useStreak } from '../context/StreakContext';
 import { useWorkspaceUi } from '../context/WorkspaceUiContext';
 import { useCourseSources } from '../hooks/useCourseSources';
 import { useRouter } from '../router/RouterContext';
@@ -64,6 +65,7 @@ import {
   type PlaybackState,
 } from '../services/ai/audioService';
 import { formatShortDate, generateDocumentId } from '../utils/validation';
+import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { MarkdownMessage } from '../components/tutor/MarkdownMessage';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -95,8 +97,18 @@ function parseSegmentEntries(segment: StudySessionSegment | undefined): StudySeg
 
 export const AutomaticStudyPage: React.FC = () => {
   const { user, profile } = useAuth();
-  const { activeCourse, topics, coursesLoading } = useCourses();
-  const { sources, loading: sourcesLoading } = useCourseSources(user?.uid, activeCourse?.id);
+  const { recordLearningActivity } = useStreak();
+  const {
+    activeCourse,
+    activeContentOwnerId,
+    activeCourseAccessRevoked,
+    topics,
+    coursesLoading,
+  } = useCourses();
+  const { sources, loading: sourcesLoading } = useCourseSources(
+    activeContentOwnerId,
+    activeCourse?.id
+  );
   const { navigate } = useRouter();
   const { setHideHeader, setHideBottomNav } = useWorkspaceUi();
 
@@ -687,6 +699,20 @@ export const AutomaticStudyPage: React.FC = () => {
       }
 
       setAnswerText('');
+
+      if (evaluation.decision === 'advance') {
+        void recordLearningActivity({
+          activityType: 'automatic_study',
+          title: `${activeSession.title}: ${currentUnit.title}`,
+          courseId: activeCourse.id,
+          courseCode: activeCourse.code,
+          isSharedCourse: Boolean(activeCourse.isShared),
+          durationSeconds: 90,
+          score: evaluation.score,
+          maxScore: 10,
+          summary: `Completed unit "${currentUnit.title}" (${evaluation.score}/10).`,
+        });
+      }
     } catch (err) {
       setError(formatReadableError(err));
     } finally {
@@ -977,6 +1003,18 @@ export const AutomaticStudyPage: React.FC = () => {
       });
 
       setNotice('Automatic Study session completed and logged to Study History.');
+
+      void recordLearningActivity({
+        activityType: 'automatic_study',
+        title: activeSession.title,
+        courseId: activeCourse.id,
+        courseCode: activeCourse.code,
+        isSharedCourse: Boolean(activeCourse.isShared),
+        durationSeconds,
+        score: totalScore,
+        maxScore,
+        summary: summaryText,
+      });
     } catch (err) {
       setError(formatReadableError(err));
     } finally {
@@ -1008,17 +1046,17 @@ export const AutomaticStudyPage: React.FC = () => {
   if (!activeCourse || !user) {
     return (
       <div>
-        <div className="flex items-center gap-3 border-b border-zinc-200 pb-5">
+        <div className="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-5">
           <button
             type="button"
             onClick={() => navigate('/library')}
             aria-label="Back to Library"
             title="Back to Library"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 transition-colors cursor-pointer"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
             Automatic Study
           </h1>
         </div>
@@ -1032,20 +1070,24 @@ export const AutomaticStudyPage: React.FC = () => {
     );
   }
 
+  if (activeCourseAccessRevoked) {
+    return <RevokedCourseNotice course={activeCourse} pageTitle="Automatic Study" />;
+  }
+
   if (sources.length === 0) {
     return (
       <div>
-        <div className="flex items-center gap-3 border-b border-zinc-200 pb-5">
+        <div className="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-5">
           <button
             type="button"
             onClick={() => navigate('/library')}
             aria-label="Back to Library"
             title="Back to Library"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 transition-colors cursor-pointer"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
             Automatic Study
           </h1>
         </div>
@@ -1069,7 +1111,7 @@ export const AutomaticStudyPage: React.FC = () => {
     return (
       <div className="space-y-6">
         {/* Top Classroom Bar */}
-        <div className="flex flex-col gap-4 border-b border-zinc-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3 min-w-0">
             <button
               type="button"
@@ -1079,15 +1121,15 @@ export const AutomaticStudyPage: React.FC = () => {
               }}
               aria-label="Back to all Automatic Study sessions"
               title="All Automatic Study sessions"
-              className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 transition-colors cursor-pointer"
+              className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div className="min-w-0">
-              <h1 className="font-display text-xl font-semibold tracking-tight text-zinc-950 truncate">
+              <h1 className="font-display text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 truncate">
                 {activeSession.title}
               </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500 font-mono tabular-nums">
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 font-mono tabular-nums">
               <span>{activeCourse.code}</span>
               <span aria-hidden="true">·</span>
               <span>
@@ -1153,12 +1195,12 @@ export const AutomaticStudyPage: React.FC = () => {
 
         {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
         {notice && (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-xs text-zinc-800">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-2.5 text-xs text-zinc-800 dark:text-zinc-200">
             <span>{notice}</span>
             <button
               type="button"
               onClick={() => setNotice(null)}
-              className="text-zinc-500 hover:text-zinc-950 cursor-pointer"
+              className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer"
             >
               Dismiss
             </button>
@@ -1171,24 +1213,24 @@ export const AutomaticStudyPage: React.FC = () => {
           <aside className="lg:col-span-4 space-y-5">
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold uppercase tracking-wider text-zinc-500">
+                <span className="font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                   Study Plan
                 </span>
-                <span className="font-mono text-zinc-600 tabular-nums">
+                <span className="font-mono text-zinc-600 dark:text-zinc-400 tabular-nums">
                   {completedCount}/{totalUnits} mastered
                 </span>
               </div>
 
-              <div className="h-1 w-full bg-zinc-100 overflow-hidden">
+              <div className="h-1 w-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
                 <div
-                  className="h-full bg-zinc-950 transition-all duration-300"
+                  className="h-full bg-zinc-950 dark:bg-zinc-200 transition-all duration-300"
                   style={{
                     width: `${totalUnits > 0 ? Math.round((completedCount / totalUnits) * 100) : 0}%`,
                   }}
                 />
               </div>
 
-              <ol className="divide-y divide-zinc-200 border-y border-zinc-200">
+              <ol className="divide-y divide-zinc-200 dark:divide-zinc-800 border-y border-zinc-200 dark:border-zinc-800">
                 {activeSession.studyPlan.map((unit, idx) => {
                   const done = activeSession.completedUnitIds.includes(unit.unitId);
                   const current = idx === activeSession.currentUnitIndex && !isCompleted;
@@ -1197,15 +1239,15 @@ export const AutomaticStudyPage: React.FC = () => {
                     <li
                       key={unit.unitId}
                       className={`py-3 flex items-start gap-2.5 ${
-                        current ? 'text-zinc-950' : 'text-zinc-600'
+                        current ? 'text-zinc-950 dark:text-zinc-200' : 'text-zinc-600 dark:text-zinc-400'
                       }`}
                     >
                       {done ? (
-                        <CheckCircle2 className="h-4 w-4 text-zinc-950 shrink-0 mt-0.5" />
+                        <CheckCircle2 className="h-4 w-4 text-zinc-950 dark:text-zinc-200 shrink-0 mt-0.5" />
                       ) : (
                         <Circle
                           className={`h-4 w-4 shrink-0 mt-0.5 ${
-                            current ? 'text-zinc-950' : 'text-zinc-300'
+                            current ? 'text-zinc-950 dark:text-zinc-200' : 'text-zinc-300 dark:text-zinc-700'
                           }`}
                         />
                       )}
@@ -1213,18 +1255,22 @@ export const AutomaticStudyPage: React.FC = () => {
                         <div className="flex items-baseline justify-between gap-2">
                           <span
                             className={`text-sm ${
-                              current ? 'font-semibold text-zinc-950' : done ? 'text-zinc-800' : ''
+                              current
+                                ? 'font-semibold text-zinc-950 dark:text-zinc-200'
+                                : done
+                                ? 'text-zinc-800 dark:text-zinc-300'
+                                : ''
                             }`}
                           >
                             {idx + 1}. {unit.title}
                           </span>
                           {typeof mastery === 'number' && (
-                            <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0">
+                            <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400 tabular-nums shrink-0">
                               {mastery}%
                             </span>
                           )}
                         </div>
-                        <p className="mt-0.5 text-xs text-zinc-500 line-clamp-2">
+                        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400 line-clamp-2">
                           {unit.objective}
                         </p>
                       </div>
@@ -1235,8 +1281,8 @@ export const AutomaticStudyPage: React.FC = () => {
             </div>
 
             {/* Segment & Compaction Info */}
-            <div className="space-y-2 border-t border-zinc-200 pt-4 text-xs text-zinc-600">
-              <div className="font-semibold uppercase tracking-wider text-zinc-500">
+            <div className="space-y-2 border-t border-zinc-200 dark:border-zinc-800 pt-4 text-xs text-zinc-600 dark:text-zinc-400">
+              <div className="font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                 Session Continuity
               </div>
               <div className="flex justify-between font-mono tabular-nums">
@@ -1253,10 +1299,10 @@ export const AutomaticStudyPage: React.FC = () => {
               </div>
               {activeSession.topicsRequiringReview.length > 0 && (
                 <div className="pt-2">
-                  <div className="font-semibold uppercase tracking-wider text-zinc-500 mb-1">
+                  <div className="font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1">
                     Flagged for Review
                   </div>
-                  <ul className="list-disc pl-4 space-y-0.5 text-zinc-700">
+                  <ul className="list-disc pl-4 space-y-0.5 text-zinc-700 dark:text-zinc-300">
                     {activeSession.topicsRequiringReview.map((w, i) => (
                       <li key={`rev_${i}`}>{w}</li>
                     ))}
@@ -1267,22 +1313,22 @@ export const AutomaticStudyPage: React.FC = () => {
           </aside>
 
           {/* Main Lecturer Stream + Student Response Composer */}
-          <section className="lg:col-span-8 border-t border-zinc-200 pt-6 lg:border-t-0 lg:border-l lg:pl-8 lg:pt-0 flex flex-col">
+          <section className="lg:col-span-8 border-t border-zinc-200 dark:border-zinc-800 pt-6 lg:border-t-0 lg:border-l lg:pl-8 lg:pt-0 flex flex-col">
             {/* Prior Checkpoint Carry-Over Summary (if segmentIndex > 0) */}
             {activeSegment?.summaryFromCheckpoint && (
-              <div className="mb-5 border border-zinc-200 rounded-md bg-zinc-50 px-4 py-3 text-xs">
+              <div className="mb-5 border border-zinc-200 dark:border-zinc-800 rounded-md bg-zinc-50 dark:bg-zinc-900 px-4 py-3 text-xs">
                 <button
                   type="button"
                   onClick={() => setShowPriorSummary((v) => !v)}
-                  className="flex w-full items-center justify-between font-medium text-zinc-900 cursor-pointer"
+                  className="flex w-full items-center justify-between font-medium text-zinc-900 dark:text-zinc-200 cursor-pointer"
                 >
                   <span>
                     Carried forward from Checkpoint (Segment {activeSegment.segmentIndex})
                   </span>
-                  <span className="text-zinc-500">{showPriorSummary ? 'Hide' : 'View'}</span>
+                  <span className="text-zinc-500 dark:text-zinc-400">{showPriorSummary ? 'Hide' : 'View'}</span>
                 </button>
                 {showPriorSummary && (
-                  <p className="mt-2 text-zinc-700 whitespace-pre-wrap leading-relaxed">
+                  <p className="mt-2 text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed">
                     {activeSegment.summaryFromCheckpoint}
                   </p>
                 )}
@@ -1303,8 +1349,8 @@ export const AutomaticStudyPage: React.FC = () => {
                 if (isStudent) {
                   return (
                     <div key={entry.id} className="flex justify-end">
-                      <div className="max-w-xl rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 whitespace-pre-wrap">
-                        <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                      <div className="max-w-xl rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-3 text-sm text-zinc-900 dark:text-zinc-200 whitespace-pre-wrap">
+                        <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                           Your Answer
                         </div>
                         {entry.markdown}
@@ -1314,10 +1360,10 @@ export const AutomaticStudyPage: React.FC = () => {
                 }
 
                 return (
-                  <article key={entry.id} className="border-b border-zinc-200 pb-6 last:border-b-0">
-                    <div className="mb-2 flex items-center justify-between gap-2 text-xs text-zinc-500">
+                  <article key={entry.id} className="border-b border-zinc-200 dark:border-zinc-800 pb-6 last:border-b-0">
+                    <div className="mb-2 flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-zinc-900">
+                        <span className="font-medium text-zinc-900 dark:text-zinc-200">
                           {entry.kind === 'lesson'
                             ? 'Lecturer'
                             : entry.kind === 'reteach'
@@ -1340,7 +1386,7 @@ export const AutomaticStudyPage: React.FC = () => {
                             type="button"
                             onClick={() => void handleTogglePlay(entry.id, entry.markdown)}
                             disabled={isLoadingAudio}
-                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer disabled:opacity-50"
                           >
                             {isLoadingAudio ? (
                               <>Generating audio...</>
@@ -1366,7 +1412,7 @@ export const AutomaticStudyPage: React.FC = () => {
                               type="button"
                               onClick={() => geminiAudioPlayer.stop()}
                               aria-label="Stop playback"
-                              className="inline-flex items-center rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950 cursor-pointer"
+                              className="inline-flex items-center rounded p-1 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer"
                             >
                               <Square className="h-3 w-3" />
                             </button>
@@ -1383,10 +1429,10 @@ export const AutomaticStudyPage: React.FC = () => {
             </div>
 
             {/* Action / Answer Composer */}
-            <div className="mt-6 border-t border-zinc-200 pt-5 space-y-3">
+            <div className="mt-6 border-t border-zinc-200 dark:border-zinc-800 pt-5 space-y-3">
               {isCompleted ? (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm">
-                  <span className="text-zinc-800">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-3 text-sm">
+                  <span className="text-zinc-800 dark:text-zinc-200">
                     This Automatic Study session is completed and logged in Study History.
                   </span>
                   <Button variant="secondary" size="sm" onClick={() => navigate('/history')}>
@@ -1394,12 +1440,12 @@ export const AutomaticStudyPage: React.FC = () => {
                   </Button>
                 </div>
               ) : isUnitReadyToAdvance ? (
-                <div className="flex flex-col gap-3 rounded-md border border-zinc-200 bg-zinc-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-sm">
-                    <div className="font-medium text-zinc-950">
+                    <div className="font-medium text-zinc-950 dark:text-zinc-200">
                       Unit mastered{latestEvaluation ? ` (${latestEvaluation.score}/10)` : ''}.
                     </div>
-                    <p className="text-xs text-zinc-600 mt-0.5">
+                    <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
                       {hasMoreUnits
                         ? `Ready for Unit ${activeSession.currentUnitIndex + 2}: ${
                             activeSession.studyPlan[activeSession.currentUnitIndex + 1]?.title
@@ -1430,8 +1476,8 @@ export const AutomaticStudyPage: React.FC = () => {
               ) : (
                 <>
                   {activeSession.currentQuestion && (
-                    <div className="text-xs text-zinc-600">
-                      <span className="font-semibold text-zinc-900">Active check: </span>
+                    <div className="text-xs text-zinc-600 dark:text-zinc-400">
+                      <span className="font-semibold text-zinc-900 dark:text-zinc-200">Active check: </span>
                       {activeSession.currentQuestion}
                     </div>
                   )}
@@ -1446,7 +1492,7 @@ export const AutomaticStudyPage: React.FC = () => {
                           "I'm not fully confident yet—please explain this concept more simply with an everyday analogy."
                         )
                       }
-                      className="rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:border-zinc-400 hover:text-zinc-950 cursor-pointer disabled:opacity-50"
+                      className="rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer disabled:opacity-50"
                     >
                       Explain simpler
                     </button>
@@ -1458,7 +1504,7 @@ export const AutomaticStudyPage: React.FC = () => {
                           'Could you walk me through a different concrete worked example before I try again?'
                         )
                       }
-                      className="rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:border-zinc-400 hover:text-zinc-950 cursor-pointer disabled:opacity-50"
+                      className="rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer disabled:opacity-50"
                     >
                       Different example
                     </button>
@@ -1467,7 +1513,7 @@ export const AutomaticStudyPage: React.FC = () => {
                         type="button"
                         disabled={busyAction !== null}
                         onClick={() => void handleAdvanceToNextUnit()}
-                        className="rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-500 hover:border-zinc-400 hover:text-zinc-950 cursor-pointer disabled:opacity-50 ml-auto"
+                        className="rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-500 dark:text-zinc-400 hover:border-zinc-400 dark:hover:border-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer disabled:opacity-50 ml-auto"
                       >
                         Skip to next unit
                       </button>
@@ -1488,7 +1534,7 @@ export const AutomaticStudyPage: React.FC = () => {
                       onChange={(e) => setAnswerText(e.target.value)}
                       placeholder="Explain your answer in your own words, or record a voice answer..."
                       disabled={busyAction !== null || transcribing}
-                      className="w-full rounded-md border border-zinc-300 bg-white px-3.5 py-2.5 text-sm text-zinc-950 placeholder:text-zinc-400 focus:border-zinc-950 focus:outline-none resize-y"
+                      className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none resize-y"
                     />
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -1555,18 +1601,18 @@ export const AutomaticStudyPage: React.FC = () => {
   // SESSION LAUNCHER & RESUMABLE SESSIONS OVERVIEW
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-200 pb-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-200 dark:border-zinc-800 pb-5">
         <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={() => navigate('/library')}
             aria-label="Back to Library"
             title="Back to Library"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 transition-colors cursor-pointer"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 truncate">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 truncate">
             Automatic Study
           </h1>
         </div>
@@ -1578,12 +1624,12 @@ export const AutomaticStudyPage: React.FC = () => {
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
       {notice && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-xs text-zinc-800">
+        <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-2.5 text-xs text-zinc-800 dark:text-zinc-200">
           <span>{notice}</span>
           <button
             type="button"
             onClick={() => setNotice(null)}
-            className="text-zinc-500 hover:text-zinc-950 cursor-pointer"
+            className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer"
           >
             Dismiss
           </button>
@@ -1594,20 +1640,20 @@ export const AutomaticStudyPage: React.FC = () => {
       {(launcherOpen || sessions.length === 0) && (
         <form
           onSubmit={handleCreateSession}
-          className="space-y-5 border border-zinc-200 rounded-md p-5 sm:p-6 bg-white"
+          className="space-y-5 border border-zinc-200 dark:border-zinc-800 rounded-md p-5 sm:p-6 bg-white dark:bg-zinc-900"
         >
           <div>
-            <h2 className="text-base font-semibold text-zinc-950">
+            <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-200">
               Start an Automatic Study session
             </h2>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
               Grounded in {sources.length} uploaded {sources.length === 1 ? 'material' : 'materials'} in {activeCourse.code}.
             </p>
           </div>
 
           {topics.length > 0 && (
             <div className="space-y-2">
-              <label className="block text-xs font-medium text-zinc-700">
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                 Topics to cover (leave unselected for entire course)
               </label>
               <div className="flex flex-wrap gap-2">
@@ -1620,8 +1666,8 @@ export const AutomaticStudyPage: React.FC = () => {
                       onClick={() => toggleTopicSelection(topic.id)}
                       className={`rounded-md border px-3 py-1.5 text-xs transition-colors cursor-pointer ${
                         selected
-                          ? 'border-zinc-950 bg-zinc-950 text-white font-medium'
-                          : 'border-zinc-300 bg-white text-zinc-700 hover:border-zinc-500'
+                          ? 'border-zinc-950 bg-zinc-950 text-white dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-950 font-medium'
+                          : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300 hover:border-zinc-500 dark:hover:border-zinc-500'
                       }`}
                     >
                       {topic.name}
@@ -1634,14 +1680,14 @@ export const AutomaticStudyPage: React.FC = () => {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="as-difficulty" className="block text-xs font-medium text-zinc-700 mb-1.5">
+              <label htmlFor="as-difficulty" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
                 Teaching depth
               </label>
               <select
                 id="as-difficulty"
                 value={difficulty}
                 onChange={(e) => setDifficulty(e.target.value as DifficultyLevel)}
-                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 focus:border-zinc-950 focus:outline-none"
+                className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
               >
                 <option value="foundational">Foundational — gentle intuition first</option>
                 <option value="standard">Standard — university lecture level</option>
@@ -1649,7 +1695,7 @@ export const AutomaticStudyPage: React.FC = () => {
               </select>
             </div>
             <div>
-              <label htmlFor="as-instructions" className="block text-xs font-medium text-zinc-700 mb-1.5">
+              <label htmlFor="as-instructions" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
                 Focus instructions (optional)
               </label>
               <input
@@ -1658,7 +1704,7 @@ export const AutomaticStudyPage: React.FC = () => {
                 value={customInstructions}
                 onChange={(e) => setCustomInstructions(e.target.value)}
                 placeholder="e.g., Focus on formulas and common exam pitfalls"
-                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 placeholder:text-zinc-400 focus:border-zinc-950 focus:outline-none"
+                className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
               />
             </div>
           </div>
@@ -1668,7 +1714,7 @@ export const AutomaticStudyPage: React.FC = () => {
               <GraduationCap className="h-4 w-4" />
               Begin guided study
             </Button>
-            {creationPhase && <span className="text-xs text-zinc-600">{creationPhase}</span>}
+            {creationPhase && <span className="text-xs text-zinc-600 dark:text-zinc-400">{creationPhase}</span>}
           </div>
         </form>
       )}
@@ -1679,13 +1725,13 @@ export const AutomaticStudyPage: React.FC = () => {
       ) : sessions.length > 0 ? (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
               Your {activeCourse.code} Study Sessions
             </h2>
-            <span className="font-mono text-xs text-zinc-400 tabular-nums">{sessions.length}</span>
+            <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">{sessions.length}</span>
           </div>
 
-          <div className="border-t border-zinc-200 divide-y divide-zinc-200">
+          <div className="border-t border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-200 dark:divide-zinc-800">
             {sessions.map((sess) => {
               const totalUnits = sess.studyPlan.length;
               const completedUnits = sess.completedUnitIds.length;
@@ -1695,8 +1741,8 @@ export const AutomaticStudyPage: React.FC = () => {
                   className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                      <span className="font-medium text-zinc-900 capitalize">{sess.status}</span>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                      <span className="font-medium text-zinc-900 dark:text-zinc-200 capitalize">{sess.status}</span>
                       <span aria-hidden="true">·</span>
                       <span className="font-mono tabular-nums">
                         {completedUnits}/{totalUnits} units mastered
@@ -1706,11 +1752,11 @@ export const AutomaticStudyPage: React.FC = () => {
                       <span aria-hidden="true">·</span>
                       <span>{formatShortDate(sess.updatedAt)}</span>
                     </div>
-                    <h3 className="mt-1 text-base font-medium text-zinc-950 truncate">
+                    <h3 className="mt-1 text-base font-medium text-zinc-950 dark:text-zinc-200 truncate">
                       {sess.title}
                     </h3>
                     {sess.currentObjective && sess.status !== 'completed' && (
-                      <p className="mt-0.5 text-xs text-zinc-600 line-clamp-1">
+                      <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400 line-clamp-1">
                         Current objective: {sess.currentObjective}
                       </p>
                     )}
@@ -1732,7 +1778,7 @@ export const AutomaticStudyPage: React.FC = () => {
                       type="button"
                       onClick={() => setSessionToDelete(sess)}
                       aria-label={`Delete ${sess.title}`}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-400 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-400 dark:text-zinc-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-400 cursor-pointer"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>

@@ -280,7 +280,9 @@ async function requestChatCompletion(
   options: ChatCompletionOptions
 ): Promise<ChatCompletionResult> {
   const definition = getProviderDefinition(options.provider);
-  const model = options.modelOverride?.trim() || definition.models[options.task];
+  const rawOverride = options.modelOverride?.trim() || '';
+  const safeOverride = rawOverride && !/^gemini-/i.test(rawOverride) ? rawOverride : '';
+  const model = safeOverride || definition.models[options.task];
 
   if (!model) {
     throw new ProviderRequestError({
@@ -651,6 +653,96 @@ export async function transcribeProviderAudio(params: {
           .slice(0, 200)}.`
       : '';
 
+  // Groq Whisper requires multipart/form-data to /audio/transcriptions rather than chat completions.
+  if (params.provider === 'groq') {
+    const def = getProviderDefinition('groq');
+    const rawOverride = params.model?.trim() || '';
+    const model =
+      rawOverride && !/^gemini-/i.test(rawOverride) ? rawOverride : def.models.transcription;
+    if (!model) {
+      throw new ProviderRequestError({
+        status: 501,
+        code: 'MODEL_UNAVAILABLE',
+        message: 'Groq transcription model is not configured.',
+        retryable: false,
+        cooldownMs: 0,
+      });
+    }
+
+    const audioBuffer = Buffer.from(params.audioBase64, 'base64');
+    const isMp3 = cleanMime === 'audio/mpeg' || cleanMime === 'audio/mp3';
+    const fileName = isMp3 ? 'voice.mp3' : 'voice.wav';
+    const blob = new Blob([audioBuffer], { type: isMp3 ? 'audio/mpeg' : 'audio/wav' });
+
+    const formData = new FormData();
+    formData.append('file', blob, fileName);
+    formData.append('model', model);
+    formData.append('response_format', 'json');
+    if (hint) {
+      formData.append('prompt', hint.trim());
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error('TIMEOUT')), 45_000);
+    try {
+      const response = await fetch(`${def.baseUrl.replace(/\/+$/, '')}/audio/transcriptions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          ...def.extraHeaders,
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+
+      const text = await response.text();
+      let json: unknown = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // Leave null
+      }
+
+      if (!response.ok) {
+        const message = extractProviderMessage(json, text.slice(0, 240));
+        throw new ProviderRequestError(classifyStatus('groq', response.status, message));
+      }
+
+      const transcribed =
+        json && typeof json === 'object' && typeof (json as { text?: unknown }).text === 'string'
+          ? (json as { text: string }).text.trim()
+          : '';
+
+      if (!transcribed) {
+        throw new ProviderRequestError({
+          status: 502,
+          code: 'SERVER_ERROR',
+          message: 'Groq Whisper returned an empty transcription.',
+          retryable: true,
+          cooldownMs: 3_000,
+        });
+      }
+
+      return { text: transcribed, model };
+    } catch (err) {
+      if (err instanceof ProviderRequestError) throw err;
+      const isTimeout =
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        (err instanceof Error && err.message === 'TIMEOUT');
+      throw new ProviderRequestError({
+        status: isTimeout ? 504 : 502,
+        code: isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR',
+        message: isTimeout
+          ? 'Groq Whisper timed out while transcribing audio.'
+          : `Groq Whisper request failed: ${err instanceof Error ? err.message : 'unknown error'}`,
+        retryable: true,
+        cooldownMs: 5_000,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   const completion = await requestChatCompletion({
     provider: params.provider,
     apiKey: params.apiKey,
@@ -681,6 +773,27 @@ export async function transcribeProviderAudio(params: {
   return { text: completion.content.trim(), model: completion.model };
 }
 
+const GROQ_ORPHEUS_VOICES = new Set(['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy']);
+const GEMINI_TO_GROQ_VOICE_MAP: Record<string, string> = {
+  kore: 'hannah',
+  puck: 'autumn',
+  charon: 'daniel',
+  fenrir: 'troy',
+  zephyr: 'diana',
+};
+
+function resolveProviderTtsVoice(provider: OpenAiProviderId, requestedVoice?: string): string {
+  const normalized = (requestedVoice || '').trim().toLowerCase();
+  if (provider === 'groq') {
+    if (GROQ_ORPHEUS_VOICES.has(normalized)) return normalized;
+    if (normalized && GEMINI_TO_GROQ_VOICE_MAP[normalized]) {
+      return GEMINI_TO_GROQ_VOICE_MAP[normalized];
+    }
+    return 'troy';
+  }
+  return requestedVoice?.trim() || 'troy';
+}
+
 export async function synthesizeProviderSpeech(params: {
   provider: OpenAiProviderId;
   apiKey: string;
@@ -690,7 +803,8 @@ export async function synthesizeProviderSpeech(params: {
   timeoutMs?: number;
 }): Promise<{ audioBase64: string; mimeType: string; voiceName: string; model: string }> {
   const def = getProviderDefinition(params.provider);
-  const model = params.model || def.models.tts;
+  const rawOverride = params.model?.trim() || '';
+  const model = (rawOverride && !/^gemini-/i.test(rawOverride) ? rawOverride : '') || def.models.tts;
   if (!model) {
     throw new ProviderRequestError({
       status: 501,
@@ -701,7 +815,7 @@ export async function synthesizeProviderSpeech(params: {
     });
   }
 
-  const voice = params.voiceName || 'troy';
+  const voice = resolveProviderTtsVoice(params.provider, params.voiceName);
   const url = `${def.baseUrl.replace(/\/+$/, '')}/audio/speech`;
   const timeout = params.timeoutMs ?? 30_000;
 

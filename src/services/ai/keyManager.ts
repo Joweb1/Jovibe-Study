@@ -29,6 +29,8 @@ export interface ByokConfig {
   preferredKeyIds: Partial<Record<AiProvider, string | null>>;
   enableKeyRotation: boolean;
   fallbackToServerKey: boolean;
+  /** Once true, the app never falls back to the server env GEMINI_API_KEY again. */
+  hasEnteredOwnKey: boolean;
 }
 
 export interface ExecutionCandidate {
@@ -45,6 +47,7 @@ export const DEFAULT_BYOK_CONFIG: ByokConfig = {
   preferredKeyIds: {},
   enableKeyRotation: true,
   fallbackToServerKey: true,
+  hasEnteredOwnKey: false,
 };
 
 /** Minimum plausible length per provider (guards against obvious paste errors). */
@@ -152,6 +155,9 @@ export function getByokConfig(): ByokConfig {
     saved.preferredKeyIds && typeof saved.preferredKeyIds === 'object'
       ? saved.preferredKeyIds
       : {};
+  const hasSavedKeys = readAllKeys().length > 0;
+  const hasEnteredOwnKey = saved.hasEnteredOwnKey === true || hasSavedKeys;
+
   return {
     version: STORAGE_SCHEMA_VERSION,
     preferredKeyId:
@@ -173,18 +179,28 @@ export function getByokConfig(): ByokConfig {
       typeof saved.enableKeyRotation === 'boolean'
         ? saved.enableKeyRotation
         : DEFAULT_BYOK_CONFIG.enableKeyRotation,
-    fallbackToServerKey:
-      typeof saved.fallbackToServerKey === 'boolean'
-        ? saved.fallbackToServerKey
-        : DEFAULT_BYOK_CONFIG.fallbackToServerKey,
+    fallbackToServerKey: hasEnteredOwnKey
+      ? false
+      : typeof saved.fallbackToServerKey === 'boolean'
+      ? saved.fallbackToServerKey
+      : DEFAULT_BYOK_CONFIG.fallbackToServerKey,
+    hasEnteredOwnKey,
   };
 }
 
 export function saveByokConfig(patch: Partial<ByokConfig>): ByokConfig {
   const current = getByokConfig();
+  const hasEnteredOwnKey = current.hasEnteredOwnKey || patch.hasEnteredOwnKey === true;
   const next: ByokConfig = {
     ...current,
     ...patch,
+    hasEnteredOwnKey,
+    // Once a user has entered their own API key, never re-enable server env key fallback
+    fallbackToServerKey: hasEnteredOwnKey
+      ? false
+      : typeof patch.fallbackToServerKey === 'boolean'
+      ? patch.fallbackToServerKey
+      : current.fallbackToServerKey,
     preferredKeyIds: {
       ...current.preferredKeyIds,
       ...(patch.preferredKeyIds ?? {}),
@@ -192,6 +208,22 @@ export function saveByokConfig(patch: Partial<ByokConfig>): ByokConfig {
   };
   writeLocalStorage(CONFIG_STORAGE_KEY, next);
   return next;
+}
+
+/** True once the user has added any personal API key on this device. */
+export function hasUserEnteredOwnKey(): boolean {
+  return getByokConfig().hasEnteredOwnKey;
+}
+
+/**
+ * True ONLY before the user has ever entered their own API key (e.g. skipped onboarding).
+ * Once the user adds their own key, the application never uses the server env key again.
+ */
+export function canUseServerFallbackKey(): boolean {
+  const config = getByokConfig();
+  if (config.hasEnteredOwnKey) return false;
+  if (readAllKeys().length > 0) return false;
+  return config.fallbackToServerKey;
 }
 
 export function getPreferredKeyId(provider: AiProvider): string | null {
@@ -240,9 +272,15 @@ export function addStoredApiKey(
   persistKeys([...existing, entry]);
 
   const config = getByokConfig();
-  if (!config.preferredKeyIds[provider]) {
-    saveByokConfig({ preferredKeyIds: { ...config.preferredKeyIds, [provider]: entry.id } });
-  }
+  saveByokConfig({
+    hasEnteredOwnKey: true,
+    fallbackToServerKey: false,
+    preferredKeyIds: {
+      ...config.preferredKeyIds,
+      [provider]: config.preferredKeyIds[provider] ?? entry.id,
+    },
+    ...(provider === 'gemini' && !config.preferredKeyId ? { preferredKeyId: entry.id } : {}),
+  });
 
   return entry;
 }
@@ -431,11 +469,10 @@ export function hasUsableApiKey(provider: AiProvider): boolean {
 }
 
 /**
- * Ordered key candidates for a single provider. Gemini can additionally fall
- * back to the server-managed GEMINI_API_KEY when enabled.
+ * Ordered key candidates for a single provider. Gemini can only use the
+ * server-managed GEMINI_API_KEY if the user has never entered their own key.
  */
 export function buildProviderCandidates(provider: AiProvider): ExecutionCandidate[] {
-  const config = getByokConfig();
   const candidates: ExecutionCandidate[] = listUsableApiKeys(provider).map((entry) => ({
     provider,
     kind: 'byok' as const,
@@ -444,7 +481,7 @@ export function buildProviderCandidates(provider: AiProvider): ExecutionCandidat
     apiKey: entry.key,
   }));
 
-  if (provider === 'gemini' && config.fallbackToServerKey) {
+  if (provider === 'gemini' && canUseServerFallbackKey()) {
     candidates.push({
       provider,
       kind: 'server_fallback',

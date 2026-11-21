@@ -5,9 +5,14 @@ export type AppRoute =
   | '/tutor'
   | '/practice'
   | '/automatic-study'
+  | '/live'
   | '/history'
   | '/courses'
-  | '/settings';
+  | '/settings'
+  | '/manage-course'
+  | '/join'
+  | '/streak'
+  | '/dashboard';
 
 export type TutorSourceMode = 'materials_only' | 'materials_plus_ai' | 'general_ai';
 
@@ -86,6 +91,73 @@ export interface Course {
   code: string;
   name: string;
   description: string;
+  isPublic?: boolean;
+  shareToken?: string;
+  authorName?: string;
+  /** Derived client-side metadata distinguishing owned vs joined shared courses */
+  isShared?: boolean;
+  isOwner?: boolean;
+  authorId?: string;
+  joinedAt?: FirestoreTimestamp | null;
+  createdAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface CourseShare {
+  shareToken: string;
+  authorId: string;
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  courseDescription: string;
+  authorName: string;
+  active: boolean;
+  createdAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface CourseMember {
+  memberUid: string;
+  authorId: string;
+  courseId: string;
+  displayName: string;
+  photoURL: string;
+  groupId: string;
+  role: 'member';
+  shareToken: string;
+  joinedAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface CourseGroup {
+  id: string;
+  authorId: string;
+  courseId: string;
+  name: string;
+  description: string;
+  createdAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface JoinedCourse {
+  id: string;
+  userId: string;
+  authorId: string;
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  courseDescription: string;
+  authorName: string;
+  joinedAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface PersonalSourceNote {
+  id: string;
+  userId: string;
+  courseId: string;
+  sourceId: string;
+  notes: string;
   createdAt: FirestoreTimestamp | null;
   updatedAt: FirestoreTimestamp | null;
 }
@@ -272,3 +344,105 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   ttsVoice: 'Kore',
   defaultDifficulty: 'standard',
 };
+
+export type DailyStreakStatus = 'pending_claim' | 'claimed' | 'frozen' | 'missed';
+
+export type StudyActivityType =
+  | 'cbt'
+  | 'flashcards'
+  | 'fill_in_the_gap'
+  | 'exam_prep'
+  | 'automatic_study'
+  | 'tutor'
+  | 'live'
+  | 'shared_library';
+
+export interface StreakProfile {
+  userId: string;
+  currentStreak: number;
+  longestStreak: number;
+  totalStudyDays: number;
+  /** Internal hidden streak freeze inventory (never displayed in UI). */
+  freezeBalance: number;
+  lastQualifyingDate: string;
+  lastEvaluatedDate: string;
+  pendingClaimDate: string;
+  pendingStreakCount: number;
+  accountCreatedDate: string;
+  timezoneOffsetMinutes: number;
+  createdAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface DailyStreakRecord {
+  dateKey: string;
+  userId: string;
+  status: DailyStreakStatus;
+  streakCount: number;
+  qualifyingActivitiesCount: number;
+  firstActivityType: StudyActivityType | '';
+  firstActivityTitle: string;
+  freezeAwarded: boolean;
+  freezeConsumed: boolean;
+  claimedAt: FirestoreTimestamp | null;
+  createdAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface FreezeLedgerEntry {
+  id: string;
+  userId: string;
+  dateKey: string;
+  action: 'initial_grant' | 'earned' | 'consumed';
+  delta: number;
+  balanceAfter: number;
+  createdAt: FirestoreTimestamp | null;
+}
+
+export interface StudyActivityEvent {
+  id: string;
+  userId: string;
+  courseId: string;
+  courseCode: string;
+  isSharedCourse: boolean;
+  activityType: StudyActivityType;
+  title: string;
+  dateKey: string;
+  durationSeconds: number;
+  score: number | null;
+  maxScore: number | null;
+  summary: string;
+  createdAt: FirestoreTimestamp | null;
+}
+
+export interface AppUsageSummary {
+  userId: string;
+  totalAppSeconds: number;
+  totalActiveLearningSeconds: number;
+  lastActiveDate: string;
+  createdAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface AppUsageDailyRecord {
+  dateKey: string;
+  userId: string;
+  appSeconds: number;
+  activeLearningSeconds: number;
+  sessionsCount: number;
+  createdAt: FirestoreTimestamp | null;
+  updatedAt: FirestoreTimestamp | null;
+}
+
+export interface PracticeTimerConfig {
+  enabled: boolean;
+  durationMinutes: number;
+}
+
+export interface ActivePracticeTimerSnapshot {
+  sessionId: string;
+  durationMinutes: number;
+  startedAtMs: number;
+  expiresAtMs: number;
+}
+

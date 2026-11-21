@@ -24,7 +24,7 @@ function renderInline(text: string): React.ReactNode[] {
 
     if (token.startsWith('**') && token.endsWith('**')) {
       nodes.push(
-        <strong key={keyCounter} className="font-semibold text-zinc-950">
+        <strong key={keyCounter} className="font-semibold text-zinc-950 dark:text-zinc-200">
           {token.slice(2, -2)}
         </strong>
       );
@@ -32,7 +32,7 @@ function renderInline(text: string): React.ReactNode[] {
       nodes.push(
         <code
           key={keyCounter}
-          className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[12px] text-zinc-900"
+          className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 font-mono text-[12px] text-zinc-900 dark:text-zinc-200"
         >
           {token.slice(1, -1)}
         </code>
@@ -124,7 +124,7 @@ const MarkdownMessageInner: React.FC<MarkdownMessageProps> = ({ content }) => {
       blocks.push(
         <pre
           key={blockKey}
-          className="overflow-x-auto rounded-md border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs leading-relaxed text-zinc-900"
+          className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-3 font-mono text-xs leading-relaxed text-zinc-900 dark:text-zinc-200"
         >
           <code>{codeLines.join('\n')}</code>
         </pre>
@@ -134,7 +134,7 @@ const MarkdownMessageInner: React.FC<MarkdownMessageProps> = ({ content }) => {
 
     // Horizontal rule
     if (isHorizontalRule(trimmed)) {
-      blocks.push(<hr key={blockKey} className="my-2 border-zinc-200" />);
+      blocks.push(<hr key={blockKey} className="my-2 border-zinc-200 dark:border-zinc-800" />);
       i += 1;
       continue;
     }
@@ -153,22 +153,22 @@ const MarkdownMessageInner: React.FC<MarkdownMessageProps> = ({ content }) => {
         i += 1;
       }
       blocks.push(
-        <div key={blockKey} className="overflow-x-auto border border-zinc-200 rounded-md">
+        <div key={blockKey} className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-md">
           <table className="w-full border-collapse text-left text-xs">
             <thead>
-              <tr className="border-b border-zinc-200 bg-zinc-50">
+              <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
                 {headers.map((h, idx) => (
-                  <th key={idx} className="px-3 py-2 font-semibold text-zinc-900">
+                  <th key={idx} className="px-3 py-2 font-semibold text-zinc-900 dark:text-zinc-200">
                     {renderInline(h)}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-200">
+            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
               {rows.map((row, rIdx) => (
                 <tr key={rIdx}>
                   {headers.map((_, cIdx) => (
-                    <td key={cIdx} className="px-3 py-2 text-zinc-700 align-top">
+                    <td key={cIdx} className="px-3 py-2 text-zinc-700 dark:text-zinc-300 align-top">
                       {renderInline(row[cIdx] || '')}
                     </td>
                   ))}
@@ -188,12 +188,12 @@ const MarkdownMessageInner: React.FC<MarkdownMessageProps> = ({ content }) => {
       const headingText = headingMatch[2];
       const cls =
         level === 1
-          ? 'font-display text-base font-semibold text-zinc-950 pt-2'
+          ? 'font-display text-base font-semibold text-zinc-950 dark:text-zinc-200 pt-2'
           : level === 2
-          ? 'font-display text-sm font-semibold text-zinc-950 pt-1.5'
+          ? 'font-display text-sm font-semibold text-zinc-950 dark:text-zinc-200 pt-1.5'
           : level === 3
-          ? 'text-sm font-semibold text-zinc-900 pt-1'
-          : 'text-xs font-semibold uppercase tracking-wide text-zinc-700 pt-1';
+          ? 'text-sm font-semibold text-zinc-900 dark:text-zinc-200 pt-1'
+          : 'text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-400 pt-1';
       blocks.push(
         <div key={blockKey} className={cls}>
           {renderInline(headingText)}
@@ -213,7 +213,7 @@ const MarkdownMessageInner: React.FC<MarkdownMessageProps> = ({ content }) => {
       blocks.push(
         <blockquote
           key={blockKey}
-          className="border-l border-zinc-300 pl-3.5 text-sm italic text-zinc-600 space-y-1"
+          className="border-l border-zinc-300 dark:border-zinc-700 pl-3.5 text-sm italic text-zinc-600 dark:text-zinc-400 space-y-1"
         >
           {quoteLines.map((q, idx) => (
             <p key={idx}>{renderInline(q)}</p>
@@ -231,7 +231,7 @@ const MarkdownMessageInner: React.FC<MarkdownMessageProps> = ({ content }) => {
         i += 1;
       }
       blocks.push(
-        <ul key={blockKey} className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-zinc-800">
+        <ul key={blockKey} className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-zinc-800 dark:text-zinc-300">
           {items.map((item, idx) => (
             <li key={idx}>{renderInline(item)}</li>
           ))}
@@ -248,7 +248,7 @@ const MarkdownMessageInner: React.FC<MarkdownMessageProps> = ({ content }) => {
         i += 1;
       }
       blocks.push(
-        <ol key={blockKey} className="list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-zinc-800">
+        <ol key={blockKey} className="list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-zinc-800 dark:text-zinc-300">
           {items.map((item, idx) => (
             <li key={idx}>{renderInline(item)}</li>
           ))}
@@ -265,7 +265,7 @@ const MarkdownMessageInner: React.FC<MarkdownMessageProps> = ({ content }) => {
       i += 1;
     }
     blocks.push(
-      <p key={blockKey} className="text-sm leading-relaxed text-zinc-800">
+      <p key={blockKey} className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-300">
         {renderInline(paraLines.join(' '))}
       </p>
     );

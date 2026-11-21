@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Upload,
+  Users,
   X,
 } from 'lucide-react';
 import type { MaterialType, SavedMaterialType, Topic } from '../types/models';
@@ -28,6 +29,7 @@ import {
 import { deleteLocalDraft, getLocalDraft } from '../services/local/indexedDb';
 import { formatShortDate } from '../utils/validation';
 import { CourseModal } from '../components/courses/CourseModal';
+import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { TopicModal } from '../components/courses/TopicModal';
 import {
   ImportMaterialModal,
@@ -46,7 +48,11 @@ export const LibraryPage: React.FC = () => {
   const { user } = useAuth();
   const {
     courses,
+    ownedCourses,
     activeCourse,
+    activeContentOwnerId,
+    activeCourseAccessRevoked,
+    activeMemberGroupName,
     topics,
     coursesLoading,
     topicsLoading,
@@ -64,7 +70,9 @@ export const LibraryPage: React.FC = () => {
     loading: sourcesLoading,
     error: sourcesError,
     clearError: clearSourcesError,
-  } = useCourseSources(user?.uid, activeCourse?.id);
+  } = useCourseSources(activeContentOwnerId, activeCourse?.id);
+
+  const isOwner = Boolean(activeCourse?.isOwner);
 
   const [courseModalOpen, setCourseModalOpen] = useState(false);
   const [topicsListOpen, setTopicsListOpen] = useState(false);
@@ -92,7 +100,8 @@ export const LibraryPage: React.FC = () => {
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const draftKey = user && activeCourse ? `ingestion_draft:${user.uid}:${activeCourse.id}` : '';
+  const draftKey =
+    user && activeCourse && isOwner ? `ingestion_draft:${user.uid}:${activeCourse.id}` : '';
 
   const activeSource = useMemo(
     () => (activeSourceId ? sources.find((s) => s.id === activeSourceId) ?? null : null),
@@ -100,12 +109,23 @@ export const LibraryPage: React.FC = () => {
   );
 
   // Lock page viewport on the main Library list so ONLY the list/cards section scrolls;
-  // unlock when viewing a full-page reader or onboarding empty state.
+  // unlock when viewing a full-page reader, revoked notice, or onboarding empty state.
   const isMainLibraryView =
-    !coursesLoading && courses.length > 0 && Boolean(activeCourse) && Boolean(user) && !activeSource && !savedReaderOpen;
+    !coursesLoading &&
+    courses.length > 0 &&
+    Boolean(activeCourse) &&
+    Boolean(user) &&
+    !activeCourseAccessRevoked &&
+    !activeSource &&
+    !savedReaderOpen;
 
   const isReaderView =
-    !coursesLoading && courses.length > 0 && Boolean(activeCourse) && Boolean(user) && (Boolean(activeSource) || savedReaderOpen);
+    !coursesLoading &&
+    courses.length > 0 &&
+    Boolean(activeCourse) &&
+    Boolean(user) &&
+    !activeCourseAccessRevoked &&
+    (Boolean(activeSource) || savedReaderOpen);
 
   useEffect(() => {
     setLockViewport(isMainLibraryView);
@@ -202,11 +222,11 @@ export const LibraryPage: React.FC = () => {
   if (courses.length === 0 || !activeCourse || !user) {
     return (
       <div>
-        <div className="border-b border-zinc-200 pb-6">
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950">
+        <div className="border-b border-zinc-200 dark:border-zinc-800 pb-6">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
             Library
           </h1>
-          <p className="mt-1.5 text-sm text-zinc-600">
+          <p className="mt-1.5 text-sm text-zinc-600 dark:text-zinc-400">
             Your personal academic knowledge base for lecture slides, textbooks, and notes.
           </p>
         </div>
@@ -227,16 +247,22 @@ export const LibraryPage: React.FC = () => {
     );
   }
 
+  if (activeCourseAccessRevoked) {
+    return <RevokedCourseNotice course={activeCourse} pageTitle="Library" />;
+  }
+
   // Dedicated full-width structured source reader view
   if (activeSource) {
     return (
       <SourceViewer
         userId={user.uid}
         source={activeSource}
-        courses={courses}
+        courses={ownedCourses}
         activeCourse={activeCourse}
         topics={topics}
+        isOwner={isOwner}
         onBack={() => setActiveSourceId(null)}
+        onOpenLive={() => navigate(`/live/${activeSource.id}`)}
         onMovedToAnotherCourse={(targetCourseId) => {
           setActiveSourceId(null);
           void selectCourse(targetCourseId);
@@ -313,19 +339,26 @@ export const LibraryPage: React.FC = () => {
       <div className="shrink-0 space-y-4 pb-3">
         {/* Everything above the search field hides smoothly when search is focused */}
         {!searchFocused && !savedReaderOpen && (
-          <div className="space-y-3 border-b border-zinc-200 pb-4">
+          <div className="space-y-3 border-b border-zinc-200 dark:border-zinc-800 pb-4">
             <div className="min-w-0">
-              <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 truncate">
+              <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 truncate">
                 {activeCourse.name}
               </h1>
+              {!isOwner && (
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Shared by {activeCourse.authorName || 'Course Author'}
+                  {activeMemberGroupName ? ` · ${activeMemberGroupName}` : ''}
+                  {' · Materials managed by author'}
+                </p>
+              )}
               {activeCourse.description && (
-                <p className="mt-1 max-w-2xl text-sm text-zinc-600 line-clamp-1">
+                <p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400 line-clamp-1">
                   {activeCourse.description}
                 </p>
               )}
             </div>
 
-            {/* Action Row: Topics + Add material + Study on left; History + Add Topic icon buttons on right */}
+            {/* Action Row: Topics + (Owner: Add material) + Study on left; (Owner: Share) + History on right */}
             <div className="flex items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                 <Button
@@ -337,17 +370,19 @@ export const LibraryPage: React.FC = () => {
                   <Folder className="h-3.5 w-3.5" />
                   <span className="max-w-[90px] sm:max-w-[120px] truncate">{activeTopicLabel}</span>
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setUseRestoredDraft(false);
-                    setImportModalOpen(true);
-                  }}
-                  className="px-2.5 sm:px-3"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  Add material
-                </Button>
+                {isOwner && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setUseRestoredDraft(false);
+                      setImportModalOpen(true);
+                    }}
+                    className="px-2.5 sm:px-3"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    Add material
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
                   size="sm"
@@ -360,26 +395,25 @@ export const LibraryPage: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
+                {isOwner && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/manage-course/${activeCourse.id}`)}
+                    aria-label="Share and manage course"
+                    title="Share & manage course"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => navigate('/history')}
                   aria-label="Study history"
                   title="Study history"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-950 transition-colors cursor-pointer"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 transition-colors cursor-pointer"
                 >
                   <Clock className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingTopic(null);
-                    setTopicModalOpen(true);
-                  }}
-                  aria-label="Add topic"
-                  title="Add topic"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-950 transition-colors cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -390,7 +424,7 @@ export const LibraryPage: React.FC = () => {
         {!savedReaderOpen && (
           <div className="flex items-center gap-2">
             <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500" />
               <input
                 ref={searchInputRef}
                 type="search"
@@ -408,7 +442,7 @@ export const LibraryPage: React.FC = () => {
                     : `Search saved materials in ${activeCourse.code}...`
                 }
                 aria-label="Search library"
-                className="w-full rounded-md border border-zinc-300 bg-white py-2 pl-9 pr-8 text-sm text-zinc-950 placeholder:text-zinc-400 focus:border-zinc-950 focus:outline-none"
+                className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-2 pl-9 pr-8 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
               />
               {searchQuery && (
                 <button
@@ -418,7 +452,7 @@ export const LibraryPage: React.FC = () => {
                     searchInputRef.current?.focus();
                   }}
                   aria-label="Clear search"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-900 cursor-pointer"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-zinc-200 cursor-pointer"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -435,8 +469,8 @@ export const LibraryPage: React.FC = () => {
                 aria-label={`Filter by type: ${activeFilterLabel}`}
                 className={`inline-flex h-[38px] items-center gap-1.5 rounded-md border px-3 text-sm transition-colors cursor-pointer ${
                   currentTypeFilter !== 'all'
-                    ? 'border-zinc-950 bg-zinc-950 text-white'
-                    : 'border-zinc-300 bg-white text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50'
+                    ? 'border-zinc-950 bg-zinc-950 text-white dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-950'
+                    : 'border-zinc-300 bg-white text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:bg-zinc-800'
                 }`}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
@@ -453,12 +487,12 @@ export const LibraryPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -4, scale: 0.97 }}
                     transition={{ duration: 0.14 }}
-                    className="absolute right-0 z-40 mt-2.5 w-52 origin-top-right rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg"
+                    className="absolute right-0 z-40 mt-2.5 w-52 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1.5 shadow-lg dark:shadow-black/40"
                   >
                     {/* Tooltip pointer arrow */}
                     <span
                       aria-hidden="true"
-                      className="absolute -top-1.5 right-4 h-3 w-3 rotate-45 border-l border-t border-zinc-200 bg-white"
+                      className="absolute -top-1.5 right-4 h-3 w-3 rotate-45 border-l border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
                     />
                     <div className="relative z-10 max-h-64 overflow-y-auto space-y-0.5">
                       {currentTypeOptions.map((opt) => {
@@ -472,8 +506,8 @@ export const LibraryPage: React.FC = () => {
                             onClick={() => handleSelectTypeFilter(opt.value)}
                             className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors cursor-pointer ${
                               isSelected
-                                ? 'bg-zinc-950 text-white font-medium'
-                                : 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950'
+                                ? 'bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950 font-medium'
+                                : 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
                             }`}
                           >
                             <span className="truncate">{opt.label}</span>
@@ -492,7 +526,7 @@ export const LibraryPage: React.FC = () => {
               <button
                 type="button"
                 onClick={handleExitSearchFocus}
-                className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-zinc-600 hover:text-zinc-950 cursor-pointer"
+                className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer"
               >
                 Done
               </button>
@@ -506,7 +540,7 @@ export const LibraryPage: React.FC = () => {
             <div
               role="tablist"
               aria-label="Library sections"
-              className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 p-1"
+              className="inline-flex items-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 p-1"
             >
               {(
                 [
@@ -526,14 +560,16 @@ export const LibraryPage: React.FC = () => {
                       setFilterMenuOpen(false);
                     }}
                     className={`relative rounded-full px-4 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                      isActive ? 'text-white' : 'text-zinc-600 hover:text-zinc-950'
+                      isActive
+                        ? 'text-white dark:text-zinc-950'
+                        : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200'
                     }`}
                   >
                     {isActive && (
                       <motion.span
                         layoutId="library-tab-pill"
                         transition={{ type: 'spring', stiffness: 450, damping: 34 }}
-                        className="absolute inset-0 rounded-full bg-zinc-950"
+                        className="absolute inset-0 rounded-full bg-zinc-950 dark:bg-zinc-200"
                         aria-hidden="true"
                       />
                     )}
@@ -542,7 +578,9 @@ export const LibraryPage: React.FC = () => {
                       {item.count !== null && (
                         <span
                           className={`font-mono text-xs tabular-nums ${
-                            isActive ? 'text-zinc-300' : 'text-zinc-400'
+                            isActive
+                              ? 'text-zinc-300 dark:text-zinc-700'
+                              : 'text-zinc-400 dark:text-zinc-500'
                           }`}
                         >
                           {item.count}
@@ -557,11 +595,11 @@ export const LibraryPage: React.FC = () => {
         )}
 
         {/* Unsaved Extraction Draft Recovery Banner */}
-        {pendingDraft && activeTab === 'sources' && !searchFocused && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-xs sm:text-sm">
+        {isOwner && pendingDraft && activeTab === 'sources' && !searchFocused && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-4 py-2.5 text-xs sm:text-sm">
             <div className="truncate">
-              <span className="font-medium text-zinc-950">Unsaved draft:</span>{' '}
-              <span className="text-zinc-700">{pendingDraft.title || 'Untitled Material'}</span>
+              <span className="font-medium text-zinc-950 dark:text-zinc-200">Unsaved draft:</span>{' '}
+              <span className="text-zinc-700 dark:text-zinc-300">{pendingDraft.title || 'Untitled Material'}</span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Button
@@ -626,21 +664,28 @@ export const LibraryPage: React.FC = () => {
         ) : sourcesLoading && sources.length === 0 ? (
           <LoadingSkeleton lines={4} />
         ) : sources.length === 0 ? (
-          <EmptyState
-            title={`No study materials in ${activeCourse.code} yet`}
-            description="Upload PDFs, PowerPoint decks (.pptx), photographs of textbook pages or handwritten notes, or paste typed notes. Extracted content is structured, editable before saving, and cloud-synced across your devices."
-            actionLabel="Add your first material"
-            onAction={() => {
-              setUseRestoredDraft(false);
-              setImportModalOpen(true);
-            }}
-          />
+          isOwner ? (
+            <EmptyState
+              title={`No study materials in ${activeCourse.code} yet`}
+              description="Upload PDFs, PowerPoint decks (.pptx), photographs of textbook pages or handwritten notes, or paste typed notes. Extracted content is structured, editable before saving, and cloud-synced across your devices."
+              actionLabel="Add your first material"
+              onAction={() => {
+                setUseRestoredDraft(false);
+                setImportModalOpen(true);
+              }}
+            />
+          ) : (
+            <EmptyState
+              title={`No materials in ${activeCourse.code} yet`}
+              description={`Course materials are managed by ${activeCourse.authorName || 'the course author'}. New uploads will appear here automatically.`}
+            />
+          )
         ) : filteredSources.length === 0 ? (
-          <div className="border-t border-zinc-200 py-10 text-center text-sm text-zinc-500">
+          <div className="border-t border-zinc-200 dark:border-zinc-800 py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
             No materials match your current search or filter.
           </div>
         ) : (
-          <div className="border-t border-zinc-200 divide-y divide-zinc-200">
+          <div className="border-t border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-200 dark:divide-zinc-800">
             {filteredSources.map((src) => {
               const topicName = src.topicId ? topicMap.get(src.topicId)?.name : null;
               const uncertain = countUncertainMarkers(src.extractedContent);
@@ -658,11 +703,11 @@ export const LibraryPage: React.FC = () => {
                     setSearchFocused(false);
                     setActiveSourceId(src.id);
                   }}
-                  className="group block w-full py-4 text-left hover:bg-zinc-50/80 px-2 rounded-md transition-colors cursor-pointer"
+                  className="group block w-full py-4 text-left hover:bg-zinc-50/80 dark:hover:bg-zinc-900/70 px-2 rounded-md transition-colors cursor-pointer"
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-zinc-700">
+                      <span className="font-medium text-zinc-700 dark:text-zinc-300">
                         {MATERIAL_TYPE_LABELS[src.materialType]}
                       </span>
                       {topicName && (
@@ -699,7 +744,7 @@ export const LibraryPage: React.FC = () => {
 
                     <div className="flex items-center gap-2 tabular-nums">
                       {uncertain > 0 && (
-                        <span className="inline-flex items-center gap-1 font-medium text-zinc-900">
+                        <span className="inline-flex items-center gap-1 font-medium text-zinc-900 dark:text-zinc-200">
                           <AlertTriangle className="h-3 w-3" />
                           {uncertain} to review
                         </span>
@@ -708,16 +753,16 @@ export const LibraryPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <h3 className="mt-1.5 text-base font-medium text-zinc-950 group-hover:underline underline-offset-4">
+                  <h3 className="mt-1.5 text-base font-medium text-zinc-950 dark:text-zinc-200 group-hover:underline underline-offset-4">
                     {src.title}
                   </h3>
 
                   {snippet && (
-                    <p className="mt-1 text-sm text-zinc-600 line-clamp-2">{snippet}</p>
+                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400 line-clamp-2">{snippet}</p>
                   )}
 
-                  {src.studentNotes.trim() && (
-                    <p className="mt-1.5 text-xs text-zinc-500 truncate">
+                  {isOwner && src.studentNotes.trim() && (
+                    <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400 truncate">
                       Note: {src.studentNotes.trim()}
                     </p>
                   )}
@@ -734,7 +779,11 @@ export const LibraryPage: React.FC = () => {
       <Modal
         open={topicsListOpen}
         title="Choose a topic"
-        description={`Filter ${activeCourse.code} materials by topic or manage your topics.`}
+        description={
+          isOwner
+            ? `Filter ${activeCourse.code} materials by topic or manage your topics.`
+            : `Filter ${activeCourse.code} materials by topic.`
+        }
         onClose={() => setTopicsListOpen(false)}
       >
         <div className="space-y-4">
@@ -747,8 +796,8 @@ export const LibraryPage: React.FC = () => {
               }}
               className={`flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm cursor-pointer transition-colors ${
                 selectedTopicId === 'all'
-                  ? 'bg-zinc-950 text-white font-medium'
-                  : 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950'
+                  ? 'bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950 font-medium'
+                  : 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
               }`}
             >
               <span>All materials</span>
@@ -764,8 +813,8 @@ export const LibraryPage: React.FC = () => {
                 }}
                 className={`flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm cursor-pointer transition-colors ${
                   selectedTopicId === 'unassigned'
-                    ? 'bg-zinc-950 text-white font-medium'
-                    : 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950'
+                    ? 'bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950 font-medium'
+                    : 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
                 }`}
               >
                 <span>General / Unassigned</span>
@@ -778,8 +827,10 @@ export const LibraryPage: React.FC = () => {
                 <LoadingSkeleton lines={3} />
               </div>
             ) : topics.length === 0 ? (
-              <p className="px-3 py-4 text-xs text-zinc-500">
-                No topics in {activeCourse.code} yet. Create one below or add one when uploading a material or note.
+              <p className="px-3 py-4 text-xs text-zinc-500 dark:text-zinc-400">
+                {isOwner
+                  ? `No topics in ${activeCourse.code} yet. Create one below or add one when uploading a material or note.`
+                  : `No topics have been organized in ${activeCourse.code} yet.`}
               </p>
             ) : (
               topics.map((topic) => {
@@ -790,8 +841,8 @@ export const LibraryPage: React.FC = () => {
                     key={topic.id}
                     className={`flex items-center justify-between rounded-md transition-colors ${
                       selected
-                        ? 'bg-zinc-950 text-white'
-                        : 'text-zinc-700 hover:bg-zinc-100'
+                        ? 'bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950'
+                        : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'
                     }`}
                   >
                     <button
@@ -801,70 +852,80 @@ export const LibraryPage: React.FC = () => {
                         setTopicsListOpen(false);
                       }}
                       className={`min-w-0 flex-1 flex items-center justify-between gap-2 px-3 py-2.5 text-left text-sm cursor-pointer ${
-                        selected ? 'font-medium text-white' : 'text-zinc-800'
+                        selected
+                          ? 'font-medium text-white dark:text-zinc-950'
+                          : 'text-zinc-800 dark:text-zinc-200'
                       }`}
                     >
                       <span className="truncate">{topic.name}</span>
                       <span
                         className={`font-mono text-xs tabular-nums shrink-0 ${
-                          selected ? 'text-zinc-300' : 'text-zinc-400'
+                          selected
+                            ? 'text-zinc-300 dark:text-zinc-700'
+                            : 'text-zinc-400 dark:text-zinc-500'
                         }`}
                       >
                         {count}
                       </span>
                     </button>
-                    <div className="flex items-center pr-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTopicsListOpen(false);
-                          setEditingTopic(topic);
-                          setTopicModalOpen(true);
-                        }}
-                        aria-label={`Rename ${topic.name}`}
-                        className={`inline-flex h-7 w-7 items-center justify-center rounded cursor-pointer ${
-                          selected
-                            ? 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
-                            : 'text-zinc-500 hover:bg-zinc-200 hover:text-zinc-950'
-                        }`}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTopicsListOpen(false);
-                          setTopicToDelete(topic);
-                        }}
-                        aria-label={`Delete ${topic.name}`}
-                        className={`inline-flex h-7 w-7 items-center justify-center rounded cursor-pointer ${
-                          selected
-                            ? 'text-zinc-300 hover:bg-red-950/60 hover:text-red-300'
-                            : 'text-zinc-500 hover:bg-red-50 hover:text-red-700'
-                        }`}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
+                    {isOwner && (
+                      <div className="flex items-center pr-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopicsListOpen(false);
+                            setEditingTopic(topic);
+                            setTopicModalOpen(true);
+                          }}
+                          aria-label={`Rename ${topic.name}`}
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded cursor-pointer ${
+                            selected
+                              ? 'text-zinc-300 hover:bg-zinc-800 hover:text-white dark:text-zinc-700 dark:hover:bg-zinc-300 dark:hover:text-zinc-950'
+                              : 'text-zinc-500 hover:bg-zinc-200 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200'
+                          }`}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopicsListOpen(false);
+                            setTopicToDelete(topic);
+                          }}
+                          aria-label={`Delete ${topic.name}`}
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded cursor-pointer ${
+                            selected
+                              ? 'text-zinc-300 hover:bg-red-950/60 hover:text-red-300 dark:text-zinc-700 dark:hover:bg-red-200 dark:hover:text-red-800'
+                              : 'text-zinc-500 hover:bg-red-50 hover:text-red-700 dark:text-zinc-400 dark:hover:bg-red-950/40 dark:hover:text-red-400'
+                          }`}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })
             )}
           </div>
 
-          <div className="flex items-center justify-between border-t border-zinc-200 pt-3">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setTopicsListOpen(false);
-                setEditingTopic(null);
-                setTopicModalOpen(true);
-              }}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New topic
-            </Button>
+          <div className="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 pt-3">
+            {isOwner ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setTopicsListOpen(false);
+                  setEditingTopic(null);
+                  setTopicModalOpen(true);
+                }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New topic
+              </Button>
+            ) : (
+              <span />
+            )}
             <Button variant="ghost" size="sm" onClick={() => setTopicsListOpen(false)}>
               Close
             </Button>
@@ -872,30 +933,32 @@ export const LibraryPage: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Import Material Wizard Modal */}
-      <ImportMaterialModal
-        open={importModalOpen}
-        userId={user.uid}
-        courses={courses}
-        activeCourse={activeCourse}
-        topics={topics}
-        initialTopicId={
-          selectedTopicId !== 'all' && selectedTopicId !== 'unassigned' ? selectedTopicId : ''
-        }
-        restoredDraft={useRestoredDraft ? pendingDraft : null}
-        draftKey={draftKey}
-        onClose={() => setImportModalOpen(false)}
-        onSaved={(sourceId, savedCourseId) => {
-          setImportModalOpen(false);
-          setPendingDraft(null);
-          setUseRestoredDraft(false);
-          if (savedCourseId !== activeCourse.id) {
-            void selectCourse(savedCourseId);
-          } else {
-            setActiveSourceId(sourceId);
-          }
-        }}
-      />
+      {/* Owner-only Import & Topic Management Modals */}
+      {isOwner && (
+        <>
+          <ImportMaterialModal
+            open={importModalOpen}
+            userId={user.uid}
+            courses={ownedCourses}
+            activeCourse={activeCourse}
+            topics={topics}
+            initialTopicId={
+              selectedTopicId !== 'all' && selectedTopicId !== 'unassigned' ? selectedTopicId : ''
+            }
+            restoredDraft={useRestoredDraft ? pendingDraft : null}
+            draftKey={draftKey}
+            onClose={() => setImportModalOpen(false)}
+            onSaved={(sourceId, savedCourseId) => {
+              setImportModalOpen(false);
+              setPendingDraft(null);
+              setUseRestoredDraft(false);
+              if (savedCourseId !== activeCourse.id) {
+                void selectCourse(savedCourseId);
+              } else {
+                setActiveSourceId(sourceId);
+              }
+            }}
+          />
 
       {/* Topic Modals */}
       <TopicModal
@@ -945,6 +1008,8 @@ export const LibraryPage: React.FC = () => {
           </Button>
         </div>
       </Modal>
+        </>
+      )}
     </div>
   );
 };

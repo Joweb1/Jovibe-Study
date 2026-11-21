@@ -18,17 +18,101 @@
     },
     "Course": {
       "title": "Course",
-      "description": "An academic course created by the student.",
+      "description": "An academic course created by the student, optionally shared publicly via an invite link.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "code": { "type": "string", "minLength": 1, "maxLength": 32 },
         "name": { "type": "string", "minLength": 1, "maxLength": 120 },
         "description": { "type": "string", "maxLength": 1000 },
+        "isPublic": { "type": "boolean" },
+        "shareToken": { "type": "string", "maxLength": 128 },
+        "authorName": { "type": "string", "maxLength": 120 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "code", "name", "description", "createdAt", "updatedAt"]
+    },
+    "CourseShare": {
+      "title": "CourseShare",
+      "description": "PII-free public invite link lookup mapping a shareToken to an author's public course.",
+      "type": "object",
+      "properties": {
+        "shareToken": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseCode": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "courseName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "courseDescription": { "type": "string", "maxLength": 1000 },
+        "authorName": { "type": "string", "maxLength": 120 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["shareToken", "authorId", "courseId", "courseCode", "courseName", "courseDescription", "authorName", "active", "createdAt", "updatedAt"]
+    },
+    "CourseMember": {
+      "title": "CourseMember",
+      "description": "Active member enrolled in an author's shared course library.",
+      "type": "object",
+      "properties": {
+        "memberUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "groupId": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["member"] },
+        "shareToken": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["memberUid", "authorId", "courseId", "displayName", "photoURL", "groupId", "role", "shareToken", "joinedAt", "updatedAt"]
+    },
+    "CourseGroup": {
+      "title": "CourseGroup",
+      "description": "Author-managed named study group inside a shared course.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "courseId", "name", "description", "createdAt", "updatedAt"]
+    },
+    "JoinedCourse": {
+      "title": "JoinedCourse",
+      "description": "User's bookmark pointer to a shared course managed by another author.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseCode": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "courseName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "courseDescription": { "type": "string", "maxLength": 1000 },
+        "authorName": { "type": "string", "maxLength": 120 },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "authorId", "courseId", "courseCode", "courseName", "courseDescription", "authorName", "joinedAt", "updatedAt"]
+    },
+    "PersonalSourceNote": {
+      "title": "PersonalSourceNote",
+      "description": "Private member-owned annotations on a source belonging to a shared course.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "courseId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sourceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "notes": { "type": "string", "maxLength": 20000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseId", "sourceId", "notes", "createdAt", "updatedAt"]
     },
     "Topic": {
       "title": "Topic",
@@ -286,16 +370,203 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "StreakProfile": {
+      "title": "StreakProfile",
+      "description": "User-level global learning streak state and internal hidden freeze inventory.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "currentStreak": { "type": "number" },
+        "longestStreak": { "type": "number" },
+        "totalStudyDays": { "type": "number" },
+        "freezeBalance": { "type": "number" },
+        "lastQualifyingDate": { "type": "string" },
+        "lastEvaluatedDate": { "type": "string" },
+        "pendingClaimDate": { "type": "string" },
+        "pendingStreakCount": { "type": "number" },
+        "accountCreatedDate": { "type": "string" },
+        "timezoneOffsetMinutes": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "currentStreak",
+        "longestStreak",
+        "totalStudyDays",
+        "freezeBalance",
+        "lastQualifyingDate",
+        "lastEvaluatedDate",
+        "pendingClaimDate",
+        "pendingStreakCount",
+        "accountCreatedDate",
+        "timezoneOffsetMinutes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DailyStreakRecord": {
+      "title": "DailyStreakRecord",
+      "description": "Per-calendar-day (YYYY-MM-DD) streak record backing the monthly streak calendar.",
+      "type": "object",
+      "properties": {
+        "dateKey": { "type": "string" },
+        "userId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending_claim", "claimed", "frozen", "missed"] },
+        "streakCount": { "type": "number" },
+        "qualifyingActivitiesCount": { "type": "number" },
+        "firstActivityType": { "type": "string" },
+        "firstActivityTitle": { "type": "string", "maxLength": 140 },
+        "freezeAwarded": { "type": "boolean" },
+        "freezeConsumed": { "type": "boolean" },
+        "claimedAt": { "type": ["string", "null"], "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "dateKey",
+        "userId",
+        "status",
+        "streakCount",
+        "qualifyingActivitiesCount",
+        "firstActivityType",
+        "firstActivityTitle",
+        "freezeAwarded",
+        "freezeConsumed",
+        "claimedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FreezeLedgerEntry": {
+      "title": "FreezeLedgerEntry",
+      "description": "Append-only deterministic audit ledger for internal streak freeze grants, earnings, and consumptions.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "dateKey": { "type": "string" },
+        "action": { "type": "string", "enum": ["initial_grant", "earned", "consumed"] },
+        "delta": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "dateKey", "action", "delta", "balanceAfter", "createdAt"]
+    },
+    "StudyActivityEvent": {
+      "title": "StudyActivityEvent",
+      "description": "Immutable completed learning activity event across private and shared courses.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "courseCode": { "type": "string", "maxLength": 40 },
+        "isSharedCourse": { "type": "boolean" },
+        "activityType": {
+          "type": "string",
+          "enum": ["cbt", "flashcards", "fill_in_the_gap", "exam_prep", "automatic_study", "tutor", "live", "shared_library"]
+        },
+        "title": { "type": "string", "maxLength": 180 },
+        "dateKey": { "type": "string" },
+        "durationSeconds": { "type": "number" },
+        "score": { "type": ["number", "null"] },
+        "maxScore": { "type": ["number", "null"] },
+        "summary": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "courseId",
+        "courseCode",
+        "isSharedCourse",
+        "activityType",
+        "title",
+        "dateKey",
+        "durationSeconds",
+        "score",
+        "maxScore",
+        "summary",
+        "createdAt"
+      ]
+    },
+    "AppUsageSummary": {
+      "title": "AppUsageSummary",
+      "description": "Lifetime foreground Time in app and Active learning time totals for a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "totalAppSeconds": { "type": "number" },
+        "totalActiveLearningSeconds": { "type": "number" },
+        "lastActiveDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "totalAppSeconds", "totalActiveLearningSeconds", "lastActiveDate", "createdAt", "updatedAt"]
+    },
+    "AppUsageDailyRecord": {
+      "title": "AppUsageDailyRecord",
+      "description": "Per-day foreground Time in app and Active learning time breakdown.",
+      "type": "object",
+      "properties": {
+        "dateKey": { "type": "string" },
+        "userId": { "type": "string" },
+        "appSeconds": { "type": "number" },
+        "activeLearningSeconds": { "type": "number" },
+        "sessionsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["dateKey", "userId", "appSeconds", "activeLearningSeconds", "sessionsCount", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
+    "/courseShares/{shareToken}": {
+      "schema": { "$ref": "#/entities/CourseShare" },
+      "description": "PII-free public invite link lookup mapping a shareToken to an author's public course."
+    },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Private user account profile and workspace preferences."
     },
+    "/users/{userId}/streakProfile/current": {
+      "schema": { "$ref": "#/entities/StreakProfile" },
+      "description": "Global user learning streak profile and internal freeze protection balance."
+    },
+    "/users/{userId}/streakDays/{dateKey}": {
+      "schema": { "$ref": "#/entities/DailyStreakRecord" },
+      "description": "Daily streak status records keyed by local YYYY-MM-DD date."
+    },
+    "/users/{userId}/freezeLedger/{entryId}": {
+      "schema": { "$ref": "#/entities/FreezeLedgerEntry" },
+      "description": "Append-only deterministic audit log for streak freeze grants, earnings, and consumptions."
+    },
+    "/users/{userId}/studyActivities/{activityId}": {
+      "schema": { "$ref": "#/entities/StudyActivityEvent" },
+      "description": "Global completed learning activities across owned and shared courses."
+    },
+    "/users/{userId}/appUsage/summary": {
+      "schema": { "$ref": "#/entities/AppUsageSummary" },
+      "description": "Lifetime Time in app and Active learning time totals."
+    },
+    "/users/{userId}/appUsageDays/{dateKey}": {
+      "schema": { "$ref": "#/entities/AppUsageDailyRecord" },
+      "description": "Daily Time in app and Active learning time totals keyed by YYYY-MM-DD."
+    },
+    "/users/{userId}/joinedCourses/{courseId}": {
+      "schema": { "$ref": "#/entities/JoinedCourse" },
+      "description": "Shared courses joined by the user."
+    },
     "/users/{userId}/courses/{courseId}": {
       "schema": { "$ref": "#/entities/Course" },
       "description": "Courses owned by the user."
+    },
+    "/users/{userId}/courses/{courseId}/members/{memberUid}": {
+      "schema": { "$ref": "#/entities/CourseMember" },
+      "description": "Active members enrolled in an author's shared course."
+    },
+    "/users/{userId}/courses/{courseId}/groups/{groupId}": {
+      "schema": { "$ref": "#/entities/CourseGroup" },
+      "description": "Named study groups managed by the author of a shared course."
     },
     "/users/{userId}/courses/{courseId}/topics/{topicId}": {
       "schema": { "$ref": "#/entities/Topic" },
@@ -304,6 +575,10 @@
     "/users/{userId}/courses/{courseId}/sources/{sourceId}": {
       "schema": { "$ref": "#/entities/StudySource" },
       "description": "Extracted study sources and notes within a course."
+    },
+    "/users/{userId}/courses/{courseId}/sourceNotes/{sourceId}": {
+      "schema": { "$ref": "#/entities/PersonalSourceNote" },
+      "description": "Private personal annotations written by a learner on a shared course source."
     },
     "/users/{userId}/courses/{courseId}/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/TutorConversation" },
@@ -335,3 +610,4 @@
     }
   }
 }
+

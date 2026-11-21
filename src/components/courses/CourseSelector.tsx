@@ -39,7 +39,7 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({ onNewCourse }) =
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="inline-flex min-h-9 max-w-[180px] sm:max-w-[230px] items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-950 dark:text-zinc-50 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+        className="inline-flex min-h-9 max-w-[180px] sm:max-w-[230px] items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-950 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
       >
         <span className="truncate">
           {coursesLoading
@@ -82,15 +82,28 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({ onNewCourse }) =
                       }}
                       className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm cursor-pointer transition-colors ${
                         isSelected
-                          ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-950 dark:text-zinc-50 font-medium'
-                          : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-50'
+                          ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-950 dark:text-zinc-200 font-medium'
+                          : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200'
                       }`}
                     >
                       <div className="min-w-0">
-                        <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{course.code}</div>
+                        <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                          <span className="font-mono">{course.code}</span>
+                          {course.isShared ? (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>Shared</span>
+                            </>
+                          ) : course.isPublic ? (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>Public</span>
+                            </>
+                          ) : null}
+                        </div>
                         <div className="truncate">{course.name}</div>
                       </div>
-                      {isSelected && <Check className="h-4 w-4 shrink-0 text-zinc-950 dark:text-zinc-50" />}
+                      {isSelected && <Check className="h-4 w-4 shrink-0 text-zinc-950 dark:text-zinc-200" />}
                     </button>
                   );
                 })}
@@ -104,7 +117,7 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({ onNewCourse }) =
                   setOpen(false);
                   onNewCourse();
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-zinc-950 dark:text-zinc-50 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-zinc-950 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
               >
                 <Plus className="h-4 w-4 text-zinc-600 dark:text-zinc-400" />
                 New course
@@ -115,7 +128,7 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({ onNewCourse }) =
                   setOpen(false);
                   navigate('/courses');
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-50 cursor-pointer transition-colors"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer transition-colors"
               >
                 <FolderOpen className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
                 All courses

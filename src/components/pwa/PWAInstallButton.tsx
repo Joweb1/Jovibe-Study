@@ -35,9 +35,9 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
         <button
           type="button"
           onClick={() => void handleClick()}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950 cursor-pointer"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
         >
-          <Download className="h-4 w-4 text-zinc-500" />
+          <Download className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
           Install SOTAL Study
         </button>
       ) : (
@@ -56,16 +56,16 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
           onActionComplete?.();
         }}
       >
-        <ol className="space-y-3 text-sm text-zinc-700 list-decimal pl-5">
+        <ol className="space-y-3 text-sm text-zinc-700 dark:text-zinc-300 list-decimal pl-5">
           <li>
-            Tap the <Share className="inline h-3.5 w-3.5 mx-0.5 text-zinc-950" />{' '}
-            <span className="font-medium text-zinc-950">Share</span> button in Safari.
+            Tap the <Share className="inline h-3.5 w-3.5 mx-0.5 text-zinc-950 dark:text-zinc-200" />{' '}
+            <span className="font-medium text-zinc-950 dark:text-zinc-200">Share</span> button in Safari.
           </li>
           <li>
-            Scroll down and tap <span className="font-medium text-zinc-950">Add to Home Screen</span>.
+            Scroll down and tap <span className="font-medium text-zinc-950 dark:text-zinc-200">Add to Home Screen</span>.
           </li>
           <li>
-            Tap <span className="font-medium text-zinc-950">Add</span> in the top-right corner.
+            Tap <span className="font-medium text-zinc-950 dark:text-zinc-200">Add</span> in the top-right corner.
           </li>
         </ol>
         <div className="mt-5 flex justify-end">

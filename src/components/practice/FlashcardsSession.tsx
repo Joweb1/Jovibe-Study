@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AlertCircle,
   Bookmark,
   BookmarkCheck,
   Check,
@@ -12,17 +13,23 @@ import type { FlashcardItem } from '../../services/ai/practiceGenerators';
 import { geminiAudioPlayer, type PlaybackState } from '../../services/ai/audioService';
 import { createSavedStudyMaterial } from '../../services/firebase/savedMaterialService';
 import { createStudyHistoryRecord } from '../../services/firebase/historyService';
+import { useStreak } from '../../context/StreakContext';
+import { useLockedSessionTimer } from '../../hooks/usePersistentTimer';
+import { ActiveSessionTimerBar } from '../timer/StudyTimer';
 import { Button } from '../ui/Button';
 
 interface FlashcardsSessionProps {
   userId: string;
   course: Course;
+  sessionId: string;
+  timeLimitMinutes: number;
   topicIds: string[];
   initialCards: FlashcardItem[];
   references: SourceReference[];
   voiceEnabled: boolean;
   ttsVoice: GeminiTtsVoice;
   voiceRate: number;
+  onSessionComplete?: () => void;
   onExit: () => void;
 }
 
@@ -31,25 +38,34 @@ type CardRating = 'known' | 'difficult';
 export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
   userId,
   course,
+  sessionId,
+  timeLimitMinutes,
   topicIds,
   initialCards,
   references,
   voiceEnabled,
   ttsVoice,
   voiceRate,
+  onSessionComplete,
   onExit,
 }) => {
+  const { recordLearningActivity } = useStreak();
   const [queue, setQueue] = useState<FlashcardItem[]>(initialCards);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [ratings, setRatings] = useState<Record<string, CardRating>>({});
   const [finished, setFinished] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const [attemptTimerKey, setAttemptTimerKey] = useState<string>(`sotal_timer_fc_${sessionId}`);
+  const [activeTimeLimitMinutes, setActiveTimeLimitMinutes] = useState<number>(timeLimitMinutes);
   const [savingDeck, setSavingDeck] = useState(false);
   const [deckSaved, setDeckSaved] = useState(false);
-  const [historyLogged, setHistoryLogged] = useState(false);
   const [playback, setPlayback] = useState<PlaybackState>(() => geminiAudioPlayer.getState());
   const startedAtRef = useRef<number>(Date.now());
+  const historyLoggedRef = useRef(false);
+  const ratingsRef = useRef<Record<string, CardRating>>(ratings);
+  ratingsRef.current = ratings;
 
   useEffect(() => geminiAudioPlayer.subscribe(setPlayback), []);
   useEffect(() => () => geminiAudioPlayer.stop(), []);
@@ -58,20 +74,28 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
   const knownCount = Object.values(ratings).filter((r) => r === 'known').length;
   const difficultCards = initialCards.filter((c) => ratings[c.id] === 'difficult');
 
-  const logSession = async (finalRatings: Record<string, CardRating>) => {
-    if (historyLogged) return;
-    setHistoryLogged(true);
+  const logSession = async (finalRatings: Record<string, CardRating>, expiredByTimer = false) => {
+    if (historyLoggedRef.current) return;
+    historyLoggedRef.current = true;
+    onSessionComplete?.();
+
+    const ratedTotal = Object.keys(finalRatings).length;
     const known = Object.values(finalRatings).filter((r) => r === 'known').length;
     const difficult = Object.values(finalRatings).filter((r) => r === 'difficult').length;
     const weaknesses = initialCards
       .filter((c) => finalRatings[c.id] === 'difficult')
       .map((c) => c.conceptTag)
       .filter(Boolean);
+    const durationSeconds = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
+    const title = `Flashcards — ${course.code} (${initialCards.length} cards)`;
+    const summary = `Reviewed ${ratedTotal}/${initialCards.length} flashcards: ${known} mastered, ${difficult} marked difficult${
+      expiredByTimer ? ' (time limit reached)' : ''
+    }.`;
 
     try {
       await createStudyHistoryRecord(userId, course.id, {
         sessionType: 'flashcards',
-        title: `Flashcards — ${course.code} (${initialCards.length} cards)`,
+        title,
         topicIds,
         status: 'completed',
         score: known,
@@ -79,18 +103,45 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
         correctCount: known,
         incorrectCount: difficult,
         skippedCount: Math.max(0, initialCards.length - known - difficult),
-        durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
-        summary: `Reviewed ${initialCards.length} flashcards: ${known} mastered, ${difficult} marked difficult.`,
+        durationSeconds,
+        summary,
         weaknesses: Array.from(new Set(weaknesses)),
-        details: { cardCount: initialCards.length },
+        details: { cardCount: initialCards.length, timedOut: expiredByTimer },
       });
     } catch {
       // Non-blocking history save
     }
+
+    if (ratedTotal > 0) {
+      void recordLearningActivity({
+        activityType: 'flashcards',
+        title,
+        courseId: course.id,
+        courseCode: course.code,
+        isSharedCourse: Boolean(course.isShared),
+        durationSeconds,
+        score: known,
+        maxScore: initialCards.length,
+        summary,
+      });
+    }
   };
 
+  const timer = useLockedSessionTimer({
+    enabled: activeTimeLimitMinutes > 0,
+    durationMinutes: activeTimeLimitMinutes,
+    storageKey: attemptTimerKey,
+    stopped: finished,
+    onExpire: () => {
+      geminiAudioPlayer.stop();
+      setTimedOut(true);
+      setFinished(true);
+      void logSession(ratingsRef.current, true);
+    },
+  });
+
   const handleRate = (rating: CardRating) => {
-    if (!currentCard) return;
+    if (!currentCard || finished || timer.isExpired) return;
     geminiAudioPlayer.stop();
     const nextRatings = { ...ratings, [currentCard.id]: rating };
     setRatings(nextRatings);
@@ -101,11 +152,12 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
       setIndex(index + 1);
     } else {
       setFinished(true);
-      void logSession(nextRatings);
+      void logSession(nextRatings, false);
     }
   };
 
   const handleShuffleRemaining = () => {
+    if (finished || timer.isExpired) return;
     const remaining = [...queue.slice(index)];
     for (let i = remaining.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -123,6 +175,13 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
     setFlipped(false);
     setShowHint(false);
     setFinished(false);
+    setTimedOut(false);
+    historyLoggedRef.current = false;
+    startedAtRef.current = Date.now();
+    if (timeLimitMinutes > 0) {
+      setActiveTimeLimitMinutes(timeLimitMinutes);
+      setAttemptTimerKey(`sotal_timer_fc_${sessionId}_repeat_${Date.now()}`);
+    }
   };
 
   const handleRestartAll = () => {
@@ -132,6 +191,13 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
     setShowHint(false);
     setRatings({});
     setFinished(false);
+    setTimedOut(false);
+    historyLoggedRef.current = false;
+    startedAtRef.current = Date.now();
+    if (timeLimitMinutes > 0) {
+      setActiveTimeLimitMinutes(timeLimitMinutes);
+      setAttemptTimerKey(`sotal_timer_fc_${sessionId}_restart_${Date.now()}`);
+    }
   };
 
   const handleSaveDeck = async () => {
@@ -154,26 +220,38 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
     const pct = initialCards.length > 0 ? Math.round((knownCount / initialCards.length) * 100) : 0;
     return (
       <div className="max-w-2xl space-y-6">
-        <div className="border-b border-zinc-200 pb-5">
-          <div className="text-xs font-mono text-zinc-500 uppercase">Deck Complete</div>
-          <h2 className="mt-1 font-display text-2xl font-semibold text-zinc-950">
+        {timedOut && (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-300 dark:border-amber-800/80 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+            <div>
+              <div className="font-semibold">Time is up</div>
+              <p className="text-xs opacity-90 mt-0.5">
+                Your timed flashcard session ended automatically and your rated cards were saved.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="border-b border-zinc-200 dark:border-zinc-800 pb-5">
+          <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400 uppercase">Deck Complete</div>
+          <h2 className="mt-1 font-display text-2xl font-semibold text-zinc-950 dark:text-zinc-200">
             {knownCount} of {initialCards.length} mastered ({pct}%)
           </h2>
-          <p className="mt-1 text-sm text-zinc-600">
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
             Session recorded to your {course.code} Study History.
           </p>
         </div>
 
         {difficultCards.length > 0 && (
           <div className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
               Cards marked difficult ({difficultCards.length})
             </h3>
-            <div className="divide-y divide-zinc-200 border-y border-zinc-200">
+            <div className="divide-y divide-zinc-200 dark:divide-zinc-800 border-y border-zinc-200 dark:border-zinc-800">
               {difficultCards.map((c) => (
                 <div key={c.id} className="py-3 space-y-1">
-                  <div className="text-sm font-medium text-zinc-950">{c.front}</div>
-                  <div className="text-xs text-zinc-600">{c.back}</div>
+                  <div className="text-sm font-medium text-zinc-950 dark:text-zinc-200">{c.front}</div>
+                  <div className="text-xs text-zinc-600 dark:text-zinc-400">{c.back}</div>
                 </div>
               ))}
             </div>
@@ -211,17 +289,24 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
 
   return (
     <div className="max-w-2xl space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-4">
         <div>
-          <div className="text-xs text-zinc-500 tabular-nums">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
             Card {index + 1} of {queue.length} · Known: {knownCount} · Difficult:{' '}
             {difficultCards.length}
           </div>
-          <h2 className="font-display text-lg font-semibold text-zinc-950">
+          <h2 className="font-display text-lg font-semibold text-zinc-950 dark:text-zinc-200">
             Flashcards — {course.code}
           </h2>
         </div>
         <div className="flex items-center gap-2">
+          {activeTimeLimitMinutes > 0 && (
+            <ActiveSessionTimerBar
+              remainingSeconds={timer.remainingSeconds}
+              isWarning={timer.isWarning}
+              isUrgent={timer.isUrgent}
+            />
+          )}
           <Button variant="ghost" size="sm" onClick={handleShuffleRemaining}>
             <Shuffle className="h-3.5 w-3.5" />
             Shuffle
@@ -254,18 +339,18 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
                 setFlipped((prev) => !prev);
               }
             }}
-            className="min-h-[260px] flex flex-col justify-between rounded-md border border-zinc-300 bg-white p-6 sm:p-8 cursor-pointer hover:border-zinc-500 transition-colors"
+            className="min-h-[260px] flex flex-col justify-between rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 sm:p-8 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500 transition-colors"
           >
-            <div className="flex items-center justify-between text-xs text-zinc-500">
+            <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
               <span className="font-mono uppercase">{flipped ? 'Answer' : 'Prompt'}</span>
               <span>{currentCard.conceptTag}</span>
             </div>
 
-            <div className="my-6 text-base sm:text-lg leading-relaxed text-zinc-950 font-medium">
+            <div className="my-6 text-base sm:text-lg leading-relaxed text-zinc-950 dark:text-zinc-200 font-medium">
               {flipped ? currentCard.back : currentCard.front}
             </div>
 
-            <div className="flex items-center justify-between text-xs text-zinc-500">
+            <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
               <span>{flipped ? currentCard.sourceCitation || 'Click to view prompt' : 'Click card to reveal answer'}</span>
               {voiceEnabled && (
                 <button
@@ -279,7 +364,7 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
                       playbackRate: voiceRate,
                     });
                   }}
-                  className="inline-flex items-center gap-1 hover:text-zinc-950"
+                  className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer"
                 >
                   <Volume2 className="h-3.5 w-3.5" />
                   <span>
@@ -295,16 +380,16 @@ export const FlashcardsSession: React.FC<FlashcardsSessionProps> = ({
           </div>
 
           {!flipped && currentCard.hint && (
-            <div className="text-xs text-zinc-600">
+            <div className="text-xs text-zinc-600 dark:text-zinc-400">
               {showHint ? (
-                <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3.5 py-2.5">
-                  <strong className="font-medium text-zinc-900">Hint:</strong> {currentCard.hint}
+                <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3.5 py-2.5">
+                  <strong className="font-medium text-zinc-900 dark:text-zinc-200">Hint:</strong> {currentCard.hint}
                 </div>
               ) : (
                 <button
                   type="button"
                   onClick={() => setShowHint(true)}
-                  className="underline underline-offset-2 hover:text-zinc-950"
+                  className="underline underline-offset-2 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer"
                 >
                   Show hint
                 </button>
