@@ -66,8 +66,8 @@ const CourseCardIllustration: React.FC<{ motif: CourseMotif; inverted?: boolean 
 }) => {
   const baseClass = `pointer-events-none absolute -right-3 -bottom-3 h-28 w-32 sm:h-32 sm:w-36 transition-all duration-300 group-hover:scale-105 ${
     inverted
-      ? 'text-white opacity-[0.12] group-hover:opacity-[0.19]'
-      : 'text-zinc-900 opacity-[0.09] group-hover:opacity-[0.16]'
+      ? 'text-white dark:text-zinc-950 opacity-[0.12] group-hover:opacity-[0.19]'
+      : 'text-zinc-900 dark:text-zinc-100 opacity-[0.09] dark:opacity-[0.12] group-hover:opacity-[0.16] dark:group-hover:opacity-[0.2]'
   }`;
 
   switch (motif) {
@@ -103,92 +103,75 @@ const CourseCardIllustration: React.FC<{ motif: CourseMotif; inverted?: boolean 
           />
         </svg>
       );
-    case 'business':
-      return (
-        <svg viewBox="0 0 140 120" fill="none" aria-hidden="true" className={baseClass}>
-          <line x1="20" y1="96" x2="122" y2="96" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-          <rect x="28" y="66" width="16" height="30" rx="3" stroke="currentColor" strokeWidth="2.4" />
-          <rect x="54" y="50" width="16" height="46" rx="3" fill="currentColor" fillOpacity="0.14" stroke="currentColor" strokeWidth="2.4" />
-          <rect x="80" y="38" width="16" height="58" rx="3" stroke="currentColor" strokeWidth="2.4" />
-          <rect x="106" y="24" width="14" height="72" rx="3" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="2.4" />
-          <path
-            d="M28 54 L58 34 L82 40 L114 16"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <circle cx="58" cy="34" r="3.5" fill="currentColor" />
-          <circle cx="82" cy="40" r="3.5" fill="currentColor" />
-          <circle cx="114" cy="16" r="3.5" fill="currentColor" />
-        </svg>
-      );
     case 'tech':
       return (
         <svg viewBox="0 0 140 120" fill="none" aria-hidden="true" className={baseClass}>
-          <rect x="44" y="34" width="52" height="52" rx="10" fill="currentColor" fillOpacity="0.14" stroke="currentColor" strokeWidth="2.5" />
-          <rect x="58" y="48" width="24" height="24" rx="4" stroke="currentColor" strokeWidth="2.2" />
-          <line x1="58" y1="18" x2="58" y2="34" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="70" y1="18" x2="70" y2="34" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="82" y1="18" x2="82" y2="34" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="58" y1="86" x2="58" y2="102" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="70" y1="86" x2="70" y2="102" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="82" y1="86" x2="82" y2="102" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="26" y1="48" x2="44" y2="48" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="26" y1="60" x2="44" y2="60" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="26" y1="72" x2="44" y2="72" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="96" y1="48" x2="114" y2="48" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="96" y1="60" x2="114" y2="60" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <line x1="96" y1="72" x2="114" y2="72" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+          <rect x="36" y="24" width="68" height="68" rx="14" stroke="currentColor" strokeWidth="2.5" />
+          <rect x="52" y="40" width="36" height="36" rx="8" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="2" />
+          <line x1="50" y1="12" x2="50" y2="24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="70" y1="12" x2="70" y2="24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="90" y1="12" x2="90" y2="24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="50" y1="92" x2="50" y2="104" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="70" y1="92" x2="70" y2="104" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="90" y1="92" x2="90" y2="104" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="16" y1="42" x2="36" y2="42" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="16" y1="58" x2="36" y2="58" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="16" y1="74" x2="36" y2="74" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="104" y1="42" x2="124" y2="42" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="104" y1="58" x2="124" y2="58" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="104" y1="74" x2="124" y2="74" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
         </svg>
       );
     case 'science':
       return (
         <svg viewBox="0 0 140 120" fill="none" aria-hidden="true" className={baseClass}>
-          <ellipse cx="72" cy="60" rx="46" ry="18" transform="rotate(-28 72 60)" stroke="currentColor" strokeWidth="2.4" />
-          <ellipse cx="72" cy="60" rx="46" ry="18" transform="rotate(28 72 60)" stroke="currentColor" strokeWidth="2.4" />
-          <ellipse cx="72" cy="60" rx="46" ry="18" transform="rotate(90 72 60)" stroke="currentColor" strokeWidth="2.4" />
-          <circle cx="72" cy="60" r="9" fill="currentColor" fillOpacity="0.22" stroke="currentColor" strokeWidth="2.4" />
-          <circle cx="110" cy="40" r="4" fill="currentColor" />
-          <circle cx="34" cy="80" r="4" fill="currentColor" />
-          <circle cx="72" cy="14" r="4" fill="currentColor" />
+          <circle cx="70" cy="58" r="7" fill="currentColor" />
+          <ellipse cx="70" cy="58" rx="46" ry="16" stroke="currentColor" strokeWidth="2.4" />
+          <g transform="rotate(60 70 58)">
+            <ellipse cx="70" cy="58" rx="46" ry="16" stroke="currentColor" strokeWidth="2.4" />
+          </g>
+          <g transform="rotate(-60 70 58)">
+            <ellipse cx="70" cy="58" rx="46" ry="16" stroke="currentColor" strokeWidth="2.4" />
+          </g>
+        </svg>
+      );
+    case 'business':
+      return (
+        <svg viewBox="0 0 140 120" fill="none" aria-hidden="true" className={baseClass}>
+          <line x1="22" y1="96" x2="118" y2="96" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <rect x="28" y="68" width="16" height="28" rx="3" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="2" />
+          <rect x="52" y="52" width="16" height="44" rx="3" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="2" />
+          <rect x="76" y="38" width="16" height="58" rx="3" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="2" />
+          <rect x="100" y="24" width="16" height="72" rx="3" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="2" />
+          <path d="M26 62 L54 44 L78 50 L108 18" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+          <polyline points="96 18 108 18 108 30" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );
     case 'math':
       return (
         <svg viewBox="0 0 140 120" fill="none" aria-hidden="true" className={baseClass}>
-          <polygon
-            points="70,18 114,96 26,96"
-            fill="currentColor"
-            fillOpacity="0.1"
+          <circle cx="70" cy="58" r="42" stroke="currentColor" strokeWidth="2.4" />
+          <path d="M70 20 L70 96" stroke="currentColor" strokeWidth="2" strokeDasharray="3 3" />
+          <path d="M32 58 L108 58" stroke="currentColor" strokeWidth="2" strokeDasharray="3 3" />
+          <path
+            d="M36 78 C48 42, 60 30, 70 58 C80 86, 92 74, 104 38"
             stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
+            strokeWidth="3"
+            strokeLinecap="round"
           />
-          <circle cx="70" cy="64" r="22" stroke="currentColor" strokeWidth="2.2" strokeDasharray="5 4" />
-          <line x1="70" y1="18" x2="70" y2="96" stroke="currentColor" strokeWidth="2" />
-          <path d="M56 96 C56 88 62 82 70 82" stroke="currentColor" strokeWidth="2.2" />
-          <circle cx="70" cy="18" r="3.5" fill="currentColor" />
-          <circle cx="114" cy="96" r="3.5" fill="currentColor" />
-          <circle cx="26" cy="96" r="3.5" fill="currentColor" />
+          <circle cx="70" cy="58" r="4" fill="currentColor" />
         </svg>
       );
     case 'humanities':
       return (
         <svg viewBox="0 0 140 120" fill="none" aria-hidden="true" className={baseClass}>
-          <polygon
-            points="70,18 118,40 22,40"
-            fill="currentColor"
-            fillOpacity="0.14"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-          />
-          <line x1="26" y1="48" x2="114" y2="48" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <rect x="34" y="48" width="12" height="40" stroke="currentColor" strokeWidth="2.3" />
-          <rect x="64" y="48" width="12" height="40" fill="currentColor" fillOpacity="0.12" stroke="currentColor" strokeWidth="2.3" />
-          <rect x="94" y="48" width="12" height="40" stroke="currentColor" strokeWidth="2.3" />
-          <rect x="22" y="88" width="96" height="10" rx="2" fill="currentColor" fillOpacity="0.12" stroke="currentColor" strokeWidth="2.4" />
+          <polygon points="70,18 24,38 116,38" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" />
+          <line x1="20" y1="44" x2="120" y2="44" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="32" y1="44" x2="32" y2="84" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="56" y1="44" x2="56" y2="84" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="84" y1="44" x2="84" y2="84" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="108" y1="44" x2="108" y2="84" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <rect x="20" y="84" width="100" height="12" rx="2" stroke="currentColor" strokeWidth="2.5" fill="currentColor" fillOpacity="0.15" />
         </svg>
       );
   }
@@ -206,14 +189,14 @@ export const CoursesPage: React.FC = () => {
   } = useCourses();
   const { navigate } = useRouter();
 
-  const [openMenuCourseId, setOpenMenuCourseId] = useState<string | null>(null);
   const [courseModalOpen, setCourseModalOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [courseToDelete, setCourseToDelete] = useState<Course | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const menuContainerRef = useRef<HTMLDivElement | null>(null);
+  const [openMenuCourseId, setOpenMenuCourseId] = useState<string | null>(null);
+  const menuContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!openMenuCourseId) return;
@@ -255,13 +238,13 @@ export const CoursesPage: React.FC = () => {
 
   return (
     <div className="space-y-7">
-      <div className="flex items-center justify-between gap-4 border-b border-zinc-200 pb-5">
+      <div className="flex items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-5">
         <div className="flex items-baseline gap-3 min-w-0">
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
             Courses
           </h1>
           {!coursesLoading && courses.length > 0 && (
-            <span className="text-xs text-zinc-500 tabular-nums">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
               {courses.length} {courses.length === 1 ? 'course' : 'courses'}
             </span>
           )}
@@ -309,10 +292,10 @@ export const CoursesPage: React.FC = () => {
                   isMenuOpen ? 'z-30 shadow-md' : 'z-0'
                 } ${
                   isActive
-                    ? 'border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-900 hover:border-zinc-900'
+                    ? 'border-zinc-950 dark:border-zinc-100 bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 hover:bg-zinc-900 dark:hover:bg-zinc-200 hover:border-zinc-900 dark:hover:border-zinc-200'
                     : isMenuOpen
-                    ? 'border-zinc-900 bg-white'
-                    : 'border-zinc-200 bg-white hover:border-zinc-900'
+                    ? 'border-zinc-900 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-950 dark:text-zinc-50'
+                    : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-950 dark:text-zinc-50 hover:border-zinc-900 dark:hover:border-zinc-600'
                 }`}
               >
                 {/* Clipped vector background illustration */}
@@ -325,14 +308,16 @@ export const CoursesPage: React.FC = () => {
                   type="button"
                   onClick={() => handleSelectCourse(course.id)}
                   aria-label={`Open ${course.code} ${course.name}`}
-                  className="absolute inset-0 z-10 rounded-2xl cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-950"
+                  className="absolute inset-0 z-10 rounded-2xl cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-950 dark:focus-visible:outline-zinc-100"
                 />
 
                 {/* Top Row: Subject Icon + More Tooltip Menu */}
                 <div className="relative z-20 flex items-start justify-between gap-2 pointer-events-none">
                   <span
                     className={`inline-flex h-11 w-11 items-center justify-center rounded-xl shadow-xs transition-transform duration-200 group-hover:scale-105 ${
-                      isActive ? 'bg-white text-zinc-950' : 'bg-zinc-950 text-white'
+                      isActive
+                        ? 'bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50'
+                        : 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950'
                     }`}
                   >
                     <Icon className="h-5 w-5" />
@@ -355,11 +340,11 @@ export const CoursesPage: React.FC = () => {
                       className={`inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors cursor-pointer ${
                         isActive
                           ? isMenuOpen
-                            ? 'bg-white text-zinc-950'
-                            : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
+                            ? 'bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50'
+                            : 'text-zinc-400 dark:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-200 hover:text-white dark:hover:text-zinc-950'
                           : isMenuOpen
-                          ? 'bg-zinc-950 text-white'
-                          : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-950'
+                          ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950'
+                          : 'text-zinc-400 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-50'
                       }`}
                     >
                       <MoreHorizontal className="h-4 w-4" />
@@ -374,12 +359,12 @@ export const CoursesPage: React.FC = () => {
                           exit={{ opacity: 0, y: -4, scale: 0.96 }}
                           transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-full z-40 mt-2 w-36 origin-top-right rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg"
+                          className="absolute right-0 top-full z-40 mt-2 w-36 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1.5 shadow-lg"
                         >
                           {/* Tooltip caret arrow */}
                           <span
                             aria-hidden="true"
-                            className="absolute -top-1.5 right-3 h-3 w-3 rotate-45 border-l border-t border-zinc-200 bg-white"
+                            className="absolute -top-1.5 right-3 h-3 w-3 rotate-45 border-l border-t border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900"
                           />
                           <div className="relative z-10 space-y-0.5">
                             <button
@@ -390,7 +375,7 @@ export const CoursesPage: React.FC = () => {
                                 setEditingCourse(course);
                                 setCourseModalOpen(true);
                               }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950 transition-colors cursor-pointer"
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-50 transition-colors cursor-pointer"
                             >
                               <Pencil className="h-3.5 w-3.5" />
                               Edit
@@ -402,7 +387,7 @@ export const CoursesPage: React.FC = () => {
                                 setOpenMenuCourseId(null);
                                 setCourseToDelete(course);
                               }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer"
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-300 transition-colors cursor-pointer"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                               Delete
@@ -418,12 +403,12 @@ export const CoursesPage: React.FC = () => {
                 <div className="relative z-10 mt-6 pointer-events-none">
                   <div
                     className={`flex items-center gap-1.5 text-xs ${
-                      isActive ? 'text-zinc-400' : 'text-zinc-500'
+                      isActive ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-400'
                     }`}
                   >
                     <span
                       className={`font-mono font-medium truncate ${
-                        isActive ? 'text-zinc-300' : 'text-zinc-700'
+                        isActive ? 'text-zinc-300 dark:text-zinc-800' : 'text-zinc-700 dark:text-zinc-300'
                       }`}
                     >
                       {course.code}
@@ -431,13 +416,13 @@ export const CoursesPage: React.FC = () => {
                     {isActive && (
                       <>
                         <span aria-hidden="true">·</span>
-                        <span className="font-medium text-white shrink-0">Active</span>
+                        <span className="font-medium text-white dark:text-zinc-950 shrink-0">Active</span>
                       </>
                     )}
                   </div>
                   <h2
                     className={`mt-1 font-display text-base sm:text-lg font-semibold tracking-tight line-clamp-2 ${
-                      isActive ? 'text-white' : 'text-zinc-950'
+                      isActive ? 'text-white dark:text-zinc-950' : 'text-zinc-950 dark:text-zinc-50'
                     }`}
                   >
                     {course.name}

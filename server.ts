@@ -15,6 +15,19 @@ import {
   TTS_MODEL,
   Type,
 } from './server/geminiService.ts';
+import {
+  extractProviderVision,
+  generateProviderJson,
+  generateProviderText,
+  isOpenAiProviderId,
+  ProviderRequestError,
+  resolveProviderKey,
+  testProviderConnection,
+  transcribeProviderAudio,
+  synthesizeProviderSpeech,
+  type OpenAiProviderId,
+} from './server/openaiProvider.ts';
+import { buildVisionPrompt } from './server/prompts.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,31 +53,47 @@ const ALLOWED_AUDIO_MIMES = new Set([
   'audio/x-m4a',
 ]);
 
-function buildVisionPrompt(mode: string, pageNumber?: number): string {
-  const pageHint = pageNumber ? `This image is Page ${pageNumber} of a document.` : '';
+function resolveProviderParam(value: string): OpenAiProviderId {
+  if (!isOpenAiProviderId(value)) {
+    throw new ProviderRequestError({
+      status: 404,
+      code: 'MODEL_UNAVAILABLE',
+      message: `Unknown AI provider "${value}".`,
+      retryable: false,
+      cooldownMs: 0,
+    });
+  }
+  return value;
+}
 
-  if (mode === 'handwriting') {
-    return [
-      'You are an academic document transcription assistant specializing in handwritten study notes.',
-      pageHint,
-      'Transcribe the handwritten notes accurately while preserving structure: headings, subheadings, numbered or bulleted lists, definitions, formulas, examples, and tables (in Markdown format).',
-      'CRITICAL ACCURACY RULE: If any word, symbol, or phrase is unclear, smudged, or ambiguous, DO NOT invent or guess confidently. Mark uncertain words inline as [unclear: best guess] or [illegible] if unreadable.',
-      'Return structured JSON matching the schema. Set uncertainCount to the exact number of [unclear: ...] or [illegible] markers included in your output.',
-    ]
-      .filter(Boolean)
-      .join(' ');
+function sendProviderError(
+  res: import('express').Response,
+  provider: string,
+  err: unknown
+): void {
+  if (err instanceof ProviderRequestError) {
+    res.status(err.status).json({
+      error: err.message,
+      code: err.code,
+      retryable: err.retryable,
+      shouldRotateKey:
+        err.code === 'INVALID_KEY' ||
+        err.code === 'RATE_LIMIT' ||
+        err.code === 'QUOTA_EXHAUSTED',
+      cooldownMs: err.cooldownMs,
+      provider,
+    });
+    return;
   }
 
-  return [
-    'You are an academic OCR and document structuring assistant.',
-    pageHint,
-    'Extract all readable academic text from this textbook page or scanned document while faithfully preserving headings, subheadings, paragraphs, bullet lists, definitions, worked examples, and tables (formatted cleanly in Markdown).',
-    'Omit decorative page headers/footers unless they carry meaningful section or page context.',
-    'If any text is cut off, blurred, or unreadable, mark it explicitly as [unclear: best guess] or [illegible] rather than inventing content, and count those markers in uncertainCount.',
-    'Return structured JSON matching the schema.',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  res.status(500).json({
+    error: err instanceof Error ? err.message : `${provider} request failed.`,
+    code: 'SERVER_ERROR',
+    retryable: true,
+    shouldRotateKey: false,
+    cooldownMs: 5_000,
+    provider,
+  });
 }
 
 async function startServer() {
@@ -77,6 +106,8 @@ async function startServer() {
       ok: true,
       serverFallbackAvailable: Boolean((process.env.GEMINI_API_KEY || '').trim()),
       visionConfigured: Boolean((process.env.GEMINI_API_KEY || '').trim()),
+      serverProviderKeysEnabled: (process.env.ALLOW_SERVER_PROVIDER_KEYS || '').trim() === 'true',
+      supportedProviders: ['gemini', 'cerebras', 'nvidia_nim', 'openrouter'],
     });
   });
 
@@ -590,6 +621,273 @@ async function startServer() {
         cooldownMs: classified.cooldownMs,
         keySource,
       });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // OpenAI-compatible provider proxy (NVIDIA NIM / OpenRouter / Cerebras)
+  //
+  // The device-local BYOK key arrives via x-sotal-provider-key and is used only
+  // for this request. Nothing is written to disk, Firestore, or logs.
+  // ---------------------------------------------------------------------------
+  app.post('/api/providers/:provider/test-key', async (req, res) => {
+    let provider: OpenAiProviderId | null = null;
+    try {
+      provider = resolveProviderParam(req.params.provider);
+      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const result = await testProviderConnection({ provider, apiKey: resolved.apiKey });
+      res.json({
+        ok: true,
+        provider,
+        keySource: resolved.keySource,
+        model: result.model,
+        latencyMs: result.latencyMs,
+      });
+    } catch (err) {
+      sendProviderError(res, provider ?? req.params.provider, err);
+    }
+  });
+
+  app.post('/api/providers/:provider/generate', async (req, res) => {
+    let provider: OpenAiProviderId | null = null;
+    try {
+      provider = resolveProviderParam(req.params.provider);
+      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const { prompt, messages, systemInstruction, model } = req.body ?? {};
+
+      if (
+        (typeof prompt !== 'string' || !prompt.trim()) &&
+        (!Array.isArray(messages) || messages.length === 0)
+      ) {
+        res.status(400).json({
+          error: 'Either prompt or non-empty messages array is required.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+          provider,
+        });
+        return;
+      }
+
+      const result = await generateProviderText({
+        provider,
+        apiKey: resolved.apiKey,
+        prompt,
+        messages,
+        systemInstruction,
+        model,
+      });
+
+      res.json({
+        text: result.text,
+        model: result.model,
+        provider,
+        keySource: resolved.keySource,
+        finishReason: result.finishReason,
+      });
+    } catch (err) {
+      sendProviderError(res, provider ?? req.params.provider, err);
+    }
+  });
+
+  app.post('/api/providers/:provider/generate-json', async (req, res) => {
+    let provider: OpenAiProviderId | null = null;
+    try {
+      provider = resolveProviderParam(req.params.provider);
+      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const { prompt, systemInstruction, responseSchema, model } = req.body ?? {};
+
+      if (typeof prompt !== 'string' || !prompt.trim()) {
+        res.status(400).json({
+          error: 'A non-empty prompt is required for structured generation.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+          provider,
+        });
+        return;
+      }
+
+      const result = await generateProviderJson({
+        provider,
+        apiKey: resolved.apiKey,
+        prompt,
+        systemInstruction:
+          typeof systemInstruction === 'string' ? systemInstruction : undefined,
+        responseSchema:
+          responseSchema && typeof responseSchema === 'object'
+            ? (responseSchema as Record<string, unknown>)
+            : undefined,
+        model: typeof model === 'string' ? model : undefined,
+      });
+
+      res.json({
+        data: result.data,
+        rawText: result.rawText,
+        model: result.model,
+        provider,
+        keySource: resolved.keySource,
+      });
+    } catch (err) {
+      sendProviderError(res, provider ?? req.params.provider, err);
+    }
+  });
+
+  app.post('/api/providers/:provider/vision', async (req, res) => {
+    let provider: OpenAiProviderId | null = null;
+    try {
+      provider = resolveProviderParam(req.params.provider);
+      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const { imageBase64, mimeType, mode = 'textbook_photo', pageNumber, model } = req.body ?? {};
+
+      if (typeof imageBase64 !== 'string' || imageBase64.length < 20) {
+        res.status(400).json({
+          error: 'Missing or invalid image payload.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+          provider,
+        });
+        return;
+      }
+
+      if (imageBase64.length > 14_000_000) {
+        res.status(413).json({
+          error: 'Image is too large. Please resize or crop before uploading.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+          provider,
+        });
+        return;
+      }
+
+      const normalizedMime =
+        typeof mimeType === 'string' && ALLOWED_IMAGE_MIMES.has(mimeType.toLowerCase())
+          ? mimeType.toLowerCase() === 'image/jpg'
+            ? 'image/jpeg'
+            : mimeType.toLowerCase()
+          : 'image/jpeg';
+
+      const result = await extractProviderVision({
+        provider,
+        apiKey: resolved.apiKey,
+        imageBase64,
+        mimeType: normalizedMime,
+        mode: String(mode),
+        pageNumber: typeof pageNumber === 'number' ? pageNumber : undefined,
+        model: typeof model === 'string' ? model : undefined,
+      });
+
+      res.json({
+        sections: result.sections,
+        uncertainCount: result.uncertainCount,
+        notes: result.notes,
+        model: result.model,
+        provider,
+        keySource: resolved.keySource,
+      });
+    } catch (err) {
+      sendProviderError(res, provider ?? req.params.provider, err);
+    }
+  });
+
+  app.post('/api/providers/:provider/transcribe', async (req, res) => {
+    let provider: OpenAiProviderId | null = null;
+    try {
+      provider = resolveProviderParam(req.params.provider);
+      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const { audioBase64, mimeType, courseContextHint, model } = req.body ?? {};
+
+      if (typeof audioBase64 !== 'string' || audioBase64.length < 40) {
+        res.status(400).json({
+          error: 'Missing or invalid audio recording payload.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+          provider,
+        });
+        return;
+      }
+
+      if (audioBase64.length > 14_000_000) {
+        res.status(413).json({
+          error: 'Audio note is too large. Please keep voice notes under 2 minutes.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+          provider,
+        });
+        return;
+      }
+
+      const rawMime =
+        typeof mimeType === 'string' ? mimeType.split(';')[0].toLowerCase().trim() : 'audio/wav';
+
+      const result = await transcribeProviderAudio({
+        provider,
+        apiKey: resolved.apiKey,
+        audioBase64,
+        mimeType: rawMime,
+        courseContextHint:
+          typeof courseContextHint === 'string' ? courseContextHint : undefined,
+        model: typeof model === 'string' ? model : undefined,
+      });
+
+      res.json({
+        text: result.text,
+        model: result.model,
+        provider,
+        keySource: resolved.keySource,
+      });
+    } catch (err) {
+      sendProviderError(res, provider ?? req.params.provider, err);
+    }
+  });
+
+  // Speech output: Groq serves as the fast speech playback fallback for Gemini.
+  app.post('/api/providers/:provider/tts', async (req, res) => {
+    let provider: OpenAiProviderId | null = null;
+    try {
+      provider = resolveProviderParam(req.params.provider);
+      const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      if (!text) {
+        res.status(400).json({
+          error: 'A non-empty text string is required for speech synthesis.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+          provider,
+        });
+        return;
+      }
+
+      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const result = await synthesizeProviderSpeech({
+        provider,
+        apiKey: resolved.apiKey,
+        text,
+        voiceName: typeof req.body?.voiceName === 'string' ? req.body.voiceName : undefined,
+        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
+      });
+
+      res.json({
+        audioBase64: result.audioBase64,
+        mimeType: result.mimeType,
+        voiceName: result.voiceName,
+        model: result.model,
+        provider,
+        keySource: resolved.keySource,
+      });
+    } catch (err) {
+      sendProviderError(res, provider ?? req.params.provider, err);
     }
   });
 

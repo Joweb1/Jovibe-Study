@@ -1,12 +1,16 @@
 import { generateDocumentId } from '../../utils/validation';
+import type { AiProvider } from './providers';
 
 const KEYS_STORAGE_KEY = 'sotal_study_byok_keys_v1';
 const CONFIG_STORAGE_KEY = 'sotal_study_byok_config_v1';
+const STORAGE_SCHEMA_VERSION = 2;
 
 export type ApiKeyStatus = 'untested' | 'active' | 'cooldown' | 'invalid' | 'quota_exceeded';
 
 export interface StoredApiKey {
   id: string;
+  /** Provider this key belongs to. Missing on v1 entries and treated as Gemini. */
+  provider: AiProvider;
   label: string;
   /** Strictly device-local in browser localStorage. NEVER sent to Firestore or synced. */
   key: string;
@@ -19,12 +23,16 @@ export interface StoredApiKey {
 }
 
 export interface ByokConfig {
+  /** Schema version for on-device migrations. */
+  version: number;
   preferredKeyId: string | null;
+  preferredKeyIds: Partial<Record<AiProvider, string | null>>;
   enableKeyRotation: boolean;
   fallbackToServerKey: boolean;
 }
 
 export interface ExecutionCandidate {
+  provider: AiProvider;
   kind: 'byok' | 'server_fallback';
   keyId: string | null;
   label: string;
@@ -32,9 +40,20 @@ export interface ExecutionCandidate {
 }
 
 export const DEFAULT_BYOK_CONFIG: ByokConfig = {
+  version: STORAGE_SCHEMA_VERSION,
   preferredKeyId: null,
+  preferredKeyIds: {},
   enableKeyRotation: true,
   fallbackToServerKey: true,
+};
+
+/** Minimum plausible length per provider (guards against obvious paste errors). */
+const MIN_KEY_LENGTH: Record<AiProvider, number> = {
+  gemini: 16,
+  cerebras: 16,
+  nvidia_nim: 20,
+  openrouter: 20,
+  groq: 20,
 };
 
 export function maskApiKey(rawKey: string): string {
@@ -63,31 +82,93 @@ function writeLocalStorage(storageKey: string, value: unknown): void {
   }
 }
 
-export function listStoredApiKeys(): StoredApiKey[] {
-  const keys = readLocalStorage<StoredApiKey[]>(KEYS_STORAGE_KEY, []);
+/**
+ * Reads and normalizes stored keys.
+ * v1 entries (saved before multi-provider support) have no `provider` field and
+ * are migrated in place to Gemini without losing their rotation state.
+ */
+function readAllKeys(): StoredApiKey[] {
+  const raw = readLocalStorage<Array<Partial<StoredApiKey>>>(KEYS_STORAGE_KEY, []);
+  if (!Array.isArray(raw)) return [];
   const now = Date.now();
-  return Array.isArray(keys)
-    ? keys.map((k) => {
-        if (
-          (k.status === 'cooldown' || k.status === 'quota_exceeded') &&
-          k.cooldownUntilMs &&
-          k.cooldownUntilMs <= now
-        ) {
-          return { ...k, status: 'active' as const, cooldownUntilMs: null };
-        }
-        return k;
-      })
-    : [];
+  return raw
+    .filter((entry): entry is Partial<StoredApiKey> => Boolean(entry) && typeof entry.id === 'string')
+    .map((entry) => {
+      const provider: AiProvider =
+        entry.provider === 'cerebras' ||
+        entry.provider === 'nvidia_nim' ||
+        entry.provider === 'openrouter' ||
+        entry.provider === 'groq'
+          ? entry.provider
+          : 'gemini';
+      const normalized: StoredApiKey = {
+        id: entry.id as string,
+        provider,
+        label: typeof entry.label === 'string' && entry.label.trim() ? entry.label : 'API key',
+        key: typeof entry.key === 'string' ? entry.key : '',
+        maskedKey:
+          typeof entry.maskedKey === 'string' && entry.maskedKey
+            ? entry.maskedKey
+            : maskApiKey(typeof entry.key === 'string' ? entry.key : ''),
+        status: (entry.status as ApiKeyStatus) || 'untested',
+        cooldownUntilMs: typeof entry.cooldownUntilMs === 'number' ? entry.cooldownUntilMs : null,
+        lastTestedAtMs: typeof entry.lastTestedAtMs === 'number' ? entry.lastTestedAtMs : null,
+        lastError: typeof entry.lastError === 'string' ? entry.lastError : null,
+        createdAtMs: typeof entry.createdAtMs === 'number' ? entry.createdAtMs : now,
+      };
+      if (
+        (normalized.status === 'cooldown' || normalized.status === 'quota_exceeded') &&
+        normalized.cooldownUntilMs &&
+        normalized.cooldownUntilMs <= now
+      ) {
+        return { ...normalized, status: 'active' as const, cooldownUntilMs: null };
+      }
+      return normalized;
+    })
+    .filter((entry) => entry.key.length > 0);
 }
 
 function persistKeys(keys: StoredApiKey[]): void {
   writeLocalStorage(KEYS_STORAGE_KEY, keys);
 }
 
+export function listAllStoredApiKeys(): StoredApiKey[] {
+  return readAllKeys().sort((a, b) => a.createdAtMs - b.createdAtMs);
+}
+
+export function listStoredApiKeys(provider: AiProvider = 'gemini'): StoredApiKey[] {
+  return readAllKeys()
+    .filter((key) => key.provider === provider)
+    .sort((a, b) => a.createdAtMs - b.createdAtMs);
+}
+
+export function countStoredApiKeys(provider: AiProvider): number {
+  return readAllKeys().filter((key) => key.provider === provider).length;
+}
+
 export function getByokConfig(): ByokConfig {
   const saved = readLocalStorage<Partial<ByokConfig>>(CONFIG_STORAGE_KEY, {});
+  const preferredKeyIds =
+    saved.preferredKeyIds && typeof saved.preferredKeyIds === 'object'
+      ? saved.preferredKeyIds
+      : {};
   return {
-    preferredKeyId: typeof saved.preferredKeyId === 'string' ? saved.preferredKeyId : null,
+    version: STORAGE_SCHEMA_VERSION,
+    preferredKeyId:
+      typeof saved.preferredKeyId === 'string'
+        ? saved.preferredKeyId
+        : typeof preferredKeyIds.gemini === 'string'
+        ? preferredKeyIds.gemini
+        : null,
+    preferredKeyIds: {
+      ...preferredKeyIds,
+      gemini:
+        typeof preferredKeyIds.gemini === 'string'
+          ? preferredKeyIds.gemini
+          : typeof saved.preferredKeyId === 'string'
+          ? saved.preferredKeyId
+          : null,
+    },
     enableKeyRotation:
       typeof saved.enableKeyRotation === 'boolean'
         ? saved.enableKeyRotation
@@ -100,29 +181,52 @@ export function getByokConfig(): ByokConfig {
 }
 
 export function saveByokConfig(patch: Partial<ByokConfig>): ByokConfig {
+  const current = getByokConfig();
   const next: ByokConfig = {
-    ...getByokConfig(),
+    ...current,
     ...patch,
+    preferredKeyIds: {
+      ...current.preferredKeyIds,
+      ...(patch.preferredKeyIds ?? {}),
+    },
   };
   writeLocalStorage(CONFIG_STORAGE_KEY, next);
   return next;
 }
 
-export function addStoredApiKey(label: string, rawKey: string): StoredApiKey {
-  const cleanKey = rawKey.trim();
-  const cleanLabel = label.trim().slice(0, 60) || 'Personal Gemini Key';
+export function getPreferredKeyId(provider: AiProvider): string | null {
+  return getByokConfig().preferredKeyIds[provider] ?? null;
+}
 
-  if (cleanKey.length < 16) {
-    throw new Error('Please enter a valid Gemini API key obtained from Google AI Studio.');
+export function addStoredApiKey(
+  label: string,
+  rawKey: string,
+  provider: AiProvider = 'gemini'
+): StoredApiKey {
+  const cleanKey = rawKey.trim();
+  const cleanLabel = label.trim().slice(0, 60) || 'Personal API Key';
+  const minLength = MIN_KEY_LENGTH[provider];
+
+  if (cleanKey.length < minLength) {
+    throw new Error(
+      `This ${provider === 'gemini' ? 'Gemini' : 'provider'} API key looks too short. Paste the full key.`
+    );
   }
 
-  const existing = listStoredApiKeys();
-  if (existing.some((item) => item.key === cleanKey)) {
+  const existing = readAllKeys();
+  if (existing.some((item) => item.provider === provider && item.key === cleanKey)) {
     throw new Error('This API key is already saved on this device.');
+  }
+
+  if (provider === 'cerebras' && existing.some((item) => item.provider === 'cerebras')) {
+    throw new Error(
+      'Cerebras supports a single key on this device. Remove the saved Cerebras key before adding another.'
+    );
   }
 
   const entry: StoredApiKey = {
     id: generateDocumentId('key'),
+    provider,
     label: cleanLabel,
     key: cleanKey,
     maskedKey: maskApiKey(cleanKey),
@@ -133,12 +237,11 @@ export function addStoredApiKey(label: string, rawKey: string): StoredApiKey {
     createdAtMs: Date.now(),
   };
 
-  const next = [...existing, entry];
-  persistKeys(next);
+  persistKeys([...existing, entry]);
 
   const config = getByokConfig();
-  if (!config.preferredKeyId) {
-    saveByokConfig({ preferredKeyId: entry.id });
+  if (!config.preferredKeyIds[provider]) {
+    saveByokConfig({ preferredKeyIds: { ...config.preferredKeyIds, [provider]: entry.id } });
   }
 
   return entry;
@@ -148,7 +251,7 @@ export function updateStoredApiKey(
   id: string,
   updates: { label?: string; rawKey?: string }
 ): StoredApiKey {
-  const existing = listStoredApiKeys();
+  const existing = readAllKeys();
   const target = existing.find((k) => k.id === id);
   if (!target) throw new Error('API key not found.');
 
@@ -160,10 +263,14 @@ export function updateStoredApiKey(
 
   if (updates.rawKey !== undefined && updates.rawKey.trim().length > 0) {
     const cleanKey = updates.rawKey.trim();
-    if (cleanKey.length < 16) {
-      throw new Error('Replacement Gemini API key looks too short.');
+    if (cleanKey.length < MIN_KEY_LENGTH[target.provider]) {
+      throw new Error('Replacement API key looks too short.');
     }
-    if (existing.some((item) => item.id !== id && item.key === cleanKey)) {
+    if (
+      existing.some(
+        (item) => item.id !== id && item.provider === target.provider && item.key === cleanKey
+      )
+    ) {
       throw new Error('Another saved entry already uses this API key.');
     }
     nextKey = cleanKey;
@@ -175,7 +282,8 @@ export function updateStoredApiKey(
 
   const updated: StoredApiKey = {
     ...target,
-    label: updates.label !== undefined ? updates.label.trim().slice(0, 60) || target.label : target.label,
+    label:
+      updates.label !== undefined ? updates.label.trim().slice(0, 60) || target.label : target.label,
     key: nextKey,
     maskedKey: nextMasked,
     status: nextStatus,
@@ -188,37 +296,48 @@ export function updateStoredApiKey(
 }
 
 export function removeStoredApiKey(id: string): void {
-  const existing = listStoredApiKeys();
+  const existing = readAllKeys();
+  const target = existing.find((k) => k.id === id);
   const remaining = existing.filter((k) => k.id !== id);
   persistKeys(remaining);
 
+  if (!target) return;
   const config = getByokConfig();
-  if (config.preferredKeyId === id) {
-    saveByokConfig({ preferredKeyId: remaining[0]?.id ?? null });
+  if (config.preferredKeyIds[target.provider] === id) {
+    const nextPreferred = remaining.find((k) => k.provider === target.provider)?.id ?? null;
+    saveByokConfig({
+      preferredKeyIds: { ...config.preferredKeyIds, [target.provider]: nextPreferred },
+      ...(target.provider === 'gemini' ? { preferredKeyId: nextPreferred } : {}),
+    });
   }
 }
 
 export function setPreferredApiKey(id: string): void {
-  const existing = listStoredApiKeys();
-  if (!existing.some((k) => k.id === id)) return;
-  saveByokConfig({ preferredKeyId: id });
+  const target = readAllKeys().find((k) => k.id === id);
+  if (!target) return;
+  const config = getByokConfig();
+  saveByokConfig({
+    preferredKeyIds: { ...config.preferredKeyIds, [target.provider]: id },
+    ...(target.provider === 'gemini' ? { preferredKeyId: id } : {}),
+  });
 }
 
 export function recordApiKeySuccess(id: string): void {
-  const existing = listStoredApiKeys();
+  const existing = readAllKeys();
   const now = Date.now();
-  const updated = existing.map((k) =>
-    k.id === id
-      ? {
-          ...k,
-          status: 'active' as const,
-          cooldownUntilMs: null,
-          lastTestedAtMs: now,
-          lastError: null,
-        }
-      : k
+  persistKeys(
+    existing.map((k) =>
+      k.id === id
+        ? {
+            ...k,
+            status: 'active' as const,
+            cooldownUntilMs: null,
+            lastTestedAtMs: now,
+            lastError: null,
+          }
+        : k
+    )
   );
-  persistKeys(updated);
 }
 
 export function recordApiKeyFailure(
@@ -227,48 +346,49 @@ export function recordApiKeyFailure(
   errorMessage: string,
   cooldownMs: number
 ): void {
-  const existing = listStoredApiKeys();
+  const existing = readAllKeys();
   const now = Date.now();
-  const updated = existing.map((k) => {
-    if (k.id !== id) return k;
-    if (code === 'INVALID_KEY') {
+  persistKeys(
+    existing.map((k) => {
+      if (k.id !== id) return k;
+      if (code === 'INVALID_KEY') {
+        return {
+          ...k,
+          status: 'invalid' as const,
+          cooldownUntilMs: null,
+          lastTestedAtMs: now,
+          lastError: errorMessage,
+        };
+      }
+      if (code === 'RATE_LIMIT' || code === 'QUOTA_EXHAUSTED') {
+        return {
+          ...k,
+          status: 'quota_exceeded' as const,
+          cooldownUntilMs: now + Math.max(15_000, cooldownMs || 60_000),
+          lastTestedAtMs: now,
+          lastError: errorMessage,
+        };
+      }
+      if (cooldownMs > 0) {
+        return {
+          ...k,
+          status: 'cooldown' as const,
+          cooldownUntilMs: now + cooldownMs,
+          lastTestedAtMs: now,
+          lastError: errorMessage,
+        };
+      }
       return {
         ...k,
-        status: 'invalid' as const,
-        cooldownUntilMs: null,
         lastTestedAtMs: now,
         lastError: errorMessage,
       };
-    }
-    if (code === 'RATE_LIMIT') {
-      return {
-        ...k,
-        status: 'quota_exceeded' as const,
-        cooldownUntilMs: now + Math.max(15_000, cooldownMs || 60_000),
-        lastTestedAtMs: now,
-        lastError: errorMessage,
-      };
-    }
-    if (cooldownMs > 0) {
-      return {
-        ...k,
-        status: 'cooldown' as const,
-        cooldownUntilMs: now + cooldownMs,
-        lastTestedAtMs: now,
-        lastError: errorMessage,
-      };
-    }
-    return {
-      ...k,
-      lastTestedAtMs: now,
-      lastError: errorMessage,
-    };
-  });
-  persistKeys(updated);
+    })
+  );
 }
 
 export function clearKeyCooldown(id: string): void {
-  const existing = listStoredApiKeys();
+  const existing = readAllKeys();
   persistKeys(
     existing.map((k) =>
       k.id === id ? { ...k, status: 'untested', cooldownUntilMs: null, lastError: null } : k
@@ -276,60 +396,57 @@ export function clearKeyCooldown(id: string): void {
   );
 }
 
-export function clearAllLocalApiKeys(): void {
-  persistKeys([]);
-  saveByokConfig({ preferredKeyId: null });
+export function clearAllLocalApiKeys(provider: AiProvider = 'gemini'): void {
+  persistKeys(readAllKeys().filter((k) => k.provider !== provider));
+  const config = getByokConfig();
+  saveByokConfig({
+    preferredKeyIds: { ...config.preferredKeyIds, [provider]: null },
+    ...(provider === 'gemini' ? { preferredKeyId: null } : {}),
+  });
+}
+
+function isUsable(entry: StoredApiKey): boolean {
+  if (entry.status === 'invalid') return false;
+  if (entry.cooldownUntilMs && entry.cooldownUntilMs > Date.now()) return false;
+  return true;
+}
+
+export function listUsableApiKeys(provider: AiProvider): StoredApiKey[] {
+  const config = getByokConfig();
+  const preferredId = config.preferredKeyIds[provider] ?? null;
+  const usable = listStoredApiKeys(provider).filter(isUsable);
+  if (!config.enableKeyRotation) {
+    const preferred = usable.find((k) => k.id === preferredId) ?? usable[0];
+    return preferred ? [preferred] : [];
+  }
+  return usable.sort((a, b) => {
+    if (a.id === preferredId) return -1;
+    if (b.id === preferredId) return 1;
+    return a.createdAtMs - b.createdAtMs;
+  });
+}
+
+export function hasUsableApiKey(provider: AiProvider): boolean {
+  return listUsableApiKeys(provider).length > 0;
 }
 
 /**
- * Builds the ordered execution plan:
- * 1. Preferred device-local BYOK key (if eligible and not invalid/cooling down)
- * 2. Other eligible device-local BYOK keys (if rotation enabled)
- * 3. Server GEMINI_API_KEY fallback (if enabled and no BYOK key succeeded or none configured)
+ * Ordered key candidates for a single provider. Gemini can additionally fall
+ * back to the server-managed GEMINI_API_KEY when enabled.
  */
-export function buildExecutionCandidates(): ExecutionCandidate[] {
-  const keys = listStoredApiKeys();
+export function buildProviderCandidates(provider: AiProvider): ExecutionCandidate[] {
   const config = getByokConfig();
-  const now = Date.now();
+  const candidates: ExecutionCandidate[] = listUsableApiKeys(provider).map((entry) => ({
+    provider,
+    kind: 'byok' as const,
+    keyId: entry.id,
+    label: entry.label,
+    apiKey: entry.key,
+  }));
 
-  const eligibleByok = keys.filter((k) => {
-    if (k.status === 'invalid') return false;
-    if (k.cooldownUntilMs && k.cooldownUntilMs > now) return false;
-    return true;
-  });
-
-  // Sort preferred key first
-  eligibleByok.sort((a, b) => {
-    if (a.id === config.preferredKeyId) return -1;
-    if (b.id === config.preferredKeyId) return 1;
-    return a.createdAtMs - b.createdAtMs;
-  });
-
-  const candidates: ExecutionCandidate[] = [];
-
-  if (eligibleByok.length > 0) {
-    if (config.enableKeyRotation) {
-      for (const k of eligibleByok) {
-        candidates.push({
-          kind: 'byok',
-          keyId: k.id,
-          label: k.label,
-          apiKey: k.key,
-        });
-      }
-    } else {
-      const first = eligibleByok[0];
-      candidates.push({
-        kind: 'byok',
-        keyId: first.id,
-        label: first.label,
-        apiKey: first.key,
-      });
-    }
-  }
-
-  if (config.fallbackToServerKey) {
+  if (provider === 'gemini' && config.fallbackToServerKey) {
     candidates.push({
+      provider,
       kind: 'server_fallback',
       keyId: null,
       label: 'Server GEMINI_API_KEY',
@@ -338,4 +455,9 @@ export function buildExecutionCandidates(): ExecutionCandidate[] {
   }
 
   return candidates;
+}
+
+/** Backwards-compatible Gemini-only candidate list used by the Gemini settings UI. */
+export function buildExecutionCandidates(): ExecutionCandidate[] {
+  return buildProviderCandidates('gemini');
 }

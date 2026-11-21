@@ -9,12 +9,15 @@ import {
   LayoutGrid,
   LogOut,
   MessageSquare,
+  Moon,
   Settings,
+  Sun,
   WifiOff,
 } from 'lucide-react';
 import type { AppRoute } from '../../types/models';
 import { useAuth } from '../../context/AuthContext';
 import { useCourses } from '../../context/CourseContext';
+import { useTheme } from '../../context/ThemeContext';
 import { useWorkspaceUi } from '../../context/WorkspaceUiContext';
 import { useRouter } from '../../router/RouterContext';
 import { CourseModal } from '../courses/CourseModal';
@@ -55,6 +58,7 @@ const CHROME_HIDDEN_ROUTES: ReadonlySet<AppRoute> = new Set<AppRoute>([
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, profile, isOnline, signOut } = useAuth();
   const { createCourse, courseError, clearCourseError } = useCourses();
+  const { theme, toggleTheme } = useTheme();
   const {
     hideHeader,
     setHideHeader,
@@ -110,19 +114,19 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     <div
       className={
         effectiveLockViewport
-          ? 'h-[100dvh] overflow-hidden bg-white text-zinc-950 flex flex-col'
-          : 'min-h-screen bg-white text-zinc-950 flex flex-col'
+          ? 'h-[100dvh] overflow-hidden bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 flex flex-col'
+          : 'min-h-screen bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 flex flex-col'
       }
     >
       {/* Top Bar: strict 3-zone contract (hidden on Tutor, focused search, and back-nav views) */}
       {!effectiveHideHeader && (
-        <header className="sticky top-0 z-30 shrink-0 border-b border-zinc-200 bg-white">
+        <header className="sticky top-0 z-30 shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
           <div className="mx-auto flex h-14 max-w-[1200px] items-center justify-between gap-4 md:gap-8 px-4 sm:px-6">
             {/* Zone 1: Brand Wordmark */}
             <button
               type="button"
               onClick={() => navigate('/courses')}
-              className="font-display text-base font-semibold tracking-tight text-zinc-950 whitespace-nowrap shrink-0 cursor-pointer"
+              className="font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 whitespace-nowrap shrink-0 cursor-pointer"
             >
               SOTAL Study
             </button>
@@ -142,15 +146,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                     aria-current={active ? 'page' : undefined}
                     className={`relative py-4 text-sm whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                       active
-                        ? 'font-medium text-zinc-950'
-                        : 'text-zinc-500 hover:text-zinc-950'
+                        ? 'font-medium text-zinc-950 dark:text-zinc-50'
+                        : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-100'
                     }`}
                   >
                     {item.label}
                     {active && (
                       <span
                         aria-hidden="true"
-                        className="absolute inset-x-0 bottom-0 h-0.5 bg-zinc-950"
+                        className="absolute inset-x-0 bottom-0 h-0.5 bg-zinc-950 dark:bg-zinc-50"
                       />
                     )}
                   </button>
@@ -162,13 +166,24 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           <div className="flex items-center gap-2.5 shrink-0">
             <CourseSelector onNewCourse={() => setCourseModalOpen(true)} />
 
+            {/* Theme toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-500 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+
             <div ref={accountMenuRef} className="relative">
               <button
                 type="button"
                 onClick={() => setAccountMenuOpen((prev) => !prev)}
                 aria-label="Account and settings"
                 aria-expanded={accountMenuOpen}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 text-xs font-medium text-zinc-900 hover:border-zinc-400 hover:bg-zinc-100 cursor-pointer"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-xs font-medium text-zinc-900 dark:text-zinc-100 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
               >
                 {user?.photoURL ? (
                   <img
@@ -189,10 +204,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -6, scale: 0.96 }}
                     transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute right-0 z-40 mt-2 w-56 origin-top-right rounded-xl border border-zinc-200 bg-white py-1 shadow-lg"
+                    className="absolute right-0 z-40 mt-2 w-56 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg"
                   >
-                    <div className="border-b border-zinc-100 px-3 py-2.5">
-                      <div className="truncate text-sm font-medium text-zinc-950">
+                    <div className="border-b border-zinc-100 dark:border-zinc-800 px-3 py-2.5">
+                      <div className="truncate text-sm font-medium text-zinc-950 dark:text-zinc-50">
                         {profile?.displayName || user?.displayName || 'Student'}
                       </div>
                       <div className="truncate text-xs text-zinc-500">
@@ -205,7 +220,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                         setAccountMenuOpen(false);
                         navigate('/courses');
                       }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950 cursor-pointer"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-50 cursor-pointer"
                     >
                       <FolderOpen className="h-4 w-4 text-zinc-500" />
                       Courses
@@ -216,7 +231,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                         setAccountMenuOpen(false);
                         navigate('/settings');
                       }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950 cursor-pointer"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-50 cursor-pointer"
                     >
                       <Settings className="h-4 w-4 text-zinc-500" />
                       Settings
@@ -225,14 +240,14 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                       variant="menu"
                       onActionComplete={() => setAccountMenuOpen(false)}
                     />
-                    <div className="my-1 border-t border-zinc-100" />
+                    <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
                     <button
                       type="button"
                       onClick={() => {
                         setAccountMenuOpen(false);
                         void signOut();
                       }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950 cursor-pointer"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-50 cursor-pointer"
                     >
                       <LogOut className="h-4 w-4 text-zinc-500" />
                       Sign out
@@ -248,9 +263,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
       {/* Honest offline notice — shown ONLY when offline and header is visible */}
       {!isOnline && !effectiveHideHeader && (
-        <div className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-700">
+        <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300">
           <div className="mx-auto flex max-w-[1200px] items-center gap-2">
-            <WifiOff className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
+            <WifiOff className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-400" />
             <span>
               You are offline. Cached courses and topics remain viewable; cloud sync and AI tools require an internet connection.
             </span>
@@ -293,7 +308,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             <motion.div
               layout
               transition={{ type: 'spring', stiffness: 450, damping: 34 }}
-              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-100/95 p-1 shadow-md backdrop-blur"
+              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-100/95 dark:bg-zinc-800/95 p-1 shadow-md backdrop-blur"
             >
               {BOTTOM_NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
@@ -310,15 +325,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                     transition={{ type: 'spring', stiffness: 450, damping: 34 }}
                     className={`relative inline-flex h-10 items-center justify-center rounded-full text-sm font-medium transition-colors cursor-pointer ${
                       active
-                        ? 'gap-2 px-4 text-white'
-                        : 'w-11 text-zinc-600 hover:text-zinc-950'
+                        ? 'gap-2 px-4 text-white dark:text-zinc-950'
+                        : 'w-11 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-100'
                     }`}
                   >
                     {active && (
                       <motion.span
                         layoutId="mobile-bottom-nav-pill"
                         transition={{ type: 'spring', stiffness: 450, damping: 34 }}
-                        className="absolute inset-0 rounded-full bg-zinc-950"
+                        className="absolute inset-0 rounded-full bg-zinc-950 dark:bg-zinc-100"
                         aria-hidden="true"
                       />
                     )}

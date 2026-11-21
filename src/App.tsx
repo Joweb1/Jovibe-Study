@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { motion } from 'motion/react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { CourseProvider, useCourses } from './context/CourseContext';
 import { WorkspaceUiProvider } from './context/WorkspaceUiContext';
 import { RouterProvider, useRouter } from './router/RouterContext';
@@ -96,10 +97,12 @@ const AuthenticatedApp: React.FC = () => {
 
 export default function App() {
   return (
-    <ErrorBoundary>
-      <AuthProvider>
-        <AuthenticatedApp />
-      </AuthProvider>
-    </ErrorBoundary>
+    <ThemeProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <AuthenticatedApp />
+        </AuthProvider>
+      </ErrorBoundary>
+    </ThemeProvider>
   );
 }

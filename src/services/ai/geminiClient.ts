@@ -1,20 +1,29 @@
 import {
-  buildExecutionCandidates,
-  recordApiKeyFailure,
-  recordApiKeySuccess,
-} from './keyManager';
-import type { SchemaValidator } from './schemaValidator';
+  AiServiceError,
+  type AiErrorCode,
+} from './errors';
+import { callGeminiEndpoint } from './geminiTransport';
+import { callProviderTask } from './providerTransport';
+import { runAiTask, type RouteAttempt } from './aiRouter';
+import { toProviderSafeAudio } from './audioTranscode';
+import type { AiRequestMeta } from './providers';
+
+export type { AiRequestMeta } from './providers';
+export { AiServiceError } from './errors';
+export { checkServerFallbackStatus } from './geminiTransport';
 
 export const AVAILABLE_AI_MODELS = [
   {
     id: 'gemini-4-hydrogen',
     label: 'Gemini 4 Hydrogen (Recommended default)',
-    description: 'Fast, balanced model for Tutor explanations, OCR, practice generation, and Automatic Study.',
+    description:
+      'Fast, balanced model for Tutor explanations, OCR, practice generation, and Automatic Study.',
   },
   {
     id: 'gemini-3.1-flash-lite',
     label: 'Gemini 3.1 Flash Lite',
-    description: 'Lightweight low-latency model for quick checks, flashcards, and high-volume study drills.',
+    description:
+      'Lightweight low-latency model for quick checks, flashcards, and high-volume study drills.',
   },
 ] as const;
 
@@ -48,12 +57,6 @@ export const AVAILABLE_TTS_VOICES = [
 
 export type AiModelId = (typeof AVAILABLE_AI_MODELS)[number]['id'] | string;
 
-export interface AiRequestMeta {
-  model: string;
-  keySource: 'byok' | 'server_fallback';
-  keyLabel: string;
-}
-
 export interface ApiErrorBody {
   error?: string;
   code?: string;
@@ -62,330 +65,50 @@ export interface ApiErrorBody {
   cooldownMs?: number;
 }
 
-export class AiServiceError extends Error {
-  code: string;
-  retryable: boolean;
-
-  constructor(message: string, code = 'AI_ERROR', retryable = false) {
-    super(message);
-    this.name = 'AiServiceError';
-    this.code = code;
-    this.retryable = retryable;
-  }
-}
-
-const MAX_ATTEMPTS = 4;
-const GENERATION_TIMEOUT_MS = 35_000;
-const KEY_TEST_TIMEOUT_MS = 18_000;
+const DEFAULT_CHAT_MODEL = 'gemini-4-hydrogen';
 const TRANSIENT_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function ensureOnline(): void {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    throw new AiServiceError(
-      'You are currently offline. AI Tutor, OCR, Practice generation, and Automatic Study require an internet connection.',
-      'OFFLINE',
-      false
-    );
-  }
-}
-
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-  externalSignal?: AbortSignal
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error('TIMEOUT')), timeoutMs);
-
-  const onExternalAbort = () => controller.abort(externalSignal?.reason);
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      clearTimeout(timer);
-      controller.abort(externalSignal.reason);
-    } else {
-      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
-    }
-  }
-
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-    if (externalSignal) {
-      externalSignal.removeEventListener('abort', onExternalAbort);
-    }
-  }
-}
-
-async function executeWithFallback<TResponse>(
-  endpoint: string,
-  payload: Record<string, unknown>,
-  signal?: AbortSignal,
-  allowTransientModelFallback = true
-): Promise<{ body: TResponse; meta: AiRequestMeta }> {
-  ensureOnline();
-
-  const candidates = buildExecutionCandidates();
-  if (candidates.length === 0) {
-    throw new AiServiceError(
-      'No active Gemini API key is available. Add a BYOK key in Settings or enable server GEMINI_API_KEY fallback.',
-      'NO_API_KEY',
-      false
-    );
-  }
-
-  let attempts = 0;
-  let lastError: AiServiceError = new AiServiceError('AI request failed.', 'UNKNOWN', false);
-
-  for (let i = 0; i < candidates.length && attempts < MAX_ATTEMPTS; i += 1) {
-    const candidate = candidates[i];
-    attempts += 1;
-
-    if (signal?.aborted) {
-      throw new AiServiceError('Request cancelled.', 'ABORTED', false);
-    }
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (candidate.kind === 'byok' && candidate.apiKey) {
-      headers['x-sotal-gemini-key'] = candidate.apiKey;
-    }
-
-    try {
-      const response = await fetchWithTimeout(
-        endpoint,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(payload),
-        },
-        GENERATION_TIMEOUT_MS,
-        signal
-      );
-
-      const json = (await response.json().catch(() => ({}))) as TResponse &
-        ApiErrorBody & { model?: string; keySource?: 'byok' | 'server_fallback' };
-
-      if (response.ok) {
-        if (candidate.kind === 'byok' && candidate.keyId) {
-          recordApiKeySuccess(candidate.keyId);
-        }
-        return {
-          body: json,
-          meta: {
-            model: json.model || String(payload.model || 'gemini-4-hydrogen'),
-            keySource: json.keySource || candidate.kind,
-            keyLabel: candidate.label,
-          },
-        };
-      }
-
-      const code = json.code || (response.status === 429 ? 'RATE_LIMIT' : 'SERVER_ERROR');
-      const message = json.error || `AI request failed (HTTP ${response.status}).`;
-      const cooldownMs = typeof json.cooldownMs === 'number' ? json.cooldownMs : 0;
-
-      if (candidate.kind === 'byok' && candidate.keyId) {
-        recordApiKeyFailure(candidate.keyId, code, message, cooldownMs);
-      }
-
-      lastError = new AiServiceError(message, code, Boolean(json.retryable));
-
-      // Never rotate keys or retry on invalid client requests, safety blocks, or missing model
-      if (
-        code === 'INVALID_REQUEST' ||
-        code === 'SAFETY_BLOCKED' ||
-        code === 'MODEL_UNAVAILABLE'
-      ) {
-        throw lastError;
-      }
-
-      // If more candidates remain (another BYOK key or server fallback), move cleanly to next candidate
-      if (json.shouldRotateKey && i < candidates.length - 1) {
-        await sleep(250);
-        continue;
-      }
-
-      // Controlled single transient retry on same candidate for temporary 5xx
-      if (code === 'SERVER_ERROR' && attempts < MAX_ATTEMPTS) {
-        await sleep(800 * attempts);
-        i -= 1; // retry this candidate once
-        continue;
-      }
-
-      if (i < candidates.length - 1) {
-        continue;
-      }
-
-      break;
-    } catch (err) {
-      if (err instanceof AiServiceError) {
-        throw err;
-      }
-      if (signal?.aborted) {
-        throw new AiServiceError('Request cancelled.', 'ABORTED', false);
-      }
-      const isTimeout =
-        (err instanceof DOMException && err.name === 'AbortError') ||
-        (err instanceof Error && err.message === 'TIMEOUT');
-      const msg = isTimeout
-        ? 'The AI request timed out while waiting for Gemini to respond.'
-        : err instanceof Error
-        ? err.message
-        : 'Network error contacting AI service.';
-      lastError = new AiServiceError(msg, isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR', true);
-      if (i >= candidates.length - 1) {
-        break;
-      }
-    }
-  }
-
-  // Transparent transient failover to gemini-3.1-flash-lite if gemini-4-hydrogen is overloaded/timing out
-  const requestedModel = String(payload.model || 'gemini-4-hydrogen');
-  if (
-    allowTransientModelFallback &&
-    requestedModel !== TRANSIENT_FALLBACK_MODEL &&
-    (lastError.code === 'SERVER_ERROR' || lastError.code === 'TIMEOUT')
-  ) {
-    return executeWithFallback<TResponse>(
-      endpoint,
-      { ...payload, model: TRANSIENT_FALLBACK_MODEL },
-      signal,
-      false
-    );
-  }
-
-  throw lastError;
-}
-
-export async function testSpecificApiKey(params: {
-  rawKey?: string;
-  keyId?: string;
+interface ProviderTextBody {
+  text?: string;
   model?: string;
-}): Promise<{
-  ok: boolean;
-  keySource: 'byok' | 'server_fallback';
-  model: string;
-  latencyMs: number;
-  error?: string;
-  code?: string;
-}> {
-  ensureOnline();
-
-  const runSingleTest = async (targetModel: string) => {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (params.rawKey && params.rawKey.trim()) {
-      headers['x-sotal-gemini-key'] = params.rawKey.trim();
-    }
-
-    try {
-      const response = await fetchWithTimeout(
-        '/api/ai/test-key',
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ model: targetModel }),
-        },
-        KEY_TEST_TIMEOUT_MS
-      );
-
-      const data = (await response.json().catch(() => ({}))) as {
-        ok?: boolean;
-        keySource?: 'byok' | 'server_fallback';
-        model?: string;
-        latencyMs?: number;
-        error?: string;
-        code?: string;
-        cooldownMs?: number;
-      };
-
-      if (response.ok && data.ok) {
-        return {
-          ok: true as const,
-          keySource: data.keySource || (params.rawKey ? ('byok' as const) : ('server_fallback' as const)),
-          model: data.model || targetModel,
-          latencyMs: data.latencyMs ?? 0,
-        };
-      }
-
-      return {
-        ok: false as const,
-        keySource: data.keySource || (params.rawKey ? ('byok' as const) : ('server_fallback' as const)),
-        model: targetModel,
-        latencyMs: 0,
-        error: data.error || `Key test failed (HTTP ${response.status}).`,
-        code: data.code || 'INVALID_KEY',
-        cooldownMs: data.cooldownMs ?? 0,
-      };
-    } catch {
-      return {
-        ok: false as const,
-        keySource: params.rawKey ? ('byok' as const) : ('server_fallback' as const),
-        model: targetModel,
-        latencyMs: 0,
-        error: `Timed out waiting for ${targetModel} to respond.`,
-        code: 'TIMEOUT',
-        cooldownMs: 0,
-      };
-    }
-  };
-
-  const initialModel = params.model || 'gemini-4-hydrogen';
-  let result = await runSingleTest(initialModel);
-
-  // If the primary model is experiencing temporary 5xx/timeout, confirm key validity on gemini-3.1-flash-lite
-  if (
-    !result.ok &&
-    initialModel !== TRANSIENT_FALLBACK_MODEL &&
-    (result.code === 'SERVER_ERROR' || result.code === 'TIMEOUT')
-  ) {
-    const fallbackResult = await runSingleTest(TRANSIENT_FALLBACK_MODEL);
-    if (fallbackResult.ok) {
-      result = fallbackResult;
-    }
-  }
-
-  if (result.ok) {
-    if (params.keyId) {
-      recordApiKeySuccess(params.keyId);
-    }
-    return result;
-  }
-
-  if (params.keyId) {
-    recordApiKeyFailure(
-      params.keyId,
-      result.code || 'INVALID_KEY',
-      result.error || 'Key test failed.',
-      result.cooldownMs ?? 0
-    );
-  }
-  return {
-    ok: false,
-    keySource: result.keySource,
-    model: result.model,
-    latencyMs: 0,
-    error: result.error,
-    code: result.code,
-  };
 }
 
-export async function checkServerFallbackStatus(): Promise<boolean> {
-  try {
-    const res = await fetch('/api/health');
-    if (!res.ok) return false;
-    const data = (await res.json()) as { serverFallbackAvailable?: boolean };
-    return Boolean(data.serverFallbackAvailable);
-  } catch {
-    return false;
+interface ProviderJsonBody<T> {
+  data?: T;
+  rawText?: string;
+  model?: string;
+}
+
+interface ProviderVisionBody {
+  sections?: Array<{ heading: string; level: number; content: string; pageOrSlide?: number }>;
+  uncertainCount?: number;
+  notes?: string;
+  model?: string;
+}
+
+interface ProviderTranscribeBody {
+  text?: string;
+  model?: string;
+}
+
+interface ProviderTtsBody {
+  audioBase64?: string;
+  mimeType?: string;
+  voiceName?: string;
+  model?: string;
+}
+
+function providerForAttempt(attempt: RouteAttempt): Exclude<AiRequestMeta['provider'], 'gemini'> {
+  if (attempt.provider === 'gemini') {
+    throw new AiServiceError('Internal routing error: Gemini attempt sent to provider transport.', 'UNKNOWN', {
+      retryable: false,
+    });
   }
+  return attempt.provider;
+}
+
+function normalizeModel(model: string | undefined, fallback: string): string {
+  return typeof model === 'string' && model.trim() ? model.trim() : fallback;
 }
 
 export async function generateText(params: {
@@ -395,55 +118,112 @@ export async function generateText(params: {
   model?: string;
   signal?: AbortSignal;
 }): Promise<{ text: string; meta: AiRequestMeta }> {
-  const { body, meta } = await executeWithFallback<{ text: string }>(
-    '/api/ai/generate',
-    {
-      prompt: params.prompt,
-      messages: params.messages,
-      systemInstruction: params.systemInstruction,
-      model: params.model || 'gemini-4-hydrogen',
-    },
-    params.signal
-  );
+  const model = params.model || DEFAULT_CHAT_MODEL;
 
-  return {
-    text: body.text || '',
-    meta,
-  };
+  const { value, meta } = await runAiTask<{ text: string }>({
+    task: 'chat',
+    signal: params.signal,
+    execute: async (attempt) => {
+      if (attempt.provider === 'gemini') {
+        const body = await callGeminiEndpoint<ProviderTextBody>({
+          endpoint: '/api/ai/generate',
+          apiKey: attempt.apiKey,
+          signal: params.signal,
+          payload: {
+            prompt: params.prompt,
+            messages: params.messages,
+            systemInstruction: params.systemInstruction,
+            model,
+          },
+        });
+        return { value: { text: body.text || '' }, model: normalizeModel(body.model, model) };
+      }
+
+      const body = await callProviderTask<ProviderTextBody>({
+        provider: providerForAttempt(attempt),
+        task: 'chat',
+        apiKey: attempt.apiKey || '',
+        signal: params.signal,
+        payload: {
+          prompt: params.prompt,
+          messages: params.messages,
+          systemInstruction: params.systemInstruction,
+          model,
+        },
+      });
+      return { value: { text: body.text || '' }, model: normalizeModel(body.model, 'provider') };
+    },
+  });
+
+  return { text: value.text, meta };
 }
 
 export async function generateStructuredJson<T>(params: {
   prompt: string;
   systemInstruction?: string;
   responseSchema?: Record<string, unknown>;
-  validator: SchemaValidator<T>;
+  validator: (raw: unknown) => { valid: boolean; data?: T; error?: string };
   model?: string;
   signal?: AbortSignal;
 }): Promise<{ data: T; meta: AiRequestMeta }> {
-  const { body, meta } = await executeWithFallback<{ data: unknown; rawText?: string }>(
-    '/api/ai/generate-json',
-    {
-      prompt: params.prompt,
-      systemInstruction: params.systemInstruction,
-      responseSchema: params.responseSchema,
-      model: params.model || 'gemini-4-hydrogen',
-    },
-    params.signal
-  );
+  const model = params.model || DEFAULT_CHAT_MODEL;
 
-  const validation = params.validator(body.data);
-  if (!validation.valid || validation.data === undefined) {
-    throw new AiServiceError(
-      validation.error || 'AI returned structured output that failed schema validation.',
-      'VALIDATION_ERROR',
-      true
-    );
-  }
-
-  return {
-    data: validation.data,
-    meta,
+  const validate = (value: T): T => {
+    const validation = params.validator(value);
+    if (!validation.valid || validation.data === undefined) {
+      throw new AiServiceError(
+        validation.error || 'AI returned structured output that failed schema validation.',
+        'VALIDATION_ERROR',
+        { retryable: true }
+      );
+    }
+    return validation.data;
   };
+
+  const { value, meta } = await runAiTask<T>({
+    task: 'structured_json',
+    signal: params.signal,
+    validate,
+    execute: async (attempt) => {
+      if (attempt.provider === 'gemini') {
+        const body = await callGeminiEndpoint<ProviderJsonBody<T>>({
+          endpoint: '/api/ai/generate-json',
+          apiKey: attempt.apiKey,
+          signal: params.signal,
+          payload: {
+            prompt: params.prompt,
+            systemInstruction: params.systemInstruction,
+            responseSchema: params.responseSchema,
+            model,
+          },
+        });
+        return { value: (body.data ?? undefined) as T, model: normalizeModel(body.model, model) };
+      }
+
+      const body = await callProviderTask<ProviderJsonBody<T>>({
+        provider: providerForAttempt(attempt),
+        task: 'structured_json',
+        apiKey: attempt.apiKey || '',
+        signal: params.signal,
+        payload: {
+          prompt: params.prompt,
+          systemInstruction: params.systemInstruction,
+          responseSchema: params.responseSchema,
+          model,
+        },
+      });
+
+      if (body.data === undefined) {
+        throw new AiServiceError('Fallback provider returned no structured output.', 'VALIDATION_ERROR', {
+          retryable: true,
+          provider: attempt.provider,
+        });
+      }
+      return { value: body.data, model: normalizeModel(body.model, 'provider') };
+    },
+  });
+
+  return { data: value, meta };
 }
 
 export async function extractVisionWithClient(params: {
@@ -459,26 +239,49 @@ export async function extractVisionWithClient(params: {
   notes: string;
   meta: AiRequestMeta;
 }> {
-  const { body, meta } = await executeWithFallback<{
-    sections?: Array<{ heading: string; level: number; content: string; pageOrSlide?: number }>;
-    uncertainCount?: number;
-    notes?: string;
-  }>(
-    '/api/extract/vision',
-    {
-      imageBase64: params.imageBase64,
-      mimeType: params.mimeType,
-      mode: params.mode,
-      pageNumber: params.pageNumber,
-      model: params.model || 'gemini-4-hydrogen',
+  const model = params.model || DEFAULT_CHAT_MODEL;
+
+  const { value, meta } = await runAiTask<ProviderVisionBody>({
+    task: 'vision',
+    signal: params.signal,
+    execute: async (attempt) => {
+      if (attempt.provider === 'gemini') {
+        const body = await callGeminiEndpoint<ProviderVisionBody>({
+          endpoint: '/api/extract/vision',
+          apiKey: attempt.apiKey,
+          signal: params.signal,
+          payload: {
+            imageBase64: params.imageBase64,
+            mimeType: params.mimeType,
+            mode: params.mode,
+            pageNumber: params.pageNumber,
+            model,
+          },
+        });
+        return { value: body, model: normalizeModel(body.model, model) };
+      }
+
+      const body = await callProviderTask<ProviderVisionBody>({
+        provider: providerForAttempt(attempt),
+        task: 'vision',
+        apiKey: attempt.apiKey || '',
+        signal: params.signal,
+        payload: {
+          imageBase64: params.imageBase64,
+          mimeType: params.mimeType,
+          mode: params.mode,
+          pageNumber: params.pageNumber,
+          model,
+        },
+      });
+      return { value: body, model: normalizeModel(body.model, 'provider') };
     },
-    params.signal
-  );
+  });
 
   return {
-    sections: Array.isArray(body.sections) ? body.sections : [],
-    uncertainCount: typeof body.uncertainCount === 'number' ? body.uncertainCount : 0,
-    notes: typeof body.notes === 'string' ? body.notes : '',
+    sections: Array.isArray(value.sections) ? value.sections : [],
+    uncertainCount: typeof value.uncertainCount === 'number' ? value.uncertainCount : 0,
+    notes: typeof value.notes === 'string' ? value.notes : '',
     meta,
   };
 }
@@ -494,33 +297,49 @@ export async function synthesizeSpeechWithClient(params: {
   voiceName: string;
   meta: AiRequestMeta;
 }> {
-  const { body, meta } = await executeWithFallback<{
-    audioBase64?: string;
-    mimeType?: string;
-    voiceName?: string;
-  }>(
-    '/api/ai/tts',
-    {
-      text: params.text,
-      voiceName: params.voiceName || 'Kore',
-      style: params.style,
-    },
-    params.signal,
-    false
-  );
+  const { value, meta } = await runAiTask<ProviderTtsBody>({
+    task: 'tts',
+    signal: params.signal,
+    execute: async (attempt) => {
+      if (attempt.provider === 'gemini') {
+        const body = await callGeminiEndpoint<ProviderTtsBody>({
+          endpoint: '/api/ai/tts',
+          apiKey: attempt.apiKey,
+          signal: params.signal,
+          payload: {
+            text: params.text,
+            voiceName: params.voiceName || 'Kore',
+            style: params.style,
+          },
+        });
+        return { value: body, model: normalizeModel(body.model, 'gemini-3.8-flash-lite-tts') };
+      }
 
-  if (!body.audioBase64) {
-    throw new AiServiceError(
-      'Gemini 3.8 TTS returned no audio data.',
-      'SERVER_ERROR',
-      true
-    );
+      // Non-Gemini audio playback fallback (Groq Orpheus TTS)
+      const body = await callProviderTask<ProviderTtsBody>({
+        provider: attempt.provider,
+        task: 'tts',
+        apiKey: attempt.apiKey || '',
+        payload: {
+          text: params.text,
+          voiceName: params.voiceName,
+        },
+        signal: params.signal,
+      });
+      return { value: body, model: normalizeModel(body.model, `${attempt.provider}-tts`) };
+    },
+  });
+
+  if (!value.audioBase64) {
+    throw new AiServiceError('Gemini TTS returned no audio data.', 'SERVER_ERROR', {
+      retryable: true,
+    });
   }
 
   return {
-    audioBase64: body.audioBase64,
-    mimeType: body.mimeType || 'audio/wav',
-    voiceName: body.voiceName || params.voiceName || 'Kore',
+    audioBase64: value.audioBase64,
+    mimeType: value.mimeType || 'audio/wav',
+    voiceName: value.voiceName || params.voiceName || 'Kore',
     meta,
   };
 }
@@ -534,19 +353,137 @@ export async function transcribeAudioWithClient(params: {
   text: string;
   meta: AiRequestMeta;
 }> {
-  const { body, meta } = await executeWithFallback<{ text?: string }>(
-    '/api/ai/transcribe',
-    {
-      audioBase64: params.audioBase64,
-      mimeType: params.mimeType,
-      courseContextHint: params.courseContextHint,
+  const { value, meta } = await runAiTask<{ text: string }>({
+    task: 'transcription',
+    signal: params.signal,
+    execute: async (attempt) => {
+      if (attempt.provider === 'gemini') {
+        const body = await callGeminiEndpoint<ProviderTranscribeBody>({
+          endpoint: '/api/ai/transcribe',
+          apiKey: attempt.apiKey,
+          signal: params.signal,
+          payload: {
+            audioBase64: params.audioBase64,
+            mimeType: params.mimeType,
+            courseContextHint: params.courseContextHint,
+          },
+        });
+        return {
+          value: { text: (body.text || '').trim() },
+          model: normalizeModel(body.model, 'gemini-3.5-transcribe'),
+        };
+      }
+
+      // NIM/OpenRouter audio models accept WAV or MP3 only. Browser recordings
+      // are WebM/Opus or M4A, so transcode before sending.
+      const safeAudio = await toProviderSafeAudio(params.audioBase64, params.mimeType);
+
+      const body = await callProviderTask<ProviderTranscribeBody>({
+        provider: providerForAttempt(attempt),
+        task: 'transcription',
+        apiKey: attempt.apiKey || '',
+        signal: params.signal,
+        payload: {
+          audioBase64: safeAudio.audioBase64,
+          mimeType: safeAudio.mimeType,
+          courseContextHint: params.courseContextHint,
+        },
+      });
+      return {
+        value: { text: (body.text || '').trim() },
+        model: normalizeModel(body.model, 'provider'),
+      };
     },
-    params.signal,
-    false
-  );
+  });
+
+  return { text: value.text, meta };
+}
+
+// ---------------------------------------------------------------------------
+// Key testing (Gemini)
+// ---------------------------------------------------------------------------
+
+export async function testSpecificApiKey(params: {
+  rawKey?: string;
+  keyId?: string;
+  model?: string;
+}): Promise<{
+  ok: boolean;
+  keySource: 'byok' | 'server_fallback';
+  model: string;
+  latencyMs: number;
+  error?: string;
+  code?: string;
+}> {
+  const { recordApiKeyFailure, recordApiKeySuccess } = await import('./keyManager');
+
+  const runSingleTest = async (targetModel: string) => {
+    try {
+      const body = await callGeminiEndpoint<{ ok?: boolean; latencyMs?: number; model?: string }>({
+        endpoint: '/api/ai/test-key',
+        apiKey: params.rawKey?.trim() || null,
+        timeoutMs: 18_000,
+        payload: { model: targetModel },
+      });
+      return {
+        ok: true as const,
+        keySource: params.rawKey ? ('byok' as const) : ('server_fallback' as const),
+        model: body.model || targetModel,
+        latencyMs: body.latencyMs ?? 0,
+      };
+    } catch (err) {
+      const error = err instanceof AiServiceError ? err : null;
+      return {
+        ok: false as const,
+        keySource: params.rawKey ? ('byok' as const) : ('server_fallback' as const),
+        model: targetModel,
+        latencyMs: 0,
+        error: error?.message || 'Key test failed.',
+        code: (error?.code as AiErrorCode | undefined) || 'INVALID_KEY',
+        cooldownMs: error?.cooldownMs ?? 0,
+      };
+    }
+  };
+
+  const initialModel = params.model || DEFAULT_CHAT_MODEL;
+  let result = await runSingleTest(initialModel);
+
+  if (
+    !result.ok &&
+    initialModel !== TRANSIENT_FALLBACK_MODEL &&
+    (result.code === 'SERVER_ERROR' || result.code === 'TIMEOUT')
+  ) {
+    const fallbackResult = await runSingleTest(TRANSIENT_FALLBACK_MODEL);
+    if (fallbackResult.ok) {
+      result = fallbackResult;
+    }
+  }
+
+  if (result.ok) {
+    if (params.keyId) recordApiKeySuccess(params.keyId);
+    return {
+      ok: true,
+      keySource: result.keySource,
+      model: result.model,
+      latencyMs: result.latencyMs,
+    };
+  }
+
+  if (params.keyId) {
+    recordApiKeyFailure(
+      params.keyId,
+      result.code || 'INVALID_KEY',
+      result.error || 'Key test failed.',
+      'cooldownMs' in result ? result.cooldownMs : 0
+    );
+  }
 
   return {
-    text: (body.text || '').trim(),
-    meta,
+    ok: false,
+    keySource: result.keySource,
+    model: result.model,
+    latencyMs: 0,
+    error: result.error,
+    code: result.code,
   };
 }
