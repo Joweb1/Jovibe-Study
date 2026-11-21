@@ -90,7 +90,7 @@ export const AuthPage: React.FC = () => {
           {/* Right: Theme toggle, PWA install & existing Google Sign-in action */}
           <div className="flex items-center gap-2 shrink-0">
             <div className="hidden sm:block">
-              <PWAInstallButton variant="button" />
+              <PWAInstallButton variant="header" />
             </div>
             <button
               type="button"

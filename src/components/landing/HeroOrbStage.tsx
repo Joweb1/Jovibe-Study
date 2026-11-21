@@ -10,6 +10,7 @@ import {
 import { ArrowDown, ArrowRight } from 'lucide-react';
 import { LiquidGlassOrb } from '../live/LiquidGlassOrb';
 import type { LiveVoiceState } from '../live/types';
+import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { Button } from '../ui/Button';
 import { ErrorBanner } from '../ui/StateViews';
 
@@ -150,6 +151,7 @@ export const HeroOrbStage: React.FC<HeroOrbStageProps> = ({
           >
             Explore workspace
           </button>
+          <PWAInstallButton variant="hero" />
         </motion.div>
       </div>
 

@@ -4,12 +4,14 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { CourseProvider, useCourses } from './context/CourseContext';
 import { GeminiOnboardingProvider } from './context/GeminiOnboardingContext';
+import { PWAInstallProvider } from './context/PWAInstallContext';
 import { StreakProvider } from './context/StreakContext';
 import { WorkspaceUiProvider } from './context/WorkspaceUiContext';
 import { PENDING_JOIN_TOKEN_KEY, RouterProvider, useRouter } from './router/RouterContext';
 import { AppShell } from './components/layout/AppShell';
 import { ApiKeyLimitModal } from './components/onboarding/ApiKeyLimitModal';
 import { GeminiOnboardingOverlay } from './components/onboarding/GeminiOnboardingOverlay';
+import { PWAInstallPromptPopup } from './components/pwa/PWAInstallPromptPopup';
 import { ErrorBoundary } from './components/ui/StateViews';
 import { SotalLogo } from './components/ui/SotalLogo';
 import { AuthPage } from './pages/AuthPage';
@@ -152,9 +154,12 @@ export default function App() {
   return (
     <ThemeProvider>
       <ErrorBoundary>
-        <AuthProvider>
-          <AuthenticatedApp />
-        </AuthProvider>
+        <PWAInstallProvider>
+          <AuthProvider>
+            <AuthenticatedApp />
+            <PWAInstallPromptPopup />
+          </AuthProvider>
+        </PWAInstallProvider>
       </ErrorBoundary>
     </ThemeProvider>
   );
