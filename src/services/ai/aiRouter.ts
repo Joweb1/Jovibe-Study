@@ -11,13 +11,19 @@ import {
 } from './keyManager';
 import { emitApiKeyLimitReached } from './keyLimitBus';
 import {
+  clearAiActivity,
+  completeAiActivity,
+  guessInitialModelLabel,
+  startAiActivity,
+} from './aiActivityBus';
+import {
   AiServiceError,
   isAiServiceError,
   NON_ROTATABLE_CODES,
   TRANSIENT_CODES,
 } from './errors';
 import { ensureOnline, sleep } from './http';
-import { checkServerFallbackStatus } from './geminiTransport';
+import { checkServerFallbackProviders } from './geminiTransport';
 import {
   PROVIDERS,
   PROVIDER_CHAINS,
@@ -43,15 +49,71 @@ export interface AiExecuteResult<T> {
 
 export interface RunAiTaskParams<T> {
   task: AiTask;
+  /** Optional primary model hint shown in the subtle live AI model badge before the response arrives. */
+  requestedModel?: string;
   signal?: AbortSignal;
   /** Optional post-processing gate (e.g. structured-output schema validation). */
   validate?: (value: T) => T;
   execute: (attempt: RouteAttempt) => Promise<AiExecuteResult<T>>;
 }
 
+let aiOperationSequence = 0;
+
+function formatSwitchReason(code: AiServiceError['code']): string {
+  switch (code) {
+    case 'RATE_LIMIT':
+    case 'QUOTA_EXHAUSTED':
+      return 'Limit reached — switching';
+    case 'INVALID_KEY':
+      return 'Key rejected — switching';
+    case 'MODEL_UNAVAILABLE':
+      return 'Model unavailable — switching';
+    case 'TIMEOUT':
+      return 'Timed out — switching';
+    default:
+      return 'Switching fallback';
+  }
+}
+
 /** Retries on the same key for transient failures before trying another provider. */
 const MAX_TRANSIENT_ATTEMPTS = 2;
 const TRANSIENT_BACKOFF_MS = 700;
+
+/**
+ * In-memory cooldowns for server `.env` fallback providers so multi-page PDF OCR
+ * or back-to-back calls skip a rate-limited `.env` Gemini key immediately and go
+ * straight to healthy `.env` fallback providers (e.g., NVIDIA NIM) until cooldown expires.
+ */
+const serverFallbackCooldowns = new Map<AiProvider, number>();
+
+export function clearServerFallbackCooldowns(): void {
+  serverFallbackCooldowns.clear();
+}
+
+function isServerFallbackCoolingDown(provider: AiProvider): boolean {
+  const until = serverFallbackCooldowns.get(provider);
+  if (!until) return false;
+  if (until <= Date.now()) {
+    serverFallbackCooldowns.delete(provider);
+    return false;
+  }
+  return true;
+}
+
+function recordServerFallbackFailure(provider: AiProvider, error: AiServiceError): void {
+  const now = Date.now();
+  if (error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED') {
+    serverFallbackCooldowns.set(provider, now + Math.max(60_000, error.cooldownMs || 60_000));
+    return;
+  }
+  if (error.code === 'INVALID_KEY' || error.code === 'MODEL_UNAVAILABLE' || error.code === 'NO_API_KEY') {
+    serverFallbackCooldowns.set(provider, now + 5 * 60_000);
+    return;
+  }
+  if (error.code === 'SERVER_ERROR' || error.code === 'TIMEOUT' || error.code === 'NETWORK_ERROR') {
+    serverFallbackCooldowns.set(provider, now + Math.max(15_000, error.cooldownMs || 20_000));
+  }
+}
 
 function candidateFromStoredKey(provider: AiProvider, entry: StoredApiKey): RouteAttempt {
   return {
@@ -65,36 +127,51 @@ function candidateFromStoredKey(provider: AiProvider, entry: StoredApiKey): Rout
 
 /**
  * Builds the ordered attempt plan for a task:
- *   Gemini (rotating keys, then optional server key)
- *   → Cerebras (chat only)
- *   → NVIDIA NIM (rotating keys)
- *   → OpenRouter (rotating keys)
- *
- * Providers without a usable key are skipped entirely, so an unconfigured
- * OpenRouter never slows down a request.
+ *  - Before the user has ever entered any personal API key (`canUseServerFallbackKey() === true`):
+ *    uses configured server `.env` keys across the ENTIRE task fallback chain
+ *    (e.g., Vision OCR: Gemini (.env) → NVIDIA NIM (.env) → OpenRouter (.env)).
+ *  - Once the user has entered ANY personal API key (`hasUserEnteredOwnKey() === true`):
+ *    they are permanently banned from using server `.env` keys; ONLY their own
+ *    device-local BYOK keys are included in the plan.
  */
 export async function buildRoutePlan(task: AiTask): Promise<RouteAttempt[]> {
   const chain = PROVIDER_CHAINS[task];
-  const plan: RouteAttempt[] = [];
+  const allowServerEnv = canUseServerFallbackKey();
 
+  if (allowServerEnv) {
+    const serverProviders = await checkServerFallbackProviders();
+    const healthyPlan: RouteAttempt[] = [];
+    const coolingPlan: RouteAttempt[] = [];
+
+    for (const provider of chain) {
+      if (!serverProviders[provider]) continue;
+      const attempt: RouteAttempt = {
+        provider,
+        kind: 'server_fallback',
+        keyId: null,
+        label: `Server ${PROVIDERS[provider].shortLabel} (.env)`,
+        apiKey: null,
+      };
+      if (isServerFallbackCoolingDown(provider)) {
+        coolingPlan.push(attempt);
+      } else {
+        healthyPlan.push(attempt);
+      }
+    }
+
+    // Try non-cooling providers first; only fall back to cooling ones if ALL providers are cooling down
+    return healthyPlan.length > 0 ? healthyPlan : coolingPlan;
+  }
+
+  // User has entered at least one personal API key -> strictly BYOK only (no .env fallback).
+  const plan: RouteAttempt[] = [];
   for (const provider of chain) {
     if (provider === 'gemini') {
-      const geminiCandidates = buildProviderCandidates('gemini');
-      const byok = geminiCandidates.filter((candidate) => candidate.kind === 'byok');
-      for (const candidate of byok) {
+      const geminiCandidates = buildProviderCandidates('gemini').filter(
+        (candidate) => candidate.kind === 'byok'
+      );
+      for (const candidate of geminiCandidates) {
         plan.push(candidate);
-      }
-      if (canUseServerFallbackKey()) {
-        const serverAvailable = await checkServerFallbackStatus();
-        if (serverAvailable) {
-          plan.push({
-            provider: 'gemini',
-            kind: 'server_fallback',
-            keyId: null,
-            label: 'Server GEMINI_API_KEY',
-            apiKey: null,
-          });
-        }
       }
       continue;
     }
@@ -167,102 +244,181 @@ export async function runAiTask<T>(
     );
   }
 
+  const opId = `ai_${Date.now()}_${++aiOperationSequence}`;
   let lastError: AiServiceError | null = null;
   let sawLimitError = false;
   let limitProvider: AiProvider = 'gemini';
   const skippedProviders = new Set<AiProvider>();
+  let attemptIndex = 0;
+  let completedOp = false;
 
-  for (const attempt of plan) {
-    if (skippedProviders.has(attempt.provider)) {
-      continue;
-    }
+  try {
+    for (const attempt of plan) {
+      if (skippedProviders.has(attempt.provider)) {
+        continue;
+      }
 
-    if (params.signal?.aborted) {
-      throw new AiServiceError('Request cancelled.', 'ABORTED', {
+      if (params.signal?.aborted) {
+        throw new AiServiceError('Request cancelled.', 'ABORTED', {
+          provider: attempt.provider,
+          retryable: false,
+        });
+      }
+
+      const isFallbackAttempt = attempt.provider !== 'gemini' || attemptIndex > 0;
+      const modelHint = guessInitialModelLabel(
+        attempt.provider,
+        params.task,
+        params.requestedModel
+      );
+
+      startAiActivity({
+        id: opId,
+        task: params.task,
         provider: attempt.provider,
-        retryable: false,
+        model: modelHint,
+        keyLabel: attempt.label,
+        keySource: attempt.kind,
+        isFallback: isFallbackAttempt,
+        status: 'running',
       });
-    }
 
-    let transientAttempts = 0;
+      let transientAttempts = 0;
 
-    // Key-level loop: one candidate may be retried for transient failures.
-    for (;;) {
-      try {
-        const result = await params.execute(attempt);
-        const value = params.validate ? params.validate(result.value) : result.value;
+      // Key-level loop: one candidate may be retried for transient failures.
+      for (;;) {
+        try {
+          const result = await params.execute(attempt);
+          const value = params.validate ? params.validate(result.value) : result.value;
 
-        if (attempt.keyId) {
-          recordApiKeySuccess(attempt.keyId);
-        }
+          if (attempt.keyId) {
+            recordApiKeySuccess(attempt.keyId);
+          } else if (attempt.kind === 'server_fallback') {
+            serverFallbackCooldowns.delete(attempt.provider);
+          }
 
-        return {
-          value,
-          meta: {
+          completedOp = true;
+          completeAiActivity(opId, {
+            task: params.task,
             provider: attempt.provider,
             model: result.model,
-            keySource: attempt.kind,
             keyLabel: attempt.label,
-          },
-        };
-      } catch (rawError) {
-        const error = isAiServiceError(rawError)
-          ? rawError
-          : new AiServiceError(
-              rawError instanceof Error ? rawError.message : 'AI request failed.',
-              'UNKNOWN',
-              { provider: attempt.provider, retryable: true }
+            keySource: attempt.kind,
+            isFallback: isFallbackAttempt,
+          });
+
+          return {
+            value,
+            meta: {
+              provider: attempt.provider,
+              model: result.model,
+              keySource: attempt.kind,
+              keyLabel: attempt.label,
+            },
+          };
+        } catch (rawError) {
+          const error = isAiServiceError(rawError)
+            ? rawError
+            : new AiServiceError(
+                rawError instanceof Error ? rawError.message : 'AI request failed.',
+                'UNKNOWN',
+                { provider: attempt.provider, retryable: true }
+              );
+
+          if (NON_ROTATABLE_CODES.has(error.code)) {
+            throw error;
+          }
+
+          const isProviderLevelFailure =
+            error.code === 'VALIDATION_ERROR' || error.code === 'MODEL_UNAVAILABLE';
+
+          if (attempt.keyId && !isProviderLevelFailure) {
+            recordApiKeyFailure(
+              attempt.keyId,
+              error.code,
+              error.message,
+              error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED'
+                ? error.cooldownMs || 60_000
+                : error.cooldownMs
             );
+          }
 
-        if (NON_ROTATABLE_CODES.has(error.code)) {
-          throw error;
-        }
+          if (
+            attempt.kind === 'byok' &&
+            (error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED')
+          ) {
+            sawLimitError = true;
+            limitProvider = attempt.provider;
+          }
 
-        const isProviderLevelFailure =
-          error.code === 'VALIDATION_ERROR' || error.code === 'MODEL_UNAVAILABLE';
+          lastError = error;
 
-        if (attempt.keyId && !isProviderLevelFailure) {
-          recordApiKeyFailure(
-            attempt.keyId,
-            error.code,
-            error.message,
-            error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED'
-              ? error.cooldownMs || 60_000
-              : error.cooldownMs
+          // Structured-output validation and model-unavailable failures are
+          // provider/model-level: trying sibling keys on the same provider will
+          // not help, so skip the rest of this provider and move to the next.
+          if (isProviderLevelFailure) {
+            if (attempt.kind === 'server_fallback') {
+              recordServerFallbackFailure(attempt.provider, error);
+            }
+            skippedProviders.add(attempt.provider);
+            startAiActivity({
+              id: opId,
+              task: params.task,
+              provider: attempt.provider,
+              model: modelHint,
+              keyLabel: attempt.label,
+              keySource: attempt.kind,
+              isFallback: true,
+              status: 'switching',
+              note: formatSwitchReason(error.code),
+            });
+            break;
+          }
+
+          const hasAnotherCandidateInPlan = plan.some(
+            (candidate) =>
+              candidate !== attempt &&
+              !skippedProviders.has(candidate.provider) &&
+              (candidate.provider !== attempt.provider || candidate.keyId !== attempt.keyId)
           );
-        }
+          const shouldRetryTransient =
+            TRANSIENT_CODES.has(error.code) &&
+            transientAttempts < MAX_TRANSIENT_ATTEMPTS &&
+            !(error.code === 'TIMEOUT' && hasAnotherCandidateInPlan);
 
-        if (
-          attempt.kind === 'byok' &&
-          (error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED')
-        ) {
-          sawLimitError = true;
-          limitProvider = attempt.provider;
-        }
+          if (shouldRetryTransient) {
+            transientAttempts += 1;
+            await sleep(TRANSIENT_BACKOFF_MS * transientAttempts);
+            continue;
+          }
 
-        lastError = error;
+          if (attempt.kind === 'server_fallback') {
+            recordServerFallbackFailure(attempt.provider, error);
+          }
 
-        // Structured-output validation and model-unavailable failures are
-        // provider/model-level: trying sibling keys on the same provider will
-        // not help, so skip the rest of this provider and move to the next.
-        if (isProviderLevelFailure) {
-          skippedProviders.add(attempt.provider);
+          startAiActivity({
+            id: opId,
+            task: params.task,
+            provider: attempt.provider,
+            model: modelHint,
+            keyLabel: attempt.label,
+            keySource: attempt.kind,
+            isFallback: true,
+            status: 'switching',
+            note: formatSwitchReason(error.code),
+          });
+
+          // Invalid key, rate limit, quota, or transient retries exhausted →
+          // move to the next key/provider.
           break;
         }
-
-        if (
-          TRANSIENT_CODES.has(error.code) &&
-          transientAttempts < MAX_TRANSIENT_ATTEMPTS
-        ) {
-          transientAttempts += 1;
-          await sleep(TRANSIENT_BACKOFF_MS * transientAttempts);
-          continue;
-        }
-
-        // Invalid key, rate limit, quota, or transient retries exhausted →
-        // move to the next key/provider.
-        break;
       }
+
+      attemptIndex += 1;
+    }
+  } finally {
+    if (!completedOp) {
+      clearAiActivity(opId);
     }
   }
 

@@ -17,6 +17,10 @@ import {
 } from 'lucide-react';
 import type { MaterialType, SavedMaterialType, Topic } from '../types/models';
 import { useAuth } from '../context/AuthContext';
+import {
+  useBackgroundIngestion,
+  type BackgroundIngestionJob,
+} from '../context/BackgroundIngestionContext';
 import { useCourses } from '../context/CourseContext';
 import { useWorkspaceUi } from '../context/WorkspaceUiContext';
 import { useCourseSources } from '../hooks/useCourseSources';
@@ -35,6 +39,7 @@ import {
   ImportMaterialModal,
   type ExtractionDraftPayload,
 } from '../components/library/ImportMaterialModal';
+import { ProcessingSourceCard } from '../components/library/ProcessingSourceCard';
 import { SourceViewer } from '../components/library/SourceViewer';
 import {
   SAVED_MATERIAL_TYPE_LABELS,
@@ -64,6 +69,13 @@ export const LibraryPage: React.FC = () => {
   } = useCourses();
   const { navigate } = useRouter();
   const { setHideHeader, setHideBottomNav, setLockViewport } = useWorkspaceUi();
+  const {
+    getJobsForCourse,
+    cancelJob,
+    retryJob,
+    dismissJob,
+    consumeReadyJob,
+  } = useBackgroundIngestion();
 
   const {
     sources,
@@ -84,6 +96,7 @@ export const LibraryPage: React.FC = () => {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<ExtractionDraftPayload | null>(null);
   const [useRestoredDraft, setUseRestoredDraft] = useState(false);
+  const [reviewingJobDraft, setReviewingJobDraft] = useState<ExtractionDraftPayload | null>(null);
 
   const [selectedTopicId, setSelectedTopicId] = useState<string>('all');
   const [materialTypeFilter, setMaterialTypeFilter] = useState<MaterialType | 'all'>('all');
@@ -193,6 +206,49 @@ export const LibraryPage: React.FC = () => {
     topics.forEach((t) => map.set(t.id, t));
     return map;
   }, [topics]);
+
+  const courseJobs = useMemo(
+    () => (activeCourse && isOwner ? getJobsForCourse(activeCourse.id) : []),
+    [activeCourse, isOwner, getJobsForCourse]
+  );
+
+  const activeCourseJobsCount = useMemo(
+    () =>
+      courseJobs.filter(
+        (j) => j.status === 'queued' || j.status === 'extracting' || j.status === 'saving'
+      ).length,
+    [courseJobs]
+  );
+
+  const visibleCourseJobs = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return courseJobs.filter((job) => {
+      if (q) {
+        const matchTitle = job.title.toLowerCase().includes(q);
+        const matchFile = job.fileName.toLowerCase().includes(q);
+        if (!matchTitle && !matchFile) return false;
+      }
+      return true;
+    });
+  }, [courseJobs, searchQuery]);
+
+  const handleReviewBackgroundJob = async (job: BackgroundIngestionJob) => {
+    const result = await consumeReadyJob(job.id);
+    if (!result) return;
+    setReviewingJobDraft({
+      title: result.title,
+      materialType: result.materialType,
+      courseId: job.courseId,
+      topicId: job.topicId,
+      extractedContent: result.extractedContent,
+      sections: result.sections,
+      pageOrSlideCount: result.pageOrSlideCount,
+      originalFileName: result.originalFileName,
+      warnings: result.warnings,
+    });
+    setUseRestoredDraft(false);
+    setImportModalOpen(true);
+  };
 
   const filteredSources = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -374,6 +430,7 @@ export const LibraryPage: React.FC = () => {
                   <Button
                     size="sm"
                     onClick={() => {
+                      setReviewingJobDraft(null);
                       setUseRestoredDraft(false);
                       setImportModalOpen(true);
                     }}
@@ -586,6 +643,12 @@ export const LibraryPage: React.FC = () => {
                           {item.count}
                         </span>
                       )}
+                      {item.id === 'sources' && activeCourseJobsCount > 0 && (
+                        <span
+                          aria-label={`${activeCourseJobsCount} processing in background`}
+                          className="inline-flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse"
+                        />
+                      )}
                     </span>
                   </button>
                 );
@@ -661,15 +724,16 @@ export const LibraryPage: React.FC = () => {
             }}
             onReaderOpenChange={setSavedReaderOpen}
           />
-        ) : sourcesLoading && sources.length === 0 ? (
+        ) : sourcesLoading && sources.length === 0 && visibleCourseJobs.length === 0 ? (
           <LoadingSkeleton lines={4} />
-        ) : sources.length === 0 ? (
+        ) : sources.length === 0 && visibleCourseJobs.length === 0 ? (
           isOwner ? (
             <EmptyState
               title={`No study materials in ${activeCourse.code} yet`}
               description="Upload PDFs, PowerPoint decks (.pptx), photographs of textbook pages or handwritten notes, or paste typed notes. Extracted content is structured, editable before saving, and cloud-synced across your devices."
               actionLabel="Add your first material"
               onAction={() => {
+                setReviewingJobDraft(null);
                 setUseRestoredDraft(false);
                 setImportModalOpen(true);
               }}
@@ -680,95 +744,126 @@ export const LibraryPage: React.FC = () => {
               description={`Course materials are managed by ${activeCourse.authorName || 'the course author'}. New uploads will appear here automatically.`}
             />
           )
-        ) : filteredSources.length === 0 ? (
+        ) : filteredSources.length === 0 && visibleCourseJobs.length === 0 ? (
           <div className="border-t border-zinc-200 dark:border-zinc-800 py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
             No materials match your current search or filter.
           </div>
         ) : (
-          <div className="border-t border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-200 dark:divide-zinc-800">
-            {filteredSources.map((src) => {
-              const topicName = src.topicId ? topicMap.get(src.topicId)?.name : null;
-              const uncertain = countUncertainMarkers(src.extractedContent);
-              const snippet = src.extractedContent
-                .replace(/^#+\s*/gm, '')
-                .replace(/\s+/g, ' ')
-                .trim()
-                .slice(0, 170);
+          <div className="space-y-3">
+            {/* Background Extraction Skeleton Cards */}
+            {visibleCourseJobs.length > 0 && (
+              <div className="space-y-2.5 pt-1">
+                <AnimatePresence initial={false}>
+                  {visibleCourseJobs.map((job) => {
+                    const jobTopicName = job.topicId ? topicMap.get(job.topicId)?.name : null;
+                    return (
+                      <ProcessingSourceCard
+                        key={job.id}
+                        job={job}
+                        topicName={jobTopicName}
+                        onCancel={(id) => void cancelJob(id)}
+                        onRetry={(id) => void retryJob(id)}
+                        onDismiss={(id) => void dismissJob(id)}
+                        onReview={(j) => void handleReviewBackgroundJob(j)}
+                        onOpenSavedSource={(sourceId, jobId) => {
+                          void dismissJob(jobId);
+                          setSearchFocused(false);
+                          setActiveSourceId(sourceId);
+                        }}
+                      />
+                    );
+                  })}
+                </AnimatePresence>
+              </div>
+            )}
 
-              return (
-                <button
-                  key={src.id}
-                  type="button"
-                  onClick={() => {
-                    setSearchFocused(false);
-                    setActiveSourceId(src.id);
-                  }}
-                  className="group block w-full py-4 text-left hover:bg-zinc-50/80 dark:hover:bg-zinc-900/70 px-2 rounded-md transition-colors cursor-pointer"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                        {MATERIAL_TYPE_LABELS[src.materialType]}
-                      </span>
-                      {topicName && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span>{topicName}</span>
-                        </>
-                      )}
-                      {src.pageOrSlideCount > 0 && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="tabular-nums">
-                            {src.pageOrSlideCount}{' '}
-                            {src.materialType === 'slides'
-                              ? src.pageOrSlideCount === 1
-                                ? 'slide'
-                                : 'slides'
-                              : src.pageOrSlideCount === 1
-                              ? 'page'
-                              : 'pages'}
+            {filteredSources.length > 0 && (
+              <div className="border-t border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-200 dark:divide-zinc-800">
+                {filteredSources.map((src) => {
+                  const topicName = src.topicId ? topicMap.get(src.topicId)?.name : null;
+                  const uncertain = countUncertainMarkers(src.extractedContent);
+                  const snippet = src.extractedContent
+                    .replace(/^#+\s*/gm, '')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 170);
+
+                  return (
+                    <button
+                      key={src.id}
+                      type="button"
+                      onClick={() => {
+                        setSearchFocused(false);
+                        setActiveSourceId(src.id);
+                      }}
+                      className="group block w-full py-4 text-left hover:bg-zinc-50/80 dark:hover:bg-zinc-900/70 px-2 rounded-md transition-colors cursor-pointer"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                            {MATERIAL_TYPE_LABELS[src.materialType]}
                           </span>
-                        </>
+                          {topicName && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>{topicName}</span>
+                            </>
+                          )}
+                          {src.pageOrSlideCount > 0 && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="tabular-nums">
+                                {src.pageOrSlideCount}{' '}
+                                {src.materialType === 'slides'
+                                  ? src.pageOrSlideCount === 1
+                                    ? 'slide'
+                                    : 'slides'
+                                  : src.pageOrSlideCount === 1
+                                  ? 'page'
+                                  : 'pages'}
+                              </span>
+                            </>
+                          )}
+                          {src.sections.length > 0 && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="tabular-nums">
+                                {src.sections.length}{' '}
+                                {src.sections.length === 1 ? 'section' : 'sections'}
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 tabular-nums">
+                          {uncertain > 0 && (
+                            <span className="inline-flex items-center gap-1 font-medium text-zinc-900 dark:text-zinc-200">
+                              <AlertTriangle className="h-3 w-3" />
+                              {uncertain} to review
+                            </span>
+                          )}
+                          <span>{formatShortDate(src.updatedAt)}</span>
+                        </div>
+                      </div>
+
+                      <h3 className="mt-1.5 text-base font-medium text-zinc-950 dark:text-zinc-200 group-hover:underline underline-offset-4">
+                        {src.title}
+                      </h3>
+
+                      {snippet && (
+                        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400 line-clamp-2">{snippet}</p>
                       )}
-                      {src.sections.length > 0 && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="tabular-nums">
-                            {src.sections.length}{' '}
-                            {src.sections.length === 1 ? 'section' : 'sections'}
-                          </span>
-                        </>
+
+                      {isOwner && src.studentNotes.trim() && (
+                        <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                          Note: {src.studentNotes.trim()}
+                        </p>
                       )}
-                    </div>
-
-                    <div className="flex items-center gap-2 tabular-nums">
-                      {uncertain > 0 && (
-                        <span className="inline-flex items-center gap-1 font-medium text-zinc-900 dark:text-zinc-200">
-                          <AlertTriangle className="h-3 w-3" />
-                          {uncertain} to review
-                        </span>
-                      )}
-                      <span>{formatShortDate(src.updatedAt)}</span>
-                    </div>
-                  </div>
-
-                  <h3 className="mt-1.5 text-base font-medium text-zinc-950 dark:text-zinc-200 group-hover:underline underline-offset-4">
-                    {src.title}
-                  </h3>
-
-                  {snippet && (
-                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400 line-clamp-2">{snippet}</p>
-                  )}
-
-                  {isOwner && src.studentNotes.trim() && (
-                    <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                      Note: {src.studentNotes.trim()}
-                    </p>
-                  )}
-                </button>
-              );
-            })}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
           </motion.div>
@@ -945,11 +1040,23 @@ export const LibraryPage: React.FC = () => {
             initialTopicId={
               selectedTopicId !== 'all' && selectedTopicId !== 'unassigned' ? selectedTopicId : ''
             }
-            restoredDraft={useRestoredDraft ? pendingDraft : null}
+            restoredDraft={reviewingJobDraft ?? (useRestoredDraft ? pendingDraft : null)}
             draftKey={draftKey}
-            onClose={() => setImportModalOpen(false)}
+            onClose={() => {
+              setImportModalOpen(false);
+              setReviewingJobDraft(null);
+            }}
+            onBackgrounded={(targetCourseId) => {
+              setImportModalOpen(false);
+              setReviewingJobDraft(null);
+              setActiveTab('sources');
+              if (targetCourseId && targetCourseId !== activeCourse.id) {
+                void selectCourse(targetCourseId);
+              }
+            }}
             onSaved={(sourceId, savedCourseId) => {
               setImportModalOpen(false);
+              setReviewingJobDraft(null);
               setPendingDraft(null);
               setUseRestoredDraft(false);
               if (savedCourseId !== activeCourse.id) {

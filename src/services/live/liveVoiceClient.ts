@@ -727,6 +727,7 @@ export class LiveVoiceClient {
           JSON.stringify({
             type: 'init',
             apiKey: candidate.apiKey || undefined,
+            byokOnly: hasUserEnteredOwnKey(),
             voiceName: options.voiceName || 'Zephyr',
             sendGreeting: options.sendGreeting ?? true,
             lesson: {

@@ -19,6 +19,22 @@ export function buildVisionPrompt(mode: string, pageNumber?: number): string {
       .join(' ');
   }
 
+  if (mode === 'page_image_fallback') {
+    return [
+      'You are an academic visual OCR and document comprehension assistant.',
+      pageHint,
+      'A previous pass reported no extractable text for this page, so the entire page has been rendered as a high-resolution image.',
+      'Inspect the entire image carefully for ANY study content: faint or low-contrast scans, stylized titles, handwritten notes, equations, tables, charts, graphs, labeled diagrams, figures, or embedded screenshots.',
+      'Extract all visible text, formulas, labels, and captions cleanly while preserving headings, lists, and tables (in Markdown).',
+      'If the page contains meaningful visual study material (such as a diagram, chart, flowchart, graph, map, or illustration) with little or no body prose, capture its labels and summarize its educational content accurately as a structured section so the student can study from it.',
+      'If any word or symbol is genuinely blurry or unreadable, mark it as [unclear: best guess] or [illegible] and count those markers in uncertainCount.',
+      'ONLY return an empty sections array if the image is truly blank or contains nothing of academic value.',
+      'Return structured JSON matching the schema.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
   return [
     'You are an academic OCR and document structuring assistant.',
     pageHint,

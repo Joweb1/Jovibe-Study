@@ -28,6 +28,7 @@ interface LiveLessonPayload {
 interface ClientInitMessage {
   type: 'init';
   apiKey?: string;
+  byokOnly?: boolean;
   voiceName?: string;
   sendGreeting?: boolean;
   lesson?: LiveLessonPayload;
@@ -183,7 +184,10 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
 
         let keySource: 'byok' | 'server_fallback' = 'server_fallback';
         try {
-          const resolved = resolveApiKey(typeof msg.apiKey === 'string' ? msg.apiKey : undefined);
+          const resolved = resolveApiKey(
+            typeof msg.apiKey === 'string' ? msg.apiKey : undefined,
+            Boolean(msg.byokOnly)
+          );
           keySource = resolved.keySource;
           const voiceName = resolveTtsVoice(msg.voiceName || 'Zephyr');
           const systemInstruction = buildLiveSystemInstruction(msg.lesson);

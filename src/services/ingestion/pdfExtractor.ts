@@ -3,17 +3,28 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { StudySection } from '../../types/models';
 import { generateDocumentId } from '../../utils/validation';
 import { clampSectionsForFirestore } from './structureParser';
-import { extractImageWithVision } from './visionExtractor';
+import {
+  extractImageWithVision,
+  isEffectivelyEmptyVisionResult,
+} from './visionExtractor';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const MIN_SELECTABLE_CHARS_PER_PAGE = 45;
-const MAX_VISION_PAGES_PER_BATCH = 12;
+const MAX_VISION_PAGES_PER_BATCH = 40;
 
 export interface PdfExtractionProgress {
   currentPage: number;
   totalPages: number;
   stage: string;
+  /** Optional smooth fractional completion (0-100) for background skeleton progress bars */
+  percent?: number;
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
 }
 
 export interface PdfExtractionOptions {
@@ -132,10 +143,16 @@ function reconstructStructuredPageText(runs: TextRun[]): {
   };
 }
 
-async function renderPdfPageToJpegBase64(page: pdfjsLib.PDFPageProxy): Promise<string> {
+async function renderPdfPageToJpegBase64(
+  page: pdfjsLib.PDFPageProxy,
+  highRes = false
+): Promise<string> {
   const baseViewport = page.getViewport({ scale: 1 });
-  const scale = Math.min(2.0, 1600 / Math.max(baseViewport.width, baseViewport.height));
-  const viewport = page.getViewport({ scale: Math.max(1.2, scale) });
+  const maxDim = highRes ? 2200 : 1600;
+  const maxScale = highRes ? 2.6 : 2.0;
+  const minScale = highRes ? 1.6 : 1.2;
+  const scale = Math.min(maxScale, maxDim / Math.max(baseViewport.width, baseViewport.height));
+  const viewport = page.getViewport({ scale: Math.max(minScale, scale) });
 
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(viewport.width);
@@ -147,7 +164,7 @@ async function renderPdfPageToJpegBase64(page: pdfjsLib.PDFPageProxy): Promise<s
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  const dataUrl = canvas.toDataURL('image/jpeg', highRes ? 0.94 : 0.85);
   canvas.width = 0;
   canvas.height = 0;
   return dataUrl.split(',')[1] || '';
@@ -179,10 +196,16 @@ export async function extractPdfDocument(
         throw new Error('Extraction cancelled by user.');
       }
 
+      const pageIndex = pageNum - startPage;
+      const pageStartPercent = Math.round((pageIndex / Math.max(1, pagesToProcess)) * 100);
+      const pageMidPercent = Math.round(((pageIndex + 0.45) / Math.max(1, pagesToProcess)) * 100);
+      const pageEndPercent = Math.round(((pageIndex + 1) / Math.max(1, pagesToProcess)) * 100);
+
       options.onProgress?.({
-        currentPage: pageNum - startPage + 1,
+        currentPage: pageIndex + 1,
         totalPages: pagesToProcess,
         stage: `Reading page ${pageNum} of ${endPage}...`,
+        percent: Math.max(5, pageStartPercent),
       });
 
       const page = await pdf.getPage(pageNum);
@@ -215,20 +238,53 @@ export async function extractPdfDocument(
         });
       } else if (enableScannedOcr && visionPagesUsed < MAX_VISION_PAGES_PER_BATCH) {
         options.onProgress?.({
-          currentPage: pageNum - startPage + 1,
+          currentPage: pageIndex + 1,
           totalPages: pagesToProcess,
           stage: `Scanned page ${pageNum} detected — running AI Vision OCR...`,
+          percent: Math.max(10, pageMidPercent),
         });
 
         try {
-          const base64 = await renderPdfPageToJpegBase64(page);
-          const visionResult = await extractImageWithVision({
+          const base64 = await renderPdfPageToJpegBase64(page, false);
+          let visionResult = await extractImageWithVision({
             imageBase64: base64,
             mimeType: 'image/jpeg',
             mode: 'scanned_doc',
             pageNumber: pageNum,
             signal: options.signal,
           });
+
+          // If AI reported the page as empty/no extractable text, do NOT skip yet:
+          // re-render the page as a high-resolution full-page image and extract its visual/text content.
+          if (isEffectivelyEmptyVisionResult(visionResult.sections)) {
+            if (options.signal?.aborted) {
+              throw new Error('Extraction cancelled by user.');
+            }
+            options.onProgress?.({
+              currentPage: pageIndex + 1,
+              totalPages: pagesToProcess,
+              stage: `Page ${pageNum} reported empty — extracting page as high-res image...`,
+              percent: Math.max(12, Math.round(((pageIndex + 0.72) / Math.max(1, pagesToProcess)) * 100)),
+            });
+            const highResBase64 = await renderPdfPageToJpegBase64(page, true);
+            const imageFallbackResult = await extractImageWithVision({
+              imageBase64: highResBase64,
+              mimeType: 'image/jpeg',
+              mode: 'page_image_fallback',
+              pageNumber: pageNum,
+              signal: options.signal,
+            });
+            if (!isEffectivelyEmptyVisionResult(imageFallbackResult.sections)) {
+              visionResult = imageFallbackResult;
+            } else {
+              // Still empty after full-page image extraction — now treat as genuinely empty
+              visionResult = {
+                sections: [],
+                uncertainCount: 0,
+                notes: imageFallbackResult.notes || visionResult.notes,
+              };
+            }
+          }
 
           visionPagesUsed += 1;
           uncertainCount += visionResult.uncertainCount;
@@ -248,6 +304,9 @@ export async function extractPdfDocument(
             warnings.push(`Page ${pageNum}: ${visionResult.notes}`);
           }
         } catch (err) {
+          if (options.signal?.aborted) {
+            throw new Error('Extraction cancelled by user.');
+          }
           const msg = err instanceof Error ? err.message : String(err);
           warnings.push(`Page ${pageNum} OCR skipped: ${msg}`);
           if (body.trim()) {
@@ -273,6 +332,16 @@ export async function extractPdfDocument(
       }
 
       page.cleanup();
+
+      options.onProgress?.({
+        currentPage: pageIndex + 1,
+        totalPages: pagesToProcess,
+        stage: `Processed page ${pageNum} of ${endPage}`,
+        percent: pageEndPercent,
+      });
+
+      // Yield between pages so background extraction never starves main-thread UI interactions
+      await yieldToEventLoop();
     }
   } finally {
     await loadingTask.destroy();

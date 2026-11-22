@@ -6,6 +6,7 @@ import {
   toHttpError,
   toNetworkError,
 } from './http';
+import { hasUserEnteredOwnKey } from './keyManager';
 import type { AiProvider, AiTask } from './providers';
 
 type NonGeminiProvider = Exclude<AiProvider, 'gemini'>;
@@ -22,7 +23,8 @@ export interface ProviderCallParams {
   provider: NonGeminiProvider;
   task: AiTask;
   payload: Record<string, unknown>;
-  apiKey: string;
+  /** BYOK key, or `null` to use the server-managed `.env` fallback key (only when user has never entered a personal key). */
+  apiKey: string | null;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -36,8 +38,13 @@ export async function callProviderTask<TResponse extends { model?: string }>(
 ): Promise<TResponse> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-sotal-provider-key': params.apiKey,
   };
+  if (params.apiKey) {
+    headers['x-sotal-provider-key'] = params.apiKey;
+  }
+  if (hasUserEnteredOwnKey()) {
+    headers['x-sotal-byok-only'] = '1';
+  }
 
   try {
     const response = await fetchWithTimeout(
@@ -90,6 +97,7 @@ export async function testProviderApiKey(params: {
         headers: {
           'Content-Type': 'application/json',
           'x-sotal-provider-key': params.rawKey,
+          'x-sotal-byok-only': '1',
         },
         body: JSON.stringify({}),
       },

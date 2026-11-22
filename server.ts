@@ -18,9 +18,11 @@ import {
   Type,
 } from './server/geminiService.ts';
 import {
+  areServerProviderKeysAllowed,
   extractProviderVision,
   generateProviderJson,
   generateProviderText,
+  getServerFallbackProvidersStatus,
   isOpenAiProviderId,
   ProviderRequestError,
   resolveProviderKey,
@@ -104,12 +106,18 @@ async function startServer() {
   app.use(express.json({ limit: '15mb' }));
 
   app.get('/api/health', (_req, res) => {
+    const serverFallbackProviders = getServerFallbackProvidersStatus();
+    const anyFallback = Object.values(serverFallbackProviders).some(Boolean);
     res.json({
       ok: true,
-      serverFallbackAvailable: Boolean((process.env.GEMINI_API_KEY || '').trim()),
-      visionConfigured: Boolean((process.env.GEMINI_API_KEY || '').trim()),
-      serverProviderKeysEnabled: (process.env.ALLOW_SERVER_PROVIDER_KEYS || '').trim() === 'true',
-      supportedProviders: ['gemini', 'cerebras', 'nvidia_nim', 'openrouter', 'groq'],
+      serverFallbackAvailable: anyFallback,
+      serverFallbackProviders,
+      visionConfigured:
+        serverFallbackProviders.gemini ||
+        serverFallbackProviders.nvidia_nim ||
+        serverFallbackProviders.openrouter,
+      serverProviderKeysEnabled: areServerProviderKeysAllowed(),
+      supportedProviders: ['gemini', 'openrouter', 'cerebras', 'groq', 'cloudflare', 'nvidia_nim'],
     });
   });
 
@@ -118,7 +126,10 @@ async function startServer() {
     const startMs = Date.now();
     let keySource: 'byok' | 'server_fallback' = 'server_fallback';
     try {
-      const resolved = resolveApiKey(req.headers['x-sotal-gemini-key']);
+      const resolved = resolveApiKey(
+        req.headers['x-sotal-gemini-key'],
+        req.headers['x-sotal-byok-only']
+      );
       keySource = resolved.keySource;
       const model = resolveModelName(req.body?.model);
       const ai = createGeminiClient(resolved.apiKey);
@@ -156,7 +167,10 @@ async function startServer() {
   app.post('/api/ai/generate', async (req, res) => {
     let keySource: 'byok' | 'server_fallback' = 'server_fallback';
     try {
-      const resolved = resolveApiKey(req.headers['x-sotal-gemini-key']);
+      const resolved = resolveApiKey(
+        req.headers['x-sotal-gemini-key'],
+        req.headers['x-sotal-byok-only']
+      );
       keySource = resolved.keySource;
       const { prompt, messages, systemInstruction, model: requestedModel } = req.body ?? {};
       const model = resolveModelName(requestedModel);
@@ -221,7 +235,10 @@ async function startServer() {
   app.post('/api/ai/generate-json', async (req, res) => {
     let keySource: 'byok' | 'server_fallback' = 'server_fallback';
     try {
-      const resolved = resolveApiKey(req.headers['x-sotal-gemini-key']);
+      const resolved = resolveApiKey(
+        req.headers['x-sotal-gemini-key'],
+        req.headers['x-sotal-byok-only']
+      );
       keySource = resolved.keySource;
       const { prompt, systemInstruction, responseSchema, model: requestedModel } = req.body ?? {};
       const model = resolveModelName(requestedModel);
@@ -307,7 +324,10 @@ async function startServer() {
   app.post('/api/extract/vision', async (req, res) => {
     let keySource: 'byok' | 'server_fallback' = 'server_fallback';
     try {
-      const resolved = resolveApiKey(req.headers['x-sotal-gemini-key']);
+      const resolved = resolveApiKey(
+        req.headers['x-sotal-gemini-key'],
+        req.headers['x-sotal-byok-only']
+      );
       keySource = resolved.keySource;
       const { imageBase64, mimeType, mode = 'textbook_photo', pageNumber, model: requestedModel } =
         req.body ?? {};
@@ -465,7 +485,10 @@ async function startServer() {
   app.post('/api/ai/tts', async (req, res) => {
     let keySource: 'byok' | 'server_fallback' = 'server_fallback';
     try {
-      const resolved = resolveApiKey(req.headers['x-sotal-gemini-key']);
+      const resolved = resolveApiKey(
+        req.headers['x-sotal-gemini-key'],
+        req.headers['x-sotal-byok-only']
+      );
       keySource = resolved.keySource;
       const { text, voiceName: requestedVoice, style } = req.body ?? {};
 
@@ -554,7 +577,10 @@ async function startServer() {
   app.post('/api/ai/transcribe', async (req, res) => {
     let keySource: 'byok' | 'server_fallback' = 'server_fallback';
     try {
-      const resolved = resolveApiKey(req.headers['x-sotal-gemini-key']);
+      const resolved = resolveApiKey(
+        req.headers['x-sotal-gemini-key'],
+        req.headers['x-sotal-byok-only']
+      );
       keySource = resolved.keySource;
       const { audioBase64, mimeType, courseContextHint } = req.body ?? {};
 
@@ -636,7 +662,11 @@ async function startServer() {
     let provider: OpenAiProviderId | null = null;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const resolved = resolveProviderKey(
+        provider,
+        req.headers['x-sotal-provider-key'],
+        req.headers['x-sotal-byok-only']
+      );
       const result = await testProviderConnection({ provider, apiKey: resolved.apiKey });
       res.json({
         ok: true,
@@ -654,7 +684,11 @@ async function startServer() {
     let provider: OpenAiProviderId | null = null;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const resolved = resolveProviderKey(
+        provider,
+        req.headers['x-sotal-provider-key'],
+        req.headers['x-sotal-byok-only']
+      );
       const { prompt, messages, systemInstruction, model } = req.body ?? {};
 
       if (
@@ -697,7 +731,11 @@ async function startServer() {
     let provider: OpenAiProviderId | null = null;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const resolved = resolveProviderKey(
+        provider,
+        req.headers['x-sotal-provider-key'],
+        req.headers['x-sotal-byok-only']
+      );
       const { prompt, systemInstruction, responseSchema, model } = req.body ?? {};
 
       if (typeof prompt !== 'string' || !prompt.trim()) {
@@ -741,7 +779,11 @@ async function startServer() {
     let provider: OpenAiProviderId | null = null;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const resolved = resolveProviderKey(
+        provider,
+        req.headers['x-sotal-provider-key'],
+        req.headers['x-sotal-byok-only']
+      );
       const { imageBase64, mimeType, mode = 'textbook_photo', pageNumber, model } = req.body ?? {};
 
       if (typeof imageBase64 !== 'string' || imageBase64.length < 20) {
@@ -802,7 +844,11 @@ async function startServer() {
     let provider: OpenAiProviderId | null = null;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const resolved = resolveProviderKey(
+        provider,
+        req.headers['x-sotal-provider-key'],
+        req.headers['x-sotal-byok-only']
+      );
       const { audioBase64, mimeType, courseContextHint, model } = req.body ?? {};
 
       if (typeof audioBase64 !== 'string' || audioBase64.length < 40) {
@@ -871,7 +917,11 @@ async function startServer() {
         return;
       }
 
-      const resolved = resolveProviderKey(provider, req.headers['x-sotal-provider-key']);
+      const resolved = resolveProviderKey(
+        provider,
+        req.headers['x-sotal-provider-key'],
+        req.headers['x-sotal-byok-only']
+      );
       const result = await synthesizeProviderSpeech({
         provider,
         apiKey: resolved.apiKey,

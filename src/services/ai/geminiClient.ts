@@ -3,6 +3,7 @@ import {
   type AiErrorCode,
 } from './errors';
 import { callGeminiEndpoint } from './geminiTransport';
+import { PROVIDER_JSON_TIMEOUT_MS, PROVIDER_VISION_TIMEOUT_MS } from './http';
 import { callProviderTask } from './providerTransport';
 import { runAiTask, type RouteAttempt } from './aiRouter';
 import { toProviderSafeAudio } from './audioTranscode';
@@ -122,6 +123,7 @@ export async function generateText(params: {
 
   const { value, meta } = await runAiTask<{ text: string }>({
     task: 'chat',
+    requestedModel: model,
     signal: params.signal,
     execute: async (attempt) => {
       if (attempt.provider === 'gemini') {
@@ -142,7 +144,7 @@ export async function generateText(params: {
       const body = await callProviderTask<ProviderTextBody>({
         provider: providerForAttempt(attempt),
         task: 'chat',
-        apiKey: attempt.apiKey || '',
+        apiKey: attempt.apiKey,
         signal: params.signal,
         payload: {
           prompt: params.prompt,
@@ -181,6 +183,7 @@ export async function generateStructuredJson<T>(params: {
 
   const { value, meta } = await runAiTask<T>({
     task: 'structured_json',
+    requestedModel: model,
     signal: params.signal,
     validate,
     execute: async (attempt) => {
@@ -202,8 +205,9 @@ export async function generateStructuredJson<T>(params: {
       const body = await callProviderTask<ProviderJsonBody<T>>({
         provider: providerForAttempt(attempt),
         task: 'structured_json',
-        apiKey: attempt.apiKey || '',
+        apiKey: attempt.apiKey,
         signal: params.signal,
+        timeoutMs: PROVIDER_JSON_TIMEOUT_MS,
         payload: {
           prompt: params.prompt,
           systemInstruction: params.systemInstruction,
@@ -241,6 +245,7 @@ export async function extractVisionWithClient(params: {
 
   const { value, meta } = await runAiTask<ProviderVisionBody>({
     task: 'vision',
+    requestedModel: model,
     signal: params.signal,
     execute: async (attempt) => {
       if (attempt.provider === 'gemini') {
@@ -262,8 +267,9 @@ export async function extractVisionWithClient(params: {
       const body = await callProviderTask<ProviderVisionBody>({
         provider: providerForAttempt(attempt),
         task: 'vision',
-        apiKey: attempt.apiKey || '',
+        apiKey: attempt.apiKey,
         signal: params.signal,
+        timeoutMs: PROVIDER_VISION_TIMEOUT_MS,
         payload: {
           imageBase64: params.imageBase64,
           mimeType: params.mimeType,
@@ -296,6 +302,7 @@ export async function synthesizeSpeechWithClient(params: {
 }> {
   const { value, meta } = await runAiTask<ProviderTtsBody>({
     task: 'tts',
+    requestedModel: 'gemini-3.8-flash-lite-tts',
     signal: params.signal,
     execute: async (attempt) => {
       if (attempt.provider === 'gemini') {
@@ -314,9 +321,9 @@ export async function synthesizeSpeechWithClient(params: {
 
       // Non-Gemini audio playback fallback (Groq Orpheus TTS)
       const body = await callProviderTask<ProviderTtsBody>({
-        provider: attempt.provider,
+        provider: providerForAttempt(attempt),
         task: 'tts',
-        apiKey: attempt.apiKey || '',
+        apiKey: attempt.apiKey,
         payload: {
           text: params.text,
           voiceName: params.voiceName,
@@ -352,6 +359,7 @@ export async function transcribeAudioWithClient(params: {
 }> {
   const { value, meta } = await runAiTask<{ text: string }>({
     task: 'transcription',
+    requestedModel: 'gemini-3.5-transcribe',
     signal: params.signal,
     execute: async (attempt) => {
       if (attempt.provider === 'gemini') {
@@ -378,7 +386,7 @@ export async function transcribeAudioWithClient(params: {
       const body = await callProviderTask<ProviderTranscribeBody>({
         provider: providerForAttempt(attempt),
         task: 'transcription',
-        apiKey: attempt.apiKey || '',
+        apiKey: attempt.apiKey,
         signal: params.signal,
         payload: {
           audioBase64: safeAudio.audioBase64,

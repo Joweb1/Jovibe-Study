@@ -12,6 +12,7 @@ import {
 import {
   compressImageFileToBase64,
   extractImageWithVision,
+  isEffectivelyEmptyVisionResult,
   type VisionExtractionMode,
 } from './visionExtractor';
 
@@ -58,7 +59,10 @@ export async function ingestUploadedFile(
       onProgress: (p) =>
         options.onProgress?.({
           stage: p.stage,
-          percent: Math.round((p.currentPage / Math.max(1, p.totalPages)) * 100),
+          percent:
+            typeof p.percent === 'number'
+              ? p.percent
+              : Math.round((p.currentPage / Math.max(1, p.totalPages)) * 100),
         }),
     });
 
@@ -88,24 +92,32 @@ export async function ingestUploadedFile(
   // 2. PowerPoint (.pptx)
   if (detectedType === 'slides' || /\.pptx?$/i.test(file.name)) {
     options.onProgress?.({ stage: 'Reading PowerPoint slides...', percent: 15 });
-    const pptxRes = await extractPptxPresentation(file, (curr, total) => {
-      options.onProgress?.({
-        stage: `Extracting slide ${curr} of ${total}...`,
-        percent: Math.round((curr / Math.max(1, total)) * 100),
-      });
-    });
+    const pptxRes = await extractPptxPresentation(
+      file,
+      (curr, total) => {
+        options.onProgress?.({
+          stage: `Extracting slide ${curr} of ${total}...`,
+          percent: Math.round((curr / Math.max(1, total)) * 100),
+        });
+      },
+      options.signal
+    );
 
     const extractedContent = sectionsToMarkdown(pptxRes.sections);
+    const uncertainCount = Math.max(
+      pptxRes.uncertainCount ?? 0,
+      countUncertainMarkers(extractedContent)
+    );
     return {
       title: defaultTitle,
       materialType: 'slides',
       extractedContent,
       sections: pptxRes.sections,
       pageOrSlideCount: pptxRes.slideCount,
-      processingStatus: 'ready',
+      processingStatus: uncertainCount > 0 ? 'needs_review' : 'ready',
       originalFileName: file.name,
-      uncertainCount: 0,
-      usedVision: false,
+      uncertainCount,
+      usedVision: Boolean(pptxRes.usedVision),
       warnings: pptxRes.warnings,
     };
   }
@@ -136,12 +148,35 @@ export async function ingestUploadedFile(
       percent: 60,
     });
 
-    const visionRes = await extractImageWithVision({
+    let visionRes = await extractImageWithVision({
       imageBase64: base64,
       mimeType,
       mode,
       signal: options.signal,
     });
+
+    // If first pass returned empty (or reported no extractable text), retry once treating it as a full-page visual image before concluding empty
+    if (isEffectivelyEmptyVisionResult(visionRes.sections)) {
+      options.onProgress?.({
+        stage: 'No text detected on first pass — re-analyzing full image...',
+        percent: 78,
+      });
+      const fallbackRes = await extractImageWithVision({
+        imageBase64: base64,
+        mimeType,
+        mode: 'page_image_fallback',
+        signal: options.signal,
+      });
+      if (!isEffectivelyEmptyVisionResult(fallbackRes.sections)) {
+        visionRes = fallbackRes;
+      } else {
+        visionRes = {
+          sections: [],
+          uncertainCount: 0,
+          notes: fallbackRes.notes || visionRes.notes,
+        };
+      }
+    }
 
     const sections = clampSectionsForFirestore(visionRes.sections);
     const extractedContent = sectionsToMarkdown(sections);

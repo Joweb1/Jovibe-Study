@@ -77,13 +77,21 @@ function formatGeminiValidationError(code: string | undefined, fallback?: string
   return fallback || 'Key verification failed. Please check the key and try again.';
 }
 
-const PROVIDER_ORDER: AiProvider[] = ['gemini', 'cerebras', 'nvidia_nim', 'openrouter', 'groq'];
+const PROVIDER_ORDER: AiProvider[] = [
+  'gemini',
+  'openrouter',
+  'cerebras',
+  'groq',
+  'cloudflare',
+  'nvidia_nim',
+];
 const PROVIDER_POSITION_LABELS: Record<AiProvider, string> = {
   gemini: 'Primary',
-  cerebras: '2nd fallback',
-  nvidia_nim: '3rd fallback',
-  openrouter: '4th fallback',
-  groq: 'Audio / 5th fallback',
+  openrouter: '2nd fallback',
+  cerebras: '3rd fallback',
+  groq: '4th / Audio fallback',
+  cloudflare: '5th fallback',
+  nvidia_nim: 'Last resort',
 };
 const PROVIDER_DIRECT_LINK_META: Record<
   AiProvider,
@@ -95,11 +103,11 @@ const PROVIDER_DIRECT_LINK_META: Record<
     dotClass: 'bg-sky-500',
     hoverClass: 'hover:border-sky-300 dark:hover:border-sky-700',
   },
-  nvidia_nim: {
-    name: 'NVIDIA NIM',
-    action: 'build.nvidia.com',
-    dotClass: 'bg-emerald-500',
-    hoverClass: 'hover:border-emerald-300 dark:hover:border-emerald-700',
+  openrouter: {
+    name: 'OpenRouter',
+    action: 'openrouter.ai/keys',
+    dotClass: 'bg-amber-500',
+    hoverClass: 'hover:border-amber-300 dark:hover:border-amber-700',
   },
   cerebras: {
     name: 'Cerebras',
@@ -107,20 +115,33 @@ const PROVIDER_DIRECT_LINK_META: Record<
     dotClass: 'bg-violet-500',
     hoverClass: 'hover:border-violet-300 dark:hover:border-violet-700',
   },
-  openrouter: {
-    name: 'OpenRouter',
-    action: 'openrouter.ai/keys',
-    dotClass: 'bg-amber-500',
-    hoverClass: 'hover:border-amber-300 dark:hover:border-amber-700',
-  },
   groq: {
     name: 'Groq',
     action: 'console.groq.com',
     dotClass: 'bg-rose-500',
     hoverClass: 'hover:border-rose-300 dark:hover:border-rose-700',
   },
+  cloudflare: {
+    name: 'Cloudflare Workers AI',
+    action: 'Workers AI REST API',
+    dotClass: 'bg-orange-500',
+    hoverClass: 'hover:border-orange-300 dark:hover:border-orange-700',
+  },
+  nvidia_nim: {
+    name: 'NVIDIA NIM',
+    action: 'build.nvidia.com',
+    dotClass: 'bg-emerald-500',
+    hoverClass: 'hover:border-emerald-300 dark:hover:border-emerald-700',
+  },
 };
-const QUICK_LINK_ORDER: AiProvider[] = ['gemini', 'nvidia_nim', 'cerebras', 'openrouter', 'groq'];
+const QUICK_LINK_ORDER: AiProvider[] = [
+  'gemini',
+  'openrouter',
+  'cerebras',
+  'groq',
+  'cloudflare',
+  'nvidia_nim',
+];
 const ALL_TASKS: AiTask[] = ['chat', 'structured_json', 'vision', 'transcription', 'tts'];
 
 function formatStatusLabel(key: StoredApiKey): string {
@@ -161,17 +182,18 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
   // ── Provider keys state ──────────────────────────────────────────────────
   const [providerKeys, setProviderKeys] = useState<Record<AiProvider, StoredApiKey[]>>(() => ({
     gemini: listStoredApiKeys('gemini'),
-    cerebras: listStoredApiKeys('cerebras'),
-    nvidia_nim: listStoredApiKeys('nvidia_nim'),
     openrouter: listStoredApiKeys('openrouter'),
+    cerebras: listStoredApiKeys('cerebras'),
     groq: listStoredApiKeys('groq'),
+    cloudflare: listStoredApiKeys('cloudflare'),
+    nvidia_nim: listStoredApiKeys('nvidia_nim'),
   }));
   const [config, setConfig] = useState<ByokConfig>(() => getByokConfig());
   const [serverFallbackAvailable, setServerFallbackAvailable] = useState<boolean | null>(null);
 
   // ── Panel collapse state (gemini expanded by default) ────────────────────
   const [collapsedProviders, setCollapsedProviders] = useState<Set<AiProvider>>(
-    new Set(['cerebras', 'nvidia_nim', 'openrouter', 'groq'])
+    new Set(['openrouter', 'cerebras', 'groq', 'cloudflare', 'nvidia_nim'])
   );
 
   // ── Add key form state ───────────────────────────────────────────────────
@@ -255,10 +277,11 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
   const refreshState = () => {
     setProviderKeys({
       gemini: listStoredApiKeys('gemini'),
-      cerebras: listStoredApiKeys('cerebras'),
-      nvidia_nim: listStoredApiKeys('nvidia_nim'),
       openrouter: listStoredApiKeys('openrouter'),
+      cerebras: listStoredApiKeys('cerebras'),
       groq: listStoredApiKeys('groq'),
+      cloudflare: listStoredApiKeys('cloudflare'),
+      nvidia_nim: listStoredApiKeys('nvidia_nim'),
     });
     setConfig(getByokConfig());
   };
@@ -621,7 +644,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
             Gemini setup guide
           </button>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {QUICK_LINK_ORDER.map((provider) => {
             const def = PROVIDERS[provider];
             const meta = PROVIDER_DIRECT_LINK_META[provider];

@@ -2,7 +2,7 @@ import type { Course, MaterialType, ProcessingStatus, StudySection, StudySource,
 import { timestampToMillis } from '../../utils/validation';
 
 const DB_NAME = 'sotal_study_local_v1';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export type LocalStoreName =
   | 'courses'
@@ -11,7 +11,62 @@ export type LocalStoreName =
   | 'studySessions'
   | 'drafts'
   | 'meta'
-  | 'tutorAudio';
+  | 'tutorAudio'
+  | 'pendingIngestions';
+
+export type BackgroundIngestionStatus =
+  | 'queued'
+  | 'extracting'
+  | 'saving'
+  | 'ready_for_review'
+  | 'completed'
+  | 'failed';
+
+export interface PendingIngestionOptions {
+  overrideType?: MaterialType;
+  visionMode?: 'handwriting' | 'textbook_photo' | 'scanned_doc' | 'page_image_fallback' | 'general';
+  startPage?: number;
+  endPage?: number;
+  enableScannedOcr?: boolean;
+}
+
+export interface PendingIngestionExtractedResult {
+  title: string;
+  materialType: MaterialType;
+  extractedContent: string;
+  sections: StudySection[];
+  pageOrSlideCount: number;
+  processingStatus: ProcessingStatus;
+  originalFileName: string;
+  uncertainCount: number;
+  usedVision: boolean;
+  warnings: string[];
+}
+
+export interface PendingIngestionRecord {
+  id: string;
+  userId: string;
+  courseId: string;
+  topicId: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  title: string;
+  materialType: MaterialType;
+  /** Raw uploaded File/Blob temporarily persisted locally until background extraction completes or is cancelled */
+  fileBlob: Blob | null;
+  options: PendingIngestionOptions;
+  status: BackgroundIngestionStatus;
+  progressPercent: number;
+  progressStage: string;
+  /** When true (modal hidden/backgrounded), extraction auto-saves to Firestore and clears the temp local file */
+  autoSaveWhenDone: boolean;
+  extractedResult?: PendingIngestionExtractedResult | null;
+  savedSourceId?: string | null;
+  error?: string | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
 
 export interface CachedCourse {
   id: string;
@@ -148,6 +203,11 @@ function openDatabase(): Promise<IDBDatabase | null> {
           store.createIndex('userId', 'userId', { unique: false });
           store.createIndex('conversationId', 'conversationId', { unique: false });
           store.createIndex('lastAccessedAtMs', 'lastAccessedAtMs', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('pendingIngestions')) {
+          const store = db.createObjectStore('pendingIngestions', { keyPath: 'id' });
+          store.createIndex('userId', 'userId', { unique: false });
+          store.createIndex('courseId', 'courseId', { unique: false });
         }
       };
 
@@ -683,6 +743,114 @@ export async function getLocalCacheStats(userId: string): Promise<{
   });
 }
 
+export async function savePendingIngestion(record: PendingIngestionRecord): Promise<void> {
+  const db = await openDatabase();
+  if (!db) return;
+
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction('pendingIngestions', 'readwrite');
+      tx.objectStore('pendingIngestions').put(record);
+      tx.oncomplete = () => {
+        notifyCacheSync();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error ?? new Error('Failed to persist temporary local file.'));
+      tx.onabort = () => reject(tx.error ?? new Error('Temporary local file save was aborted.'));
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+}
+
+export async function updatePendingIngestion(
+  id: string,
+  patch: Partial<PendingIngestionRecord>
+): Promise<void> {
+  const db = await openDatabase();
+  if (!db || !id) return;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('pendingIngestions', 'readwrite');
+      const store = tx.objectStore('pendingIngestions');
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as PendingIngestionRecord | undefined;
+        if (!existing) return;
+        store.put({
+          ...existing,
+          ...patch,
+          updatedAtMs: Date.now(),
+        });
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+export async function getPendingIngestion(id: string): Promise<PendingIngestionRecord | null> {
+  const db = await openDatabase();
+  if (!db || !id) return null;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('pendingIngestions', 'readonly');
+      const req = tx.objectStore('pendingIngestions').get(id);
+      req.onsuccess = () => resolve((req.result as PendingIngestionRecord) ?? null);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+export async function getPendingIngestionsForUser(
+  userId: string
+): Promise<PendingIngestionRecord[]> {
+  const db = await openDatabase();
+  if (!db || !userId) return [];
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('pendingIngestions', 'readonly');
+      const index = tx.objectStore('pendingIngestions').index('userId');
+      const req = index.getAll(IDBKeyRange.only(userId));
+      req.onsuccess = () => {
+        const rows = (req.result as PendingIngestionRecord[]) || [];
+        resolve(rows.sort((a, b) => a.createdAtMs - b.createdAtMs));
+      };
+      req.onerror = () => resolve([]);
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
+export async function deletePendingIngestion(id: string): Promise<void> {
+  const db = await openDatabase();
+  if (!db || !id) return;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('pendingIngestions', 'readwrite');
+      tx.objectStore('pendingIngestions').delete(id);
+      tx.oncomplete = () => {
+        notifyCacheSync();
+        resolve();
+      };
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 export async function clearLocalCache(): Promise<void> {
   const db = await openDatabase();
   if (!db) return;
@@ -696,6 +864,7 @@ export async function clearLocalCache(): Promise<void> {
       'drafts',
       'meta',
       'tutorAudio',
+      'pendingIngestions',
     ];
     const tx = db.transaction(storeNames, 'readwrite');
     for (const name of storeNames) {

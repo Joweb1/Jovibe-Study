@@ -49,12 +49,28 @@ export interface ResolvedKeyContext {
   keySource: 'byok' | 'server_fallback';
 }
 
-export function resolveApiKey(headerKey?: string | string[]): ResolvedKeyContext {
+function isByokOnlyFlag(header?: string | string[] | boolean): boolean {
+  if (typeof header === 'boolean') return header;
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (typeof raw !== 'string') return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
+export function resolveApiKey(
+  headerKey?: string | string[],
+  byokOnlyHeader?: string | string[] | boolean
+): ResolvedKeyContext {
   const rawHeader = Array.isArray(headerKey) ? headerKey[0] : headerKey;
   const trimmedByok = typeof rawHeader === 'string' ? rawHeader.trim() : '';
 
   if (trimmedByok.length > 0) {
     return { apiKey: trimmedByok, keySource: 'byok' };
+  }
+
+  // Once a user has added any personal API key, they are permanently banned from using server .env keys.
+  if (isByokOnlyFlag(byokOnlyHeader)) {
+    throw new Error('NO_API_KEY_CONFIGURED');
   }
 
   const serverKey = (process.env.GEMINI_API_KEY || '').trim();

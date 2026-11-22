@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowRight,
+  Cloud,
   Cpu,
   ExternalLink,
   KeyRound,
@@ -20,7 +21,7 @@ import { PROVIDERS } from '../../services/ai/providers';
 import { Button } from '../ui/Button';
 
 interface ProviderQuickLink {
-  id: 'gemini' | 'nvidia_nim' | 'cerebras' | 'openrouter' | 'groq';
+  id: 'gemini' | 'openrouter' | 'cerebras' | 'groq' | 'cloudflare' | 'nvidia_nim';
   title: string;
   subtitle: string;
   cta: string;
@@ -46,35 +47,9 @@ const PROVIDER_QUICK_LINKS: ProviderQuickLink[] = [
     ctaClass: 'text-sky-700 dark:text-sky-400',
   },
   {
-    id: 'nvidia_nim',
-    title: 'NVIDIA NIM',
-    subtitle: 'Strong fallback for chat, OCR, quizzes & audio transcription.',
-    cta: 'Get NIM key',
-    url: PROVIDERS.nvidia_nim.docsUrl,
-    icon: Cpu,
-    badgeClass:
-      'bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-sm shadow-emerald-500/25',
-    borderHoverClass:
-      'hover:border-emerald-300 dark:hover:border-emerald-700/80 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/25',
-    ctaClass: 'text-emerald-700 dark:text-emerald-400',
-  },
-  {
-    id: 'cerebras',
-    title: 'Cerebras',
-    subtitle: 'Blazing-fast fallback for AI Tutor conversations.',
-    cta: 'Get Cerebras key',
-    url: PROVIDERS.cerebras.docsUrl,
-    icon: Zap,
-    badgeClass:
-      'bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-sm shadow-violet-500/25',
-    borderHoverClass:
-      'hover:border-violet-300 dark:hover:border-violet-700/80 hover:bg-violet-50/50 dark:hover:bg-violet-950/25',
-    ctaClass: 'text-violet-700 dark:text-violet-400',
-  },
-  {
     id: 'openrouter',
     title: 'OpenRouter',
-    subtitle: 'Flexible multi-model backup for chat, vision & structured study.',
+    subtitle: '2nd fallback for chat, practice, automatic study & vision OCR.',
     cta: 'Get OpenRouter key',
     url: PROVIDERS.openrouter.docsUrl,
     icon: Layers,
@@ -85,9 +60,22 @@ const PROVIDER_QUICK_LINKS: ProviderQuickLink[] = [
     ctaClass: 'text-amber-700 dark:text-amber-400',
   },
   {
+    id: 'cerebras',
+    title: 'Cerebras',
+    subtitle: 'Blazing-fast fallback for AI Tutor, Practice & Automatic Study.',
+    cta: 'Get Cerebras key',
+    url: PROVIDERS.cerebras.docsUrl,
+    icon: Zap,
+    badgeClass:
+      'bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-sm shadow-violet-500/25',
+    borderHoverClass:
+      'hover:border-violet-300 dark:hover:border-violet-700/80 hover:bg-violet-50/50 dark:hover:bg-violet-950/25',
+    ctaClass: 'text-violet-700 dark:text-violet-400',
+  },
+  {
     id: 'groq',
     title: 'Groq',
-    subtitle: 'Ultra-fast speech playback (TTS), transcription & chat fallback.',
+    subtitle: 'Ultra-fast speech playback (TTS), transcription, chat & practice fallback.',
     cta: 'Get Groq key',
     url: PROVIDERS.groq.docsUrl,
     icon: Mic,
@@ -96,6 +84,32 @@ const PROVIDER_QUICK_LINKS: ProviderQuickLink[] = [
     borderHoverClass:
       'hover:border-rose-300 dark:hover:border-rose-700/80 hover:bg-rose-50/50 dark:hover:bg-rose-950/25',
     ctaClass: 'text-rose-700 dark:text-rose-400',
+  },
+  {
+    id: 'cloudflare',
+    title: 'Cloudflare Workers AI',
+    subtitle: 'Fast edge REST API fallback (format: ACCOUNT_ID:API_TOKEN).',
+    cta: 'Workers AI docs',
+    url: PROVIDERS.cloudflare.docsUrl,
+    icon: Cloud,
+    badgeClass:
+      'bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-sm shadow-orange-500/25',
+    borderHoverClass:
+      'hover:border-orange-300 dark:hover:border-orange-700/80 hover:bg-orange-50/50 dark:hover:bg-orange-950/25',
+    ctaClass: 'text-orange-700 dark:text-orange-400',
+  },
+  {
+    id: 'nvidia_nim',
+    title: 'NVIDIA NIM',
+    subtitle: 'Last-resort fallback for chat, OCR, quizzes & transcription.',
+    cta: 'Get NIM key',
+    url: PROVIDERS.nvidia_nim.docsUrl,
+    icon: Cpu,
+    badgeClass:
+      'bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-sm shadow-emerald-500/25',
+    borderHoverClass:
+      'hover:border-emerald-300 dark:hover:border-emerald-700/80 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/25',
+    ctaClass: 'text-emerald-700 dark:text-emerald-400',
   },
 ];
 

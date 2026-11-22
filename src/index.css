@@ -60,6 +60,43 @@
   display: none;
 }
 
+@keyframes sotal-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-sotal-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.animate-sotal-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.65) 50%,
+    transparent 100%
+  );
+  animation: sotal-shimmer 1.65s ease-in-out infinite;
+}
+
+.dark .animate-sotal-shimmer::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 100%
+  );
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

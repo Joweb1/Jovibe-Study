@@ -29,8 +29,10 @@ import { useWorkspaceUi } from '../../context/WorkspaceUiContext';
 import { useRouter } from '../../router/RouterContext';
 import { CourseModal } from '../courses/CourseModal';
 import { CourseSelector } from '../courses/CourseSelector';
+import { BackgroundExtractionPill } from '../library/BackgroundExtractionPill';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { StreakHeaderIndicator } from '../streak/StreakHeaderIndicator';
+import { AiModelStatusBadge } from '../ui/AiModelStatusBadge';
 import { SotalLogo } from '../ui/SotalLogo';
 import { ErrorBanner } from '../ui/StateViews';
 
@@ -407,6 +409,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         </div>
       )}
 
+      {/* Subtle live AI model / fallback status chip */}
+      <AiModelStatusBadge headerHidden={effectiveHideHeader} hidden={isLiveRoute} />
+
       {/* Main Content */}
       <main
         className={
@@ -428,6 +433,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         )}
         {children}
       </main>
+
+      {/* Floating Background Document Extraction Indicator (shown when away from Library) */}
+      <BackgroundExtractionPill
+        effectiveHideBottomNav={effectiveHideBottomNav}
+        hasMinimizedLiveBar={Boolean(minimizedLiveSession && !isLiveRoute)}
+      />
 
       {/* Minimized SOTAL Live Floating Resume Bar */}
       <AnimatePresence>

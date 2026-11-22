@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { motion } from 'motion/react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { BackgroundIngestionProvider } from './context/BackgroundIngestionContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { CourseProvider, useCourses } from './context/CourseContext';
 import { GeminiOnboardingProvider } from './context/GeminiOnboardingContext';
@@ -133,19 +134,21 @@ const AuthenticatedApp: React.FC = () => {
 
   return (
     <CourseProvider>
-      <StreakProvider>
-        <RouterProvider>
-          <GeminiOnboardingProvider>
-            <WorkspaceUiProvider>
-              <AppShell>
-                <WorkspaceRouter />
-              </AppShell>
-              <GeminiOnboardingOverlay />
-              <ApiKeyLimitModal />
-            </WorkspaceUiProvider>
-          </GeminiOnboardingProvider>
-        </RouterProvider>
-      </StreakProvider>
+      <BackgroundIngestionProvider>
+        <StreakProvider>
+          <RouterProvider>
+            <GeminiOnboardingProvider>
+              <WorkspaceUiProvider>
+                <AppShell>
+                  <WorkspaceRouter />
+                </AppShell>
+                <GeminiOnboardingOverlay />
+                <ApiKeyLimitModal />
+              </WorkspaceUiProvider>
+            </GeminiOnboardingProvider>
+          </RouterProvider>
+        </StreakProvider>
+      </BackgroundIngestionProvider>
     </CourseProvider>
   );
 };

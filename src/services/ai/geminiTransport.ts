@@ -5,11 +5,24 @@ import {
   toHttpError,
   toNetworkError,
 } from './http';
+import { hasUserEnteredOwnKey } from './keyManager';
+import type { AiProvider } from './providers';
+
+export type ServerFallbackProviders = Record<AiProvider, boolean>;
+
+const EMPTY_SERVER_PROVIDERS: ServerFallbackProviders = {
+  gemini: false,
+  openrouter: false,
+  cerebras: false,
+  groq: false,
+  cloudflare: false,
+  nvidia_nim: false,
+};
 
 interface GeminiCallParams {
   endpoint: string;
   payload: Record<string, unknown>;
-  /** BYOK key. `null` uses the server-managed GEMINI_API_KEY. */
+  /** BYOK key. `null` uses the server-managed GEMINI_API_KEY (only when user has never entered a personal key). */
   apiKey: string | null;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -19,12 +32,16 @@ interface GeminiCallParams {
  * POSTs to one of SOTAL's Gemini-backed server routes.
  * The key always travels to our own server (never to Google directly), so the
  * device-local BYOK contract is preserved.
- */export async function callGeminiEndpoint<TResponse extends { model?: string }>(
+ */
+export async function callGeminiEndpoint<TResponse extends { model?: string }>(
   params: GeminiCallParams
 ): Promise<TResponse> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (params.apiKey) {
     headers['x-sotal-gemini-key'] = params.apiKey;
+  }
+  if (hasUserEnteredOwnKey()) {
+    headers['x-sotal-byok-only'] = '1';
   }
 
   try {
@@ -55,34 +72,69 @@ interface GeminiCallParams {
   }
 }
 
-let serverFallbackCache: { available: boolean; checkedAtMs: number } | null = null;
+let serverFallbackCache: {
+  providers: ServerFallbackProviders;
+  checkedAtMs: number;
+} | null = null;
 const SERVER_FALLBACK_CACHE_MS = 60_000;
 
+export function resetServerFallbackCache(): void {
+  serverFallbackCache = null;
+}
+
 /**
- * Cached health probe telling the router whether the server holds a usable
- * GEMINI_API_KEY. Avoids appending a dead candidate on every request.
+ * Cached health probe telling the router which providers have usable `.env`
+ * fallback keys configured on the server (used ONLY before a user has ever
+ * entered a personal API key).
  */
-export async function checkServerFallbackStatus(force = false): Promise<boolean> {
+export async function checkServerFallbackProviders(
+  force = false
+): Promise<ServerFallbackProviders> {
   const now = Date.now();
   if (
     !force &&
     serverFallbackCache &&
     now - serverFallbackCache.checkedAtMs < SERVER_FALLBACK_CACHE_MS
   ) {
-    return serverFallbackCache.available;
+    return serverFallbackCache.providers;
   }
   try {
     const res = await fetch('/api/health');
     if (!res.ok) {
-      serverFallbackCache = { available: false, checkedAtMs: now };
-      return false;
+      serverFallbackCache = { providers: { ...EMPTY_SERVER_PROVIDERS }, checkedAtMs: now };
+      return serverFallbackCache.providers;
     }
-    const data = (await res.json()) as { serverFallbackAvailable?: boolean };
-    const available = Boolean(data.serverFallbackAvailable);
-    serverFallbackCache = { available, checkedAtMs: now };
-    return available;
+    const data = (await res.json()) as {
+      serverFallbackAvailable?: boolean;
+      serverFallbackProviders?: Partial<ServerFallbackProviders>;
+    };
+    const raw = data.serverFallbackProviders;
+    const providers: ServerFallbackProviders = raw
+      ? {
+          gemini: Boolean(raw.gemini),
+          openrouter: Boolean(raw.openrouter),
+          cerebras: Boolean(raw.cerebras),
+          groq: Boolean(raw.groq),
+          cloudflare: Boolean(raw.cloudflare),
+          nvidia_nim: Boolean(raw.nvidia_nim),
+        }
+      : {
+          ...EMPTY_SERVER_PROVIDERS,
+          gemini: Boolean(data.serverFallbackAvailable),
+        };
+    serverFallbackCache = { providers, checkedAtMs: now };
+    return providers;
   } catch {
-    serverFallbackCache = { available: false, checkedAtMs: now };
-    return false;
+    serverFallbackCache = { providers: { ...EMPTY_SERVER_PROVIDERS }, checkedAtMs: now };
+    return serverFallbackCache.providers;
   }
+}
+
+/**
+ * Cached health probe telling the UI whether any server-managed `.env`
+ * fallback provider is available.
+ */
+export async function checkServerFallbackStatus(force = false): Promise<boolean> {
+  const providers = await checkServerFallbackProviders(force);
+  return Object.values(providers).some(Boolean);
 }

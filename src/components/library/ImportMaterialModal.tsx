@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
   Camera,
+  EyeOff,
   FileText,
+  HardDrive,
   Trash2,
   Type as TypeIcon,
   Upload,
@@ -16,11 +18,11 @@ import type {
   Topic,
 } from '../../types/models';
 import { SCHEMA_LIMITS } from '../../utils/validation';
+import { useBackgroundIngestion } from '../../context/BackgroundIngestionContext';
 import { formatReadableError } from '../../services/firebase/errors';
 import { createStudySource } from '../../services/firebase/sourceService';
 import {
   ingestTextInput,
-  ingestUploadedFile,
   type ExtractionResult,
 } from '../../services/ingestion/ingestionPipeline';
 import { inspectPdfPageCount } from '../../services/ingestion/pdfExtractor';
@@ -62,6 +64,7 @@ interface ImportMaterialModalProps {
   draftKey: string;
   onClose: () => void;
   onSaved: (sourceId: string, savedCourseId: string) => void;
+  onBackgrounded?: (targetCourseId: string) => void;
 }
 
 export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
@@ -75,7 +78,17 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
   draftKey,
   onClose,
   onSaved,
+  onBackgrounded,
 }) => {
+  const {
+    enqueueFileExtraction,
+    setJobAutoSave,
+    cancelJob,
+    dismissJob,
+    consumeReadyJob,
+    getJob,
+  } = useBackgroundIngestion();
+
   const [step, setStep] = useState<WizardStep>('input');
   const [tab, setTab] = useState<InputTab>('document');
 
@@ -96,10 +109,9 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
   const [rawText, setRawText] = useState('');
   const [textInputType, setTextInputType] = useState<'typed_notes' | 'pasted_text'>('pasted_text');
 
-  // Extraction progress
-  const [progressStage, setProgressStage] = useState('');
-  const [progressPercent, setProgressPercent] = useState(0);
-  const abortRef = useRef<AbortController | null>(null);
+  // Background extraction tracking
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [queueingBackground, setQueueingBackground] = useState(false);
 
   // Preview & Organize state
   const [title, setTitle] = useState('');
@@ -116,11 +128,17 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const activeJob = activeJobId ? getJob(activeJobId) : undefined;
+  const progressStage = activeJob?.progressStage || 'Storing locally & initializing extraction...';
+  const progressPercent = activeJob?.progressPercent ?? 8;
+
   // Reset or restore draft when modal opens
   useEffect(() => {
     if (!open) return;
     setError(null);
     setSaving(false);
+    setQueueingBackground(false);
+    setActiveJobId(null);
 
     if (restoredDraft) {
       setTitle(restoredDraft.title);
@@ -193,14 +211,71 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
     warnings,
   ]);
 
+  const applyExtractionResult = useCallback((result: ExtractionResult) => {
+    setTitle(result.title);
+    setMaterialType(result.materialType);
+    setSections(result.sections);
+    setFullText(result.extractedContent);
+    setPageOrSlideCount(result.pageOrSlideCount);
+    setOriginalFileName(result.originalFileName);
+    setWarnings(result.warnings);
+    setPreviewMode(result.sections.length > 0 ? 'sections' : 'raw');
+    setStep('preview');
+  }, []);
+
+  const handleHideToBackground = useCallback(() => {
+    if (activeJobId) {
+      setJobAutoSave(activeJobId, true);
+      setActiveJobId(null);
+    }
+    setSelectedFile(null);
+    setPhotoFile(null);
+    if (onBackgrounded) {
+      onBackgrounded(targetCourseId);
+    } else {
+      onClose();
+    }
+  }, [activeJobId, setJobAutoSave, onBackgrounded, targetCourseId, onClose]);
+
+  // Observe the active background job while the modal remains open on the extracting step
+  useEffect(() => {
+    if (!open || step !== 'extracting' || !activeJobId || !activeJob) return;
+
+    if (activeJob.status === 'ready_for_review' && activeJob.extractedResult) {
+      const id = activeJobId;
+      setActiveJobId(null);
+      void consumeReadyJob(id).then((res) => {
+        if (res) {
+          applyExtractionResult(res);
+        }
+      });
+      return;
+    }
+
+    if (activeJob.status === 'failed') {
+      const id = activeJobId;
+      const errMsg = activeJob.error || 'Could not extract content from this file.';
+      setActiveJobId(null);
+      setError(errMsg);
+      setStep('input');
+      void dismissJob(id);
+    }
+  }, [open, step, activeJobId, activeJob, consumeReadyJob, dismissJob, applyExtractionResult]);
+
   useEffect(() => {
     if (!open) return;
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && step !== 'extracting') onClose();
+      if (e.key === 'Escape') {
+        if (step === 'extracting') {
+          handleHideToBackground();
+        } else {
+          onClose();
+        }
+      }
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [open, step, onClose]);
+  }, [open, step, onClose, handleHideToBackground]);
 
   const uncertainCount = countUncertainMarkers(fullText);
 
@@ -227,19 +302,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
     }
   };
 
-  const applyExtractionResult = (result: ExtractionResult) => {
-    setTitle(result.title);
-    setMaterialType(result.materialType);
-    setSections(result.sections);
-    setFullText(result.extractedContent);
-    setPageOrSlideCount(result.pageOrSlideCount);
-    setOriginalFileName(result.originalFileName);
-    setWarnings(result.warnings);
-    setPreviewMode(result.sections.length > 0 ? 'sections' : 'raw');
-    setStep('preview');
-  };
-
-  const handleStartExtraction = async () => {
+  const handleStartExtraction = async (runInBackgroundImmediately = false) => {
     setError(null);
 
     if (tab === 'text') {
@@ -273,43 +336,54 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
       return;
     }
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setStep('extracting');
-    setProgressStage('Initializing extraction...');
-    setProgressPercent(10);
-
+    setQueueingBackground(true);
     try {
-      const result = await ingestUploadedFile(fileToProcess, {
-        visionMode: tab === 'photo' ? photoMode : undefined,
-        overrideType:
-          tab === 'photo'
-            ? photoMode === 'handwriting'
-              ? 'handwritten_notes'
-              : photoMode === 'scanned_doc'
-              ? 'scanned_doc'
-              : 'textbook_photo'
-            : undefined,
-        startPage: pdfTotalPages ? pdfStartPage : undefined,
-        endPage: pdfTotalPages ? pdfEndPage : undefined,
-        enableScannedOcr,
-        signal: controller.signal,
-        onProgress: (p) => {
-          setProgressStage(p.stage);
-          if (typeof p.percent === 'number') setProgressPercent(p.percent);
+      const jobId = await enqueueFileExtraction({
+        file: fileToProcess,
+        courseId: targetCourseId,
+        topicId: targetTopicId,
+        autoSaveWhenDone: runInBackgroundImmediately,
+        options: {
+          visionMode: tab === 'photo' ? photoMode : undefined,
+          overrideType:
+            tab === 'photo'
+              ? photoMode === 'handwriting'
+                ? 'handwritten_notes'
+                : photoMode === 'scanned_doc'
+                ? 'scanned_doc'
+                : 'textbook_photo'
+              : undefined,
+          startPage: pdfTotalPages ? pdfStartPage : undefined,
+          endPage: pdfTotalPages ? pdfEndPage : undefined,
+          enableScannedOcr,
         },
       });
-      applyExtractionResult(result);
+
+      if (runInBackgroundImmediately) {
+        setSelectedFile(null);
+        setPhotoFile(null);
+        if (onBackgrounded) {
+          onBackgrounded(targetCourseId);
+        } else {
+          onClose();
+        }
+      } else {
+        setActiveJobId(jobId);
+        setStep('extracting');
+      }
     } catch (err) {
       setError(formatReadableError(err));
       setStep('input');
     } finally {
-      abortRef.current = null;
+      setQueueingBackground(false);
     }
   };
 
   const handleCancelExtraction = () => {
-    abortRef.current?.abort();
+    if (activeJobId) {
+      void cancelJob(activeJobId);
+      setActiveJobId(null);
+    }
     setStep('input');
   };
 
@@ -392,6 +466,11 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18, ease: 'easeOut' }}
+          onClick={() => {
+            if (step === 'extracting') {
+              handleHideToBackground();
+            }
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 dark:bg-black/70 backdrop-blur-[2px] p-3 sm:p-6"
           role="dialog"
           aria-modal="true"
@@ -403,6 +482,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            onClick={(e) => e.stopPropagation()}
             className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xl"
           >
         {/* Header */}
@@ -426,8 +506,9 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
 
           <button
             type="button"
-            onClick={step === 'extracting' ? handleCancelExtraction : onClose}
-            aria-label="Close import dialog"
+            onClick={step === 'extracting' ? handleHideToBackground : onClose}
+            aria-label={step === 'extracting' ? 'Hide and continue extracting in background' : 'Close import dialog'}
+            title={step === 'extracting' ? 'Hide & run in background' : 'Close'}
             className="inline-flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
           >
             <X className="h-4 w-4" />
@@ -736,24 +817,37 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
             </div>
           )}
 
-          {/* STEP 2: EXTRACTING PROGRESS */}
+          {/* STEP 2: EXTRACTING PROGRESS (HIDEABLE TO BACKGROUND) */}
           {step === 'extracting' && (
-            <div className="py-14 text-center space-y-4">
+            <div className="py-10 text-center space-y-5">
               <div
                 aria-hidden="true"
-                className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-zinc-950 dark:border-zinc-200 border-t-transparent dark:border-t-transparent"
+                className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-zinc-950 dark:border-zinc-200 border-t-transparent dark:border-t-transparent"
               />
-              <div className="text-sm font-medium text-zinc-950 dark:text-zinc-200">{progressStage}</div>
-              <div className="mx-auto h-1.5 w-full max-w-md overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-                <div
-                  className="h-full bg-zinc-950 dark:bg-zinc-200 transition-all"
-                  style={{ width: `${Math.max(8, progressPercent)}%` }}
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-zinc-950 dark:text-zinc-200">
+                  {progressStage}
+                </div>
+                <div className="font-mono text-xs font-semibold tabular-nums text-zinc-600 dark:text-zinc-400">
+                  {Math.max(0, Math.min(100, Math.round(progressPercent)))}% complete
+                </div>
+              </div>
+              <div className="mx-auto h-2 w-full max-w-md overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <motion.div
+                  initial={{ width: '8%' }}
+                  animate={{ width: `${Math.max(8, Math.min(100, Math.round(progressPercent)))}%` }}
+                  transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                  className="h-full rounded-full bg-zinc-950 dark:bg-zinc-200 animate-sotal-shimmer"
                 />
               </div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Extracting structured headings, paragraphs, and page/slide boundaries...
+              <p className="mx-auto max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                Your file is temporarily cached locally while extraction runs in the background. You can hide this popup and continue using SOTAL Study — live progress will show in your Library and automatically save when finished.
               </p>
-              <div className="pt-2">
+              <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                <Button size="sm" onClick={handleHideToBackground}>
+                  <EyeOff className="h-3.5 w-3.5" />
+                  Hide &amp; run in background
+                </Button>
                 <Button variant="secondary" size="sm" onClick={handleCancelExtraction}>
                   Cancel extraction
                 </Button>
@@ -959,18 +1053,44 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
         <div className="flex items-center justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 px-6 py-4">
           {step === 'input' && (
             <>
-              <Button variant="secondary" onClick={onClose}>
+              <Button variant="secondary" onClick={onClose} disabled={queueingBackground}>
                 Cancel
               </Button>
-              <Button onClick={() => void handleStartExtraction()} disabled={inspectingPdf}>
-                {tab === 'text' ? 'Structure & preview' : 'Extract & preview'}
-              </Button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {tab !== 'text' && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => void handleStartExtraction(true)}
+                    disabled={inspectingPdf || queueingBackground}
+                    loading={queueingBackground}
+                  >
+                    <EyeOff className="h-3.5 w-3.5" />
+                    Extract in background
+                  </Button>
+                )}
+                <Button
+                  onClick={() => void handleStartExtraction(false)}
+                  disabled={inspectingPdf || queueingBackground}
+                >
+                  {tab === 'text' ? 'Structure & preview' : 'Extract & preview'}
+                </Button>
+              </div>
             </>
           )}
 
           {step === 'extracting' && (
-            <div className="w-full text-right text-xs text-zinc-500 dark:text-zinc-400">
-              Processing locally and discarding raw file after save...
+            <div className="flex w-full flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="inline-flex items-center gap-1.5">
+                <HardDrive className="h-3.5 w-3.5" />
+                Temporarily cached on device — raw file is removed automatically after saving.
+              </span>
+              <button
+                type="button"
+                onClick={handleHideToBackground}
+                className="font-medium text-zinc-900 dark:text-zinc-200 underline underline-offset-2 hover:opacity-80 cursor-pointer"
+              >
+                Hide popup
+              </button>
             </div>
           )}
 
@@ -988,7 +1108,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                   Save as draft
                 </Button>
                 <Button type="submit" form="save-source-form" loading={saving}>
-                  Confirm &amp; save to Library
+                  Save
                 </Button>
               </div>
             </>

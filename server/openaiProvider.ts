@@ -1,6 +1,6 @@
 import { buildVisionPrompt, VISION_JSON_SCHEMA, toJsonSchema } from './prompts';
 
-export type OpenAiProviderId = 'nvidia_nim' | 'openrouter' | 'cerebras' | 'groq';
+export type OpenAiProviderId = 'nvidia_nim' | 'openrouter' | 'cerebras' | 'groq' | 'cloudflare';
 
 export type ProviderTask = 'chat' | 'structured_json' | 'vision' | 'transcription' | 'tts';
 
@@ -38,7 +38,8 @@ export function isOpenAiProviderId(value: unknown): value is OpenAiProviderId {
     value === 'nvidia_nim' ||
     value === 'openrouter' ||
     value === 'cerebras' ||
-    value === 'groq'
+    value === 'groq' ||
+    value === 'cloudflare'
   );
 }
 
@@ -98,7 +99,7 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
   }
 
   if (provider === 'groq') {
-    const defaultModel = env('GROQ_MODEL') || 'llama-3.3-70b-versatile';
+    const defaultModel = env('GROQ_MODEL') || 'openai/gpt-oss-120b';
     return {
       label: 'Groq',
       baseUrl: env('GROQ_BASE_URL') || 'https://api.groq.com/openai/v1',
@@ -109,6 +110,31 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
         vision: '',
         transcription: env('GROQ_TRANSCRIBE_MODEL') || 'whisper-large-v3-turbo',
         tts: env('GROQ_TTS_MODEL') || 'canopylabs/orpheus-v1-english',
+      },
+      disableThinking: false,
+      extraHeaders: {},
+    };
+  }
+
+  if (provider === 'cloudflare') {
+    const defaultModel =
+      env('CLOUDFLARE_MODEL') || '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+    const accountId = env('CLOUDFLARE_ACCOUNT_ID');
+    const customBaseUrl = env('CLOUDFLARE_BASE_URL');
+    return {
+      label: 'Cloudflare Workers AI',
+      baseUrl:
+        customBaseUrl ||
+        (accountId
+          ? `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`
+          : 'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1'),
+      envKeyName: 'CLOUDFLARE_API_TOKEN',
+      models: {
+        chat: defaultModel,
+        structured_json: env('CLOUDFLARE_JSON_MODEL') || defaultModel,
+        vision: env('CLOUDFLARE_VISION_MODEL') || '',
+        transcription: '',
+        tts: '',
       },
       disableThinking: false,
       extraHeaders: {},
@@ -131,9 +157,75 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
   };
 }
 
+export function areServerProviderKeysAllowed(): boolean {
+  return env('ALLOW_SERVER_PROVIDER_KEYS').toLowerCase() !== 'false';
+}
+
+function getOpenRouterServerKey(): string {
+  return env('OPENROUTER_API_KEY') || env('OPEN_ROUTER_API_KEY');
+}
+
+function getCloudflareServerCredential(): string {
+  const token = env('CLOUDFLARE_API_TOKEN') || env('CLOUDFLARE_API_KEY');
+  if (!token) return '';
+  if (token.includes(':')) {
+    return token;
+  }
+  const accountId = env('CLOUDFLARE_ACCOUNT_ID');
+  if (accountId) {
+    return `${accountId}:${token}`;
+  }
+  return '';
+}
+
+function parseCloudflareCredential(raw: string): { accountId: string; apiToken: string } {
+  const trimmed = raw.trim();
+  const sepIndex = trimmed.indexOf(':');
+  if (sepIndex > 0 && sepIndex < trimmed.length - 1) {
+    const accountId = trimmed.slice(0, sepIndex).trim();
+    const apiToken = trimmed.slice(sepIndex + 1).trim();
+    if (accountId && apiToken) {
+      return { accountId, apiToken };
+    }
+  }
+
+  throw new ProviderRequestError({
+    status: 400,
+    code: 'INVALID_KEY',
+    message:
+      'Cloudflare Workers AI keys must use the format ACCOUNT_ID:API_TOKEN (see Cloudflare Workers AI REST API docs).',
+    retryable: false,
+    cooldownMs: 0,
+  });
+}
+
+export function getServerFallbackProvidersStatus(): Record<
+  'gemini' | OpenAiProviderId,
+  boolean
+> {
+  const allowProviders = areServerProviderKeysAllowed();
+  return {
+    gemini: Boolean(env('GEMINI_API_KEY')),
+    openrouter: allowProviders && Boolean(getOpenRouterServerKey()),
+    cerebras: allowProviders && Boolean(env('CEREBRAS_API_KEY')),
+    groq: allowProviders && Boolean(env('GROQ_API_KEY')),
+    cloudflare: allowProviders && Boolean(getCloudflareServerCredential()),
+    nvidia_nim: allowProviders && Boolean(env('NVIDIA_API_KEY')),
+  };
+}
+
+function isByokOnlyFlag(header?: string | string[] | boolean): boolean {
+  if (typeof header === 'boolean') return header;
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (typeof raw !== 'string') return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
 export function resolveProviderKey(
   provider: OpenAiProviderId,
-  headerKey?: string | string[]
+  headerKey?: string | string[],
+  byokOnlyHeader?: string | string[] | boolean
 ): ProviderKeyContext {
   const raw = Array.isArray(headerKey) ? headerKey[0] : headerKey;
   const trimmed = typeof raw === 'string' ? raw.trim() : '';
@@ -142,13 +234,35 @@ export function resolveProviderKey(
     return { apiKey: trimmed, keySource: 'byok' };
   }
 
-  // Device-local BYOK is the production contract. Server env keys are only
-  // honoured when explicitly opted in (local development / self-hosting).
-  if (env('ALLOW_SERVER_PROVIDER_KEYS') === 'true') {
-    const definition = getProviderDefinition(provider);
-    const serverKey = env(definition.envKeyName);
-    if (serverKey) {
-      return { apiKey: serverKey, keySource: 'server_fallback' };
+  // Once a user has added any personal API key, they are permanently banned from using server .env keys.
+  if (isByokOnlyFlag(byokOnlyHeader)) {
+    throw new ProviderRequestError({
+      status: 503,
+      code: 'NO_API_KEY',
+      message: `No personal ${getProviderDefinition(provider).label} API key was provided. Add your own key in Settings.`,
+      retryable: false,
+      cooldownMs: 0,
+    });
+  }
+
+  // For users who have not entered any personal API key yet, allow configured server .env fallback keys.
+  if (areServerProviderKeysAllowed()) {
+    if (provider === 'cloudflare') {
+      const cfCred = getCloudflareServerCredential();
+      if (cfCred) {
+        return { apiKey: cfCred, keySource: 'server_fallback' };
+      }
+    } else if (provider === 'openrouter') {
+      const orKey = getOpenRouterServerKey();
+      if (orKey) {
+        return { apiKey: orKey, keySource: 'server_fallback' };
+      }
+    } else {
+      const definition = getProviderDefinition(provider);
+      const serverKey = env(definition.envKeyName);
+      if (serverKey) {
+        return { apiKey: serverKey, keySource: 'server_fallback' };
+      }
     }
   }
 
@@ -303,18 +417,38 @@ async function requestChatCompletion(
   };
 
   if (options.jsonSchema) {
-    body.response_format = {
-      type: 'json_schema',
-      json_schema: {
-        name: 'sotal_response',
-        strict: true,
-        schema: options.jsonSchema,
-      },
-    };
+    body.response_format =
+      options.provider === 'cloudflare'
+        ? {
+            type: 'json_schema',
+            json_schema: {
+              name: 'sotal_response',
+              schema: options.jsonSchema,
+            },
+          }
+        : {
+            type: 'json_schema',
+            json_schema: {
+              name: 'sotal_response',
+              strict: true,
+              schema: options.jsonSchema,
+            },
+          };
   }
 
-  if (definition.disableThinking) {
+  if (definition.disableThinking && /nemotron/i.test(model)) {
     body.chat_template_kwargs = { enable_thinking: false };
+  }
+
+  let endpointBaseUrl = definition.baseUrl.replace(/\/+$/, '');
+  let bearerToken = options.apiKey;
+  if (options.provider === 'cloudflare') {
+    const parsedCf = parseCloudflareCredential(options.apiKey);
+    bearerToken = parsedCf.apiToken;
+    const customCfBase = env('CLOUDFLARE_BASE_URL').replace(/\/+$/, '');
+    endpointBaseUrl =
+      customCfBase ||
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(parsedCf.accountId)}/ai/v1`;
   }
 
   const controller = new AbortController();
@@ -322,11 +456,11 @@ async function requestChatCompletion(
   const timer = setTimeout(() => controller.abort(new Error('TIMEOUT')), timeoutMs);
 
   try {
-    const response = await fetch(`${definition.baseUrl}/chat/completions`, {
+    const response = await fetch(`${endpointBaseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${options.apiKey}`,
+        Authorization: `Bearer ${bearerToken}`,
         ...definition.extraHeaders,
       },
       body: JSON.stringify(body),
@@ -521,10 +655,11 @@ export async function generateProviderJson(params: {
       prompt: params.prompt,
       systemInstruction: params.systemInstruction,
     }),
-    maxTokens: 3000,
+    maxTokens: 4000,
     temperature: 0.2,
     jsonSchema: schema,
     modelOverride: params.model,
+    timeoutMs: 50_000,
   });
 
   const raw = stripJsonFences(completion.content);
@@ -579,6 +714,7 @@ export async function extractProviderVision(params: {
     temperature: 0.1,
     jsonSchema: VISION_JSON_SCHEMA,
     modelOverride: params.model,
+    timeoutMs: 60_000,
   });
 
   const raw = stripJsonFences(completion.content);

@@ -226,29 +226,49 @@ export const SourceViewer: React.FC<SourceViewerProps> = ({
             Back to {activeCourse.code} Library
           </button>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             {onOpenLive && !isEditing && (
-              <Button variant="primary" size="sm" onClick={onOpenLive}>
-                <AudioLines className="h-3.5 w-3.5" />
-                SOTAL Live
-              </Button>
+              <button
+                type="button"
+                onClick={onOpenLive}
+                aria-label="SOTAL Live"
+                title="SOTAL Live"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-zinc-200 dark:text-zinc-950 dark:hover:bg-white transition-colors cursor-pointer"
+              >
+                <AudioLines className="h-4 w-4" />
+              </button>
             )}
             {isOwner && (
               <>
                 {!isEditing && (
-                  <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                    Edit material
-                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    aria-label="Edit material"
+                    title="Edit material"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-100 transition-colors cursor-pointer"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
                 )}
-                <Button variant="secondary" size="sm" onClick={() => setMoveModalOpen(true)}>
-                  <FolderInput className="h-3.5 w-3.5" />
-                  Move / Topic
-                </Button>
-                <Button variant="danger" size="sm" onClick={() => setDeleteModalOpen(true)}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete
-                </Button>
+                <button
+                  type="button"
+                  onClick={() => setMoveModalOpen(true)}
+                  aria-label="Move or change topic"
+                  title="Move / Topic"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-100 transition-colors cursor-pointer"
+                >
+                  <FolderInput className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteModalOpen(true)}
+                  aria-label="Delete material"
+                  title="Delete material"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-200 dark:border-red-900/60 bg-white dark:bg-zinc-900 text-red-700 dark:text-red-400 hover:border-red-300 dark:hover:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </>
             )}
           </div>

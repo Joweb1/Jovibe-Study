@@ -1,5 +1,5 @@
 import { generateDocumentId } from '../../utils/validation';
-import type { AiProvider } from './providers';
+import { PROVIDERS, type AiProvider } from './providers';
 
 const KEYS_STORAGE_KEY = 'sotal_study_byok_keys_v1';
 const CONFIG_STORAGE_KEY = 'sotal_study_byok_config_v1';
@@ -53,10 +53,11 @@ export const DEFAULT_BYOK_CONFIG: ByokConfig = {
 /** Minimum plausible length per provider (guards against obvious paste errors). */
 const MIN_KEY_LENGTH: Record<AiProvider, number> = {
   gemini: 16,
-  cerebras: 16,
-  nvidia_nim: 20,
   openrouter: 20,
+  cerebras: 16,
   groq: 20,
+  cloudflare: 24,
+  nvidia_nim: 20,
 };
 
 export function maskApiKey(rawKey: string): string {
@@ -101,7 +102,8 @@ function readAllKeys(): StoredApiKey[] {
         entry.provider === 'cerebras' ||
         entry.provider === 'nvidia_nim' ||
         entry.provider === 'openrouter' ||
-        entry.provider === 'groq'
+        entry.provider === 'groq' ||
+        entry.provider === 'cloudflare'
           ? entry.provider
           : 'gemini';
       const normalized: StoredApiKey = {
@@ -453,7 +455,7 @@ export function listUsableApiKeys(provider: AiProvider): StoredApiKey[] {
   const config = getByokConfig();
   const preferredId = config.preferredKeyIds[provider] ?? null;
   const usable = listStoredApiKeys(provider).filter(isUsable);
-  if (!config.enableKeyRotation) {
+  if (!config.enableKeyRotation || !PROVIDERS[provider].supportsRotation) {
     const preferred = usable.find((k) => k.id === preferredId) ?? usable[0];
     return preferred ? [preferred] : [];
   }
