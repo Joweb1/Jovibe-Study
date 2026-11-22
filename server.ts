@@ -10,6 +10,7 @@ import {
   classifyAiError,
   createGeminiClient,
   extractFinishReason,
+  IMAGE_MODEL,
   resolveApiKey,
   resolveModelName,
   resolveTtsVoice,
@@ -20,6 +21,7 @@ import {
 import {
   areServerProviderKeysAllowed,
   extractProviderVision,
+  generateProviderImage,
   generateProviderJson,
   generateProviderText,
   getServerFallbackProvidersStatus,
@@ -573,6 +575,76 @@ async function startServer() {
     }
   });
 
+  // Gemini Concept Infographic / Illustrative Image Generation (Automatic Study & explicit Chat requests)
+  app.post('/api/ai/generate-image', async (req, res) => {
+    let keySource: 'byok' | 'server_fallback' = 'server_fallback';
+    try {
+      const resolved = resolveApiKey(
+        req.headers['x-sotal-gemini-key'],
+        req.headers['x-sotal-byok-only']
+      );
+      keySource = resolved.keySource;
+      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+
+      if (!prompt) {
+        res.status(400).json({
+          error: 'A non-empty visual prompt is required for image generation.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+        });
+        return;
+      }
+
+      const ai = createGeminiClient(resolved.apiKey, 'v1beta');
+      const response = await ai.models.generateContent({
+        model: IMAGE_MODEL,
+        contents: prompt.slice(0, 1600),
+        config: {
+          responseModalities: ['IMAGE'],
+        },
+      });
+
+      checkSafetyBlock(response);
+      const parts = response.candidates?.[0]?.content?.parts ?? [];
+      const imgPart = parts.find(
+        (p) => p && typeof p === 'object' && p.inlineData && typeof p.inlineData.data === 'string'
+      );
+      const imageBase64 = imgPart?.inlineData?.data;
+      const mimeType = imgPart?.inlineData?.mimeType || 'image/png';
+
+      if (!imageBase64) {
+        res.status(502).json({
+          error: 'Gemini returned no image data for this prompt.',
+          code: 'SERVER_ERROR',
+          retryable: true,
+          shouldRotateKey: false,
+          cooldownMs: 5000,
+          keySource,
+        });
+        return;
+      }
+
+      res.json({
+        imageBase64,
+        mimeType,
+        model: IMAGE_MODEL,
+        keySource,
+      });
+    } catch (err) {
+      const classified = classifyAiError(err, keySource);
+      res.status(classified.status).json({
+        error: classified.message,
+        code: classified.code,
+        retryable: classified.retryable,
+        shouldRotateKey: classified.shouldRotateKey,
+        cooldownMs: classified.cooldownMs,
+        keySource,
+      });
+    }
+  });
+
   // Gemini 3.5 Transcribe Voice Note Transcription (BYOK-first, server GEMINI_API_KEY fallback)
   app.post('/api/ai/transcribe', async (req, res) => {
     let keySource: 'byok' | 'server_fallback' = 'server_fallback';
@@ -934,6 +1006,49 @@ async function startServer() {
         audioBase64: result.audioBase64,
         mimeType: result.mimeType,
         voiceName: result.voiceName,
+        model: result.model,
+        provider,
+        keySource: resolved.keySource,
+      });
+    } catch (err) {
+      sendProviderError(res, provider ?? req.params.provider, err);
+    }
+  });
+
+  // Concept Infographic / Illustrative Image Generation fallback (Cloudflare FLUX, OpenRouter, NVIDIA NIM)
+  app.post('/api/providers/:provider/generate-image', async (req, res) => {
+    let provider: OpenAiProviderId | null = null;
+    try {
+      provider = resolveProviderParam(req.params.provider);
+      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+      if (!prompt) {
+        res.status(400).json({
+          error: 'A non-empty visual prompt is required for image generation.',
+          code: 'INVALID_REQUEST',
+          retryable: false,
+          shouldRotateKey: false,
+          cooldownMs: 0,
+          provider,
+        });
+        return;
+      }
+
+      const resolved = resolveProviderKey(
+        provider,
+        req.headers['x-sotal-provider-key'],
+        req.headers['x-sotal-byok-only']
+      );
+      const result = await generateProviderImage({
+        provider,
+        apiKey: resolved.apiKey,
+        prompt,
+        aspectRatio: typeof req.body?.aspectRatio === 'string' ? req.body.aspectRatio : undefined,
+        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
+      });
+
+      res.json({
+        imageBase64: result.imageBase64,
+        mimeType: result.mimeType,
         model: result.model,
         provider,
         keySource: resolved.keySource,

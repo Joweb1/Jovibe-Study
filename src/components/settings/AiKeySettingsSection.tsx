@@ -142,7 +142,14 @@ const QUICK_LINK_ORDER: AiProvider[] = [
   'cloudflare',
   'nvidia_nim',
 ];
-const ALL_TASKS: AiTask[] = ['chat', 'structured_json', 'vision', 'transcription', 'tts'];
+const ALL_TASKS: AiTask[] = [
+  'chat',
+  'structured_json',
+  'vision',
+  'transcription',
+  'tts',
+  'image_generation',
+];
 
 function formatStatusLabel(key: StoredApiKey): string {
   const statusMap: Record<ApiKeyStatus, string> = {

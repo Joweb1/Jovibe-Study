@@ -45,6 +45,7 @@ export function guessInitialModelLabel(
   if (provider === 'gemini') {
     if (task === 'tts') return 'gemini-3.8-flash-lite-tts';
     if (task === 'transcription') return 'gemini-3.5-transcribe';
+    if (task === 'image_generation') return 'gemini-3.1-flash-image';
     return formatCompactModelName(requestedModel || 'gemini-4-hydrogen');
   }
   if (provider === 'cerebras') {
@@ -53,6 +54,7 @@ export function guessInitialModelLabel(
   if (provider === 'nvidia_nim') {
     if (task === 'vision') return 'nemotron-3.5-super-vl';
     if (task === 'transcription') return 'nemotron-3-nano-omni';
+    if (task === 'image_generation') return 'flux.1-schnell';
     return 'NVIDIA NIM';
   }
   if (provider === 'groq') {
@@ -61,8 +63,10 @@ export function guessInitialModelLabel(
     return 'gpt-oss-120b';
   }
   if (provider === 'cloudflare') {
+    if (task === 'image_generation') return 'flux-1-schnell';
     return 'llama-3.3-70b';
   }
+  if (task === 'image_generation') return 'flux-1-schnell';
   return 'OpenRouter';
 }
 

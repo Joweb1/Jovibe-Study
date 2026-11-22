@@ -8,6 +8,7 @@ export const ALLOWED_MODELS = [
 export const DEFAULT_MODEL = 'gemini-4-hydrogen';
 export const TTS_MODEL = 'gemini-3.8-flash-lite-tts';
 export const TRANSCRIBE_MODEL = 'gemini-3.5-transcribe';
+export const IMAGE_MODEL = 'gemini-3.1-flash-image';
 export const ALLOWED_TTS_VOICES = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'] as const;
 export type TtsVoiceName = (typeof ALLOWED_TTS_VOICES)[number];
 

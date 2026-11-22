@@ -8,6 +8,7 @@
  *  - Audio/TTS:       Gemini → Groq (fast speech playback fallback)
  *  - Transcription:   Gemini → Groq → OpenRouter → NVIDIA NIM
  *  - OCR / Vision:    Gemini → OpenRouter → NVIDIA NIM
+ *  - Image Gen:       Gemini → Cloudflare Workers AI → OpenRouter → NVIDIA NIM
  *
  * Provider switching only happens once a provider is exhausted: every key is in
  * quota/rate-limit cooldown, invalid, or the provider has no usable key. A single
@@ -22,7 +23,13 @@ export type AiProvider =
   | 'cloudflare'
   | 'nvidia_nim';
 
-export type AiTask = 'chat' | 'structured_json' | 'vision' | 'transcription' | 'tts';
+export type AiTask =
+  | 'chat'
+  | 'structured_json'
+  | 'vision'
+  | 'transcription'
+  | 'tts'
+  | 'image_generation';
 
 export type AiKeySource = 'byok' | 'server_fallback';
 
@@ -61,20 +68,20 @@ export const PROVIDERS: Record<AiProvider, ProviderDefinition> = {
     keyPlaceholder: 'Paste Gemini API key (AIza...)',
     keyHint: 'Create keys in Google AI Studio. Keys from separate projects give independent quota.',
     docsUrl: 'https://aistudio.google.com/app/apikey',
-    tasks: ['chat', 'structured_json', 'vision', 'transcription', 'tts'],
+    tasks: ['chat', 'structured_json', 'vision', 'transcription', 'tts', 'image_generation'],
   },
   openrouter: {
     id: 'openrouter',
     label: 'OpenRouter',
     shortLabel: 'OpenRouter',
     description:
-      '2nd fallback right after Gemini for AI Tutor chat, Practice, Automatic Study, and OCR/vision. Rotates across your saved OpenRouter keys.',
+      '2nd fallback right after Gemini for AI Tutor chat, Practice, Automatic Study, OCR/vision, and concept visuals. Rotates across your saved OpenRouter keys.',
     supportsRotation: true,
     maxKeys: null,
     keyPlaceholder: 'Paste OpenRouter API key (sk-or-...)',
     keyHint: 'Create keys at openrouter.ai/keys. Used immediately after Gemini when configured.',
     docsUrl: 'https://openrouter.ai/keys',
-    tasks: ['chat', 'structured_json', 'vision', 'transcription'],
+    tasks: ['chat', 'structured_json', 'vision', 'transcription', 'image_generation'],
   },
   cerebras: {
     id: 'cerebras',
@@ -114,26 +121,27 @@ export const PROVIDERS: Record<AiProvider, ProviderDefinition> = {
     keyHint:
       'Enter as ACCOUNT_ID:API_TOKEN using your Cloudflare Account ID and Workers AI API Token.',
     docsUrl: 'https://developers.cloudflare.com/workers-ai/get-started/rest-api/',
-    tasks: ['chat', 'structured_json'],
+    tasks: ['chat', 'structured_json', 'image_generation'],
   },
   nvidia_nim: {
     id: 'nvidia_nim',
     label: 'NVIDIA NIM',
     shortLabel: 'NIM',
     description:
-      'Last-resort provider for chat, structured JSON, OCR/vision, and voice-note transcription. Rotates across your saved NIM keys.',
+      'Last-resort provider for chat, structured JSON, OCR/vision, voice-note transcription, and concept visuals. Rotates across your saved NIM keys.',
     supportsRotation: true,
     maxKeys: null,
     keyPlaceholder: 'Paste NVIDIA NIM API key (nvapi-...)',
     keyHint: 'Create keys at build.nvidia.com. Used as the final fallback when earlier providers are unavailable.',
     docsUrl: 'https://build.nvidia.com',
-    tasks: ['chat', 'structured_json', 'vision', 'transcription'],
+    tasks: ['chat', 'structured_json', 'vision', 'transcription', 'image_generation'],
   },
 };
 
 /**
  * Ordered fallback chain per task.
  * Practice & Chat: Gemini → OpenRouter → Cerebras → Groq → Cloudflare Workers AI → NVIDIA NIM (last resort).
+ * Image Gen:       Gemini → Cloudflare Workers AI → OpenRouter → NVIDIA NIM (last resort).
  */
 export const PROVIDER_CHAINS: Record<AiTask, AiProvider[]> = {
   chat: ['gemini', 'openrouter', 'cerebras', 'groq', 'cloudflare', 'nvidia_nim'],
@@ -141,6 +149,7 @@ export const PROVIDER_CHAINS: Record<AiTask, AiProvider[]> = {
   vision: ['gemini', 'openrouter', 'nvidia_nim'],
   transcription: ['gemini', 'groq', 'openrouter', 'nvidia_nim'],
   tts: ['gemini', 'groq'],
+  image_generation: ['gemini', 'cloudflare', 'openrouter', 'nvidia_nim'],
 };
 
 export const TASK_LABELS: Record<AiTask, string> = {
@@ -149,15 +158,16 @@ export const TASK_LABELS: Record<AiTask, string> = {
   vision: 'OCR & document vision',
   transcription: 'Voice-note transcription',
   tts: 'Speech playback (TTS)',
+  image_generation: 'Concept visuals & infographics',
 };
 
 /** Human-readable model names shown in Settings (server resolves the actual IDs). */
 export const PROVIDER_MODEL_HINTS: Record<AiProvider, string> = {
-  gemini: 'gemini-4-hydrogen / gemini-3.1-flash-lite / gemini-3.8-flash-lite-tts',
+  gemini: 'gemini-4-hydrogen / gemini-3.1-flash-lite / gemini-3.1-flash-image',
   openrouter: 'configured on the server (default: openai/gpt-4o-mini)',
   cerebras: 'gpt-oss-120b',
   groq: 'openai/gpt-oss-120b / whisper-large-v3 / canopylabs/orpheus-v1-english',
-  cloudflare: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  cloudflare: '@cf/meta/llama-3.3-70b-instruct-fp8-fast / flux-1-schnell',
   nvidia_nim: 'mistral-large-4 / nemotron-3.5-super-vl (last resort)',
 };
 

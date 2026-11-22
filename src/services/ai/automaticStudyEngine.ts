@@ -26,6 +26,10 @@ export interface LessonDeliveryPayload {
   commonMisconception: string;
   checkQuestion: string;
   sourceCitation: string;
+  /** Concise prompt for an illustrative concept infographic (text metadata only; generated image is stored locally on device). */
+  visualPrompt: string;
+  /** Short student-facing caption describing the concept infographic. */
+  visualCaption: string;
 }
 
 export interface AdaptiveEvaluationPayload {
@@ -54,6 +58,9 @@ export interface StudySegmentEntry {
   question?: string;
   score?: number;
   decision?: string;
+  /** Text-only visual prompt metadata; generated image bytes are NEVER stored in cloud. */
+  visualPrompt?: string;
+  visualCaption?: string;
   timestampMs: number;
 }
 
@@ -160,6 +167,8 @@ const lessonValidator = createValidator<LessonDeliveryPayload>((raw) => {
     commonMisconception: asNonEmptyString(raw.commonMisconception, 'commonMisconception'),
     checkQuestion: asNonEmptyString(raw.checkQuestion, 'checkQuestion'),
     sourceCitation: asString(raw.sourceCitation, ''),
+    visualPrompt: asString(raw.visualPrompt, ''),
+    visualCaption: asString(raw.visualCaption, ''),
   };
 });
 
@@ -200,6 +209,8 @@ export async function deliverStudyUnitLesson(params: {
     '4. realWorldApplication: Concrete worked example or real-world application.',
     '5. commonMisconception: One frequent student mistake or exam pitfall and how to avoid it.',
     '6. checkQuestion: ONE targeted comprehension question requiring the student to explain or apply this unit in their own words.',
+    '7. visualPrompt: A concise 1-2 sentence visual description for an educational infographic or illustrative diagram that visually explains this unit concept (describe spatial layout, components, arrows/relationships, and visual metaphor).',
+    '8. visualCaption: A crisp 1-sentence caption (max 18 words) summarizing what the infographic illustrates.',
     '\n=== RELEVANT COURSE EXCERPTS ===\n' + ctx.contextText,
   ]
     .filter(Boolean)
@@ -221,6 +232,8 @@ export async function deliverStudyUnitLesson(params: {
         commonMisconception: { type: 'STRING' },
         checkQuestion: { type: 'STRING' },
         sourceCitation: { type: 'STRING' },
+        visualPrompt: { type: 'STRING' },
+        visualCaption: { type: 'STRING' },
       },
       required: [
         'unitTitle',
@@ -232,6 +245,8 @@ export async function deliverStudyUnitLesson(params: {
         'commonMisconception',
         'checkQuestion',
         'sourceCitation',
+        'visualPrompt',
+        'visualCaption',
       ],
     },
   });

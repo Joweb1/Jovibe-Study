@@ -2,7 +2,10 @@ import type { Course, MaterialType, ProcessingStatus, StudySection, StudySource,
 import { timestampToMillis } from '../../utils/validation';
 
 const DB_NAME = 'sotal_study_local_v1';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
+
+const LOCAL_IMAGE_EPOCH_STORAGE_KEY = 'sotal_study_local_image_epoch_v1';
+const LOCAL_IMAGE_EPOCH_META_KEY = 'generatedImagesEpoch';
 
 export type LocalStoreName =
   | 'courses'
@@ -12,7 +15,25 @@ export type LocalStoreName =
   | 'drafts'
   | 'meta'
   | 'tutorAudio'
-  | 'pendingIngestions';
+  | 'pendingIngestions'
+  | 'generatedImages';
+
+export interface CachedGeneratedImage {
+  id: string;
+  userId: string;
+  courseId: string;
+  scopeId: string;
+  feature: 'automatic_study' | 'tutor';
+  prompt: string;
+  caption: string;
+  mimeType: string;
+  imageBlob: Blob;
+  byteLength: number;
+  model: string;
+  provider: string;
+  createdAtMs: number;
+  lastAccessedAtMs: number;
+}
 
 export type BackgroundIngestionStatus =
   | 'queued'
@@ -208,6 +229,12 @@ function openDatabase(): Promise<IDBDatabase | null> {
           const store = db.createObjectStore('pendingIngestions', { keyPath: 'id' });
           store.createIndex('userId', 'userId', { unique: false });
           store.createIndex('courseId', 'courseId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('generatedImages')) {
+          const store = db.createObjectStore('generatedImages', { keyPath: 'id' });
+          store.createIndex('userId', 'userId', { unique: false });
+          store.createIndex('scopeId', 'scopeId', { unique: false });
+          store.createIndex('lastAccessedAtMs', 'lastAccessedAtMs', { unique: false });
         }
       };
 
@@ -851,7 +878,278 @@ export async function deletePendingIngestion(id: string): Promise<void> {
   });
 }
 
+const MAX_CACHED_IMAGES = 150;
+const MAX_CACHED_IMAGE_BYTES = 120 * 1024 * 1024; // 120 MB browser cap with LRU pruning
+
+function readLocalImageEpochFromLocalStorage(): string | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    return window.localStorage.getItem(LOCAL_IMAGE_EPOCH_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalImageEpochToLocalStorage(epoch: string): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(LOCAL_IMAGE_EPOCH_STORAGE_KEY, epoch);
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function clearLocalImageEpochFromLocalStorage(): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.removeItem(LOCAL_IMAGE_EPOCH_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Couples the offline IndexedDB image cache to a lightweight epoch token stored in
+ * `localStorage`. If the user clears `localStorage`, the token disappears and all
+ * cached generated images in IndexedDB are immediately wiped on next access.
+ */
+async function syncLocalImageEpochOrWipe(db: IDBDatabase): Promise<void> {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+
+  const lsEpoch = readLocalImageEpochFromLocalStorage();
+  const dbEpoch = await new Promise<string | null>((resolve) => {
+    try {
+      const tx = db.transaction('meta', 'readonly');
+      const req = tx.objectStore('meta').get(LOCAL_IMAGE_EPOCH_META_KEY);
+      req.onsuccess = () => {
+        const row = req.result as { key: string; value?: string } | undefined;
+        resolve(typeof row?.value === 'string' ? row.value : null);
+      };
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+
+  if (lsEpoch && dbEpoch && lsEpoch === dbEpoch) {
+    return;
+  }
+
+  // Either localStorage was cleared (`!lsEpoch`) or epoch drifted — wipe cached images and mint a fresh epoch
+  const nextEpoch = lsEpoch || `img_epoch_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  writeLocalImageEpochToLocalStorage(nextEpoch);
+
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction(['generatedImages', 'meta'], 'readwrite');
+      tx.objectStore('generatedImages').clear();
+      tx.objectStore('meta').put({
+        key: LOCAL_IMAGE_EPOCH_META_KEY,
+        value: nextEpoch,
+        updatedAtMs: Date.now(),
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+async function pruneCachedGeneratedImages(db: IDBDatabase): Promise<void> {
+  try {
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction('generatedImages', 'readwrite');
+      const store = tx.objectStore('generatedImages');
+      const req = store.getAll();
+
+      req.onsuccess = () => {
+        const rows = (req.result as CachedGeneratedImage[]) || [];
+        let totalBytes = rows.reduce((sum, r) => sum + (r.byteLength || r.imageBlob?.size || 0), 0);
+        if (rows.length <= MAX_CACHED_IMAGES && totalBytes <= MAX_CACHED_IMAGE_BYTES) {
+          return;
+        }
+        const sorted = [...rows].sort((a, b) => (a.lastAccessedAtMs || 0) - (b.lastAccessedAtMs || 0));
+        let remaining = rows.length;
+        for (const item of sorted) {
+          if (remaining <= MAX_CACHED_IMAGES && totalBytes <= MAX_CACHED_IMAGE_BYTES) {
+            break;
+          }
+          store.delete(item.id);
+          remaining -= 1;
+          totalBytes -= item.byteLength || item.imageBlob?.size || 0;
+        }
+      };
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch {
+    // Non-fatal LRU cleanup error
+  }
+}
+
+export async function saveCachedGeneratedImage(params: {
+  id: string;
+  userId: string;
+  courseId: string;
+  scopeId: string;
+  feature: 'automatic_study' | 'tutor';
+  prompt: string;
+  caption: string;
+  mimeType: string;
+  imageBlob: Blob;
+  model: string;
+  provider: string;
+}): Promise<void> {
+  const db = await openDatabase();
+  if (!db || !params.id) return;
+
+  await syncLocalImageEpochOrWipe(db);
+
+  const now = Date.now();
+  const record: CachedGeneratedImage = {
+    id: params.id,
+    userId: params.userId,
+    courseId: params.courseId,
+    scopeId: params.scopeId,
+    feature: params.feature,
+    prompt: params.prompt,
+    caption: params.caption,
+    mimeType: params.mimeType || params.imageBlob.type || 'image/jpeg',
+    imageBlob: params.imageBlob,
+    byteLength: params.imageBlob.size,
+    model: params.model,
+    provider: params.provider,
+    createdAtMs: now,
+    lastAccessedAtMs: now,
+  };
+
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction('generatedImages', 'readwrite');
+      tx.objectStore('generatedImages').put(record);
+      tx.oncomplete = () => {
+        notifyCacheSync();
+        resolve();
+      };
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+
+  void pruneCachedGeneratedImages(db);
+}
+
+export async function getCachedGeneratedImage(id: string): Promise<CachedGeneratedImage | null> {
+  const db = await openDatabase();
+  if (!db || !id) return null;
+
+  await syncLocalImageEpochOrWipe(db);
+
+  const record = await new Promise<CachedGeneratedImage | null>((resolve) => {
+    try {
+      const tx = db.transaction('generatedImages', 'readonly');
+      const req = tx.objectStore('generatedImages').get(id);
+      req.onsuccess = () => resolve((req.result as CachedGeneratedImage) ?? null);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+
+  if (record && record.imageBlob instanceof Blob && record.imageBlob.size > 0) {
+    try {
+      const tx = db.transaction('generatedImages', 'readwrite');
+      tx.objectStore('generatedImages').put({
+        ...record,
+        lastAccessedAtMs: Date.now(),
+      });
+    } catch {
+      // Ignore non-fatal LRU update error
+    }
+    return record;
+  }
+
+  return null;
+}
+
+export async function getCachedGeneratedImagesForScope(
+  scopeId: string
+): Promise<CachedGeneratedImage[]> {
+  const db = await openDatabase();
+  if (!db || !scopeId) return [];
+
+  await syncLocalImageEpochOrWipe(db);
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('generatedImages', 'readonly');
+      const index = tx.objectStore('generatedImages').index('scopeId');
+      const req = index.getAll(IDBKeyRange.only(scopeId));
+      req.onsuccess = () => {
+        const rows = ((req.result as CachedGeneratedImage[]) || []).filter(
+          (r) => r.imageBlob instanceof Blob && r.imageBlob.size > 0
+        );
+        resolve(rows);
+      };
+      req.onerror = () => resolve([]);
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
+export async function deleteCachedGeneratedImage(id: string): Promise<void> {
+  const db = await openDatabase();
+  if (!db || !id) return;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('generatedImages', 'readwrite');
+      tx.objectStore('generatedImages').delete(id);
+      tx.oncomplete = () => {
+        notifyCacheSync();
+        resolve();
+      };
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+export async function deleteCachedGeneratedImagesByScope(scopeId: string): Promise<void> {
+  const db = await openDatabase();
+  if (!db || !scopeId) return;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('generatedImages', 'readwrite');
+      const store = tx.objectStore('generatedImages');
+      const index = store.index('scopeId');
+      const req = index.getAllKeys(IDBKeyRange.only(scopeId));
+      req.onsuccess = () => {
+        for (const key of req.result) {
+          store.delete(key);
+        }
+      };
+      tx.oncomplete = () => {
+        notifyCacheSync();
+        resolve();
+      };
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 export async function clearLocalCache(): Promise<void> {
+  clearLocalImageEpochFromLocalStorage();
   const db = await openDatabase();
   if (!db) return;
 
@@ -865,6 +1163,7 @@ export async function clearLocalCache(): Promise<void> {
       'meta',
       'tutorAudio',
       'pendingIngestions',
+      'generatedImages',
     ];
     const tx = db.transaction(storeNames, 'readwrite');
     for (const name of storeNames) {

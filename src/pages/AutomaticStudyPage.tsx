@@ -64,13 +64,33 @@ import {
   VoiceNoteRecorder,
   type PlaybackState,
 } from '../services/ai/audioService';
+import {
+  buildConceptInfographicPrompt,
+  generateAndCacheStudyImage,
+} from '../services/ai/imageService';
+import { isProvider, PROVIDERS } from '../services/ai/providers';
+import {
+  deleteCachedGeneratedImagesByScope,
+  getCachedGeneratedImagesForScope,
+} from '../services/local/indexedDb';
 import { formatShortDate, generateDocumentId } from '../utils/validation';
 import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { MarkdownMessage } from '../components/tutor/MarkdownMessage';
 import { Button } from '../components/ui/Button';
+import { GeneratedStudyImageCard } from '../components/ui/GeneratedStudyImageCard';
 import { Modal } from '../components/ui/Modal';
 import { EmptyState, ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
 import { OfflineFeatureNotice } from '../components/ui/OfflineFeatureNotice';
+
+interface LoadedLocalImage {
+  url: string;
+  caption: string;
+  providerLabel: string;
+}
+
+function formatImageProviderLabel(provider: string): string {
+  return isProvider(provider) ? PROVIDERS[provider].shortLabel : provider;
+}
 
 function parseSegmentEntries(segment: StudySessionSegment | undefined): StudySegmentEntry[] {
   if (!segment || !Array.isArray(segment.entries)) return [];
@@ -92,6 +112,8 @@ function parseSegmentEntries(segment: StudySessionSegment | undefined): StudySeg
       question: typeof e.question === 'string' ? e.question : undefined,
       score: typeof e.score === 'number' ? e.score : undefined,
       decision: typeof e.decision === 'string' ? e.decision : undefined,
+      visualPrompt: typeof e.visualPrompt === 'string' ? e.visualPrompt : undefined,
+      visualCaption: typeof e.visualCaption === 'string' ? e.visualCaption : undefined,
       timestampMs: typeof e.timestampMs === 'number' ? e.timestampMs : Date.now(),
     }));
 }
@@ -153,6 +175,14 @@ export const AutomaticStudyPage: React.FC = () => {
   const sessionStartRef = useRef<number>(Date.now());
   const streamEndRef = useRef<HTMLDivElement>(null);
 
+  // Device-local cached concept visuals (never stored in cloud; wiped if localStorage is cleared)
+  const [cachedImages, setCachedImages] = useState<Record<string, LoadedLocalImage>>({});
+  const cachedImagesRef = useRef<Record<string, LoadedLocalImage>>({});
+  const [generatingImageIds, setGeneratingImageIds] = useState<Set<string>>(() => new Set());
+  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
+  const activeSessionIdRef = useRef<string | null>(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+
   useEffect(() => {
     return geminiAudioPlayer.subscribe(setPlayback);
   }, []);
@@ -161,14 +191,127 @@ export const AutomaticStudyPage: React.FC = () => {
     setDifficulty(prefs.defaultDifficulty);
   }, [prefs.defaultDifficulty]);
 
-  // Cleanup recorder & playback on unmount
+  // Cleanup recorder, playback & local image object URLs on unmount
   useEffect(() => {
     return () => {
       recorderRef.current?.cancel();
       if (recordTimerRef.current) window.clearInterval(recordTimerRef.current);
       geminiAudioPlayer.stop();
+      for (const item of Object.values(cachedImagesRef.current)) {
+        URL.revokeObjectURL(item.url);
+      }
+      cachedImagesRef.current = {};
     };
   }, []);
+
+  // Load device-local offline concept visuals whenever the active session changes
+  useEffect(() => {
+    for (const item of Object.values(cachedImagesRef.current)) {
+      URL.revokeObjectURL(item.url);
+    }
+    cachedImagesRef.current = {};
+    setCachedImages({});
+    setImageErrors({});
+
+    if (!activeSessionId) return;
+
+    let cancelled = false;
+    const scopeId = activeSessionId;
+    void getCachedGeneratedImagesForScope(scopeId).then((rows) => {
+      if (cancelled || activeSessionIdRef.current !== scopeId) return;
+      if (rows.length === 0) return;
+
+      setCachedImages((prev) => {
+        const next: Record<string, LoadedLocalImage> = { ...prev };
+        for (const row of rows) {
+          if (next[row.id]) continue;
+          next[row.id] = {
+            url: URL.createObjectURL(row.imageBlob),
+            caption: row.caption,
+            providerLabel: formatImageProviderLabel(row.provider),
+          };
+        }
+        cachedImagesRef.current = next;
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId]);
+
+  const triggerEntryImageGeneration = async (entry: StudySegmentEntry, sessionId: string) => {
+    if (!user || !activeCourse || !sessionId || !isOnline) return;
+
+    setGeneratingImageIds((prev) => {
+      const next = new Set(prev);
+      next.add(entry.id);
+      return next;
+    });
+    setImageErrors((prev) => {
+      if (!(entry.id in prev)) return prev;
+      const next = { ...prev };
+      delete next[entry.id];
+      return next;
+    });
+
+    const prompt = buildConceptInfographicPrompt({
+      courseCode: activeCourse.code,
+      courseName: activeCourse.name,
+      unitTitle: entry.unitTitle || activeCourse.name,
+      conceptSummary: entry.markdown,
+      customVisualPrompt: entry.visualPrompt,
+    });
+    const caption =
+      entry.visualCaption?.trim() ||
+      `Concept infographic: ${entry.unitTitle || activeCourse.code}`;
+
+    try {
+      const result = await generateAndCacheStudyImage({
+        id: entry.id,
+        userId: user.uid,
+        courseId: activeCourse.id,
+        scopeId: sessionId,
+        feature: 'automatic_study',
+        prompt,
+        caption,
+        aspectRatio: '16:9',
+      });
+
+      if (activeSessionIdRef.current !== sessionId) return;
+
+      const objectUrl = URL.createObjectURL(result.blob);
+      setCachedImages((prev) => {
+        if (prev[entry.id]) {
+          URL.revokeObjectURL(prev[entry.id].url);
+        }
+        const next: Record<string, LoadedLocalImage> = {
+          ...prev,
+          [entry.id]: {
+            url: objectUrl,
+            caption: result.caption,
+            providerLabel: formatImageProviderLabel(result.provider),
+          },
+        };
+        cachedImagesRef.current = next;
+        return next;
+      });
+    } catch (err) {
+      if (activeSessionIdRef.current !== sessionId) return;
+      setImageErrors((prev) => ({
+        ...prev,
+        [entry.id]: formatReadableError(err),
+      }));
+    } finally {
+      setGeneratingImageIds((prev) => {
+        if (!prev.has(entry.id)) return prev;
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  };
 
   // Subscribe to course sessions
   useEffect(() => {
@@ -443,6 +586,8 @@ export const AutomaticStudyPage: React.FC = () => {
         unitTitle: firstUnit.title,
         markdown: formatLessonMarkdown(firstLesson),
         question: firstLesson.checkQuestion,
+        ...(firstLesson.visualPrompt ? { visualPrompt: firstLesson.visualPrompt } : {}),
+        ...(firstLesson.visualCaption ? { visualCaption: firstLesson.visualCaption } : {}),
         timestampMs: Date.now(),
       };
 
@@ -458,10 +603,14 @@ export const AutomaticStudyPage: React.FC = () => {
       });
 
       sessionStartRef.current = Date.now();
+      activeSessionIdRef.current = session.id;
       setActiveSessionId(session.id);
       setLauncherOpen(false);
       setCustomInstructions('');
       setAnswerText('');
+
+      // Generate illustrative concept visual in the background & cache locally on device
+      void triggerEntryImageGeneration(initialEntry, session.id);
     } catch (err) {
       setError(formatReadableError(err));
     } finally {
@@ -790,6 +939,8 @@ export const AutomaticStudyPage: React.FC = () => {
         unitTitle: nextUnit.title,
         markdown: formatLessonMarkdown(lesson),
         question: lesson.checkQuestion,
+        ...(lesson.visualPrompt ? { visualPrompt: lesson.visualPrompt } : {}),
+        ...(lesson.visualCaption ? { visualCaption: lesson.visualCaption } : {}),
         timestampMs: Date.now(),
       };
 
@@ -824,6 +975,9 @@ export const AutomaticStudyPage: React.FC = () => {
         nextAction: 'awaiting_student_answer',
         activeSegmentId: activeSegment.id,
       });
+
+      // Generate illustrative concept visual in the background & cache locally on device
+      void triggerEntryImageGeneration(lessonEntry, activeSession.id);
     } catch (err) {
       setError(formatReadableError(err));
     } finally {
@@ -1069,6 +1223,7 @@ export const AutomaticStudyPage: React.FC = () => {
     setError(null);
     try {
       await deleteAutomaticStudySession(user.uid, activeCourse.id, sessionToDelete.id);
+      void deleteCachedGeneratedImagesByScope(sessionToDelete.id);
       if (activeSessionId === sessionToDelete.id) {
         setActiveSessionId(null);
       }
@@ -1463,6 +1618,25 @@ export const AutomaticStudyPage: React.FC = () => {
                     </div>
 
                     <MarkdownMessage content={entry.markdown} />
+
+                    {(entry.kind === 'lesson' ||
+                      Boolean(cachedImages[entry.id]) ||
+                      generatingImageIds.has(entry.id) ||
+                      Boolean(imageErrors[entry.id])) && (
+                      <GeneratedStudyImageCard
+                        imageUrl={cachedImages[entry.id]?.url}
+                        caption={cachedImages[entry.id]?.caption || entry.visualCaption}
+                        providerLabel={cachedImages[entry.id]?.providerLabel}
+                        loading={generatingImageIds.has(entry.id)}
+                        error={imageErrors[entry.id] ?? null}
+                        canGenerate={entry.kind === 'lesson'}
+                        isOnline={isOnline}
+                        onGenerate={() => void triggerEntryImageGeneration(entry, activeSession.id)}
+                        onRegenerate={() =>
+                          void triggerEntryImageGeneration(entry, activeSession.id)
+                        }
+                      />
+                    )}
                   </article>
                 );
               })}

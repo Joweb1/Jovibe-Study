@@ -55,12 +55,21 @@ import {
   type PlaybackState,
 } from '../services/ai/audioService';
 import {
+  buildChatImagePrompt,
+  detectExplicitImageRequest,
+  generateAndCacheStudyImage,
+} from '../services/ai/imageService';
+import { isProvider, PROVIDERS } from '../services/ai/providers';
+import {
+  deleteCachedGeneratedImagesByScope,
   deleteCachedTutorAudioByConversation,
+  getCachedGeneratedImagesForScope,
   getCachedTutorAudioIdsForConversation,
 } from '../services/local/indexedDb';
 import { generateDocumentId } from '../utils/validation';
 import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { Button } from '../components/ui/Button';
+import { GeneratedStudyImageCard } from '../components/ui/GeneratedStudyImageCard';
 import { OfflineFeatureNotice } from '../components/ui/OfflineFeatureNotice';
 import { EmptyState, ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
 import { ConversationSidebar } from '../components/tutor/ConversationSidebar';
@@ -86,6 +95,17 @@ function formatTimer(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+interface LoadedChatImage {
+  url: string;
+  caption: string;
+  providerLabel: string;
+  prompt: string;
+}
+
+function formatChatImageProviderLabel(provider: string): string {
+  return isProvider(provider) ? PROVIDERS[provider].shortLabel : provider;
 }
 
 export const TutorPage: React.FC = () => {
@@ -142,6 +162,14 @@ export const TutorPage: React.FC = () => {
   // Gemini 3.8 TTS audio playback state
   const [playback, setPlayback] = useState<PlaybackState>(() => geminiAudioPlayer.getState());
   const [cachedAudioIds, setCachedAudioIds] = useState<Set<string>>(() => new Set());
+
+  // Device-local generated images (ONLY created when the user explicitly requests an image in chat; never stored in cloud)
+  const [cachedImages, setCachedImages] = useState<Record<string, LoadedChatImage>>({});
+  const cachedImagesRef = useRef<Record<string, LoadedChatImage>>({});
+  const [generatingImageIds, setGeneratingImageIds] = useState<Set<string>>(() => new Set());
+  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
+  const activeConversationIdRef = useRef<string | null>(activeConversationId);
+  activeConversationIdRef.current = activeConversationId;
 
   // Gemini 3.5 Transcribe voice-note recorder state
   const [isRecording, setIsRecording] = useState(false);
@@ -234,24 +262,54 @@ export const TutorPage: React.FC = () => {
     };
   }, []);
 
-  // Load IDs of messages in the active conversation that already have saved local audio
+  // Load IDs of messages in the active conversation that already have saved local audio & local images
   useEffect(() => {
+    for (const item of Object.values(cachedImagesRef.current)) {
+      URL.revokeObjectURL(item.url);
+    }
+    cachedImagesRef.current = {};
+    setCachedImages({});
+    setImageErrors({});
+
     if (!activeConversationId) {
       setCachedAudioIds(new Set());
       return;
     }
     let cancelled = false;
-    void getCachedTutorAudioIdsForConversation(activeConversationId).then((ids) => {
+    const convId = activeConversationId;
+
+    void getCachedTutorAudioIdsForConversation(convId).then((ids) => {
       if (!cancelled) {
         setCachedAudioIds(ids);
       }
     });
+
+    void getCachedGeneratedImagesForScope(convId).then((rows) => {
+      if (cancelled || activeConversationIdRef.current !== convId) return;
+      if (rows.length === 0) return;
+
+      setCachedImages((prev) => {
+        const next: Record<string, LoadedChatImage> = { ...prev };
+        for (const row of rows) {
+          if (next[row.id]) continue;
+          next[row.id] = {
+            url: URL.createObjectURL(row.imageBlob),
+            caption: row.caption,
+            providerLabel: formatChatImageProviderLabel(row.provider),
+            prompt: row.prompt,
+          };
+        }
+        cachedImagesRef.current = next;
+        return next;
+      });
+    });
+
     return () => {
       cancelled = true;
     };
   }, [activeConversationId]);
 
-  // Cleanup recorder & inflight requests on unmount
+  // Cleanup recorder, inflight requests & local image object URLs on unmount
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) {
@@ -259,8 +317,90 @@ export const TutorPage: React.FC = () => {
       }
       recorderRef.current?.cancel();
       generationAbortRef.current?.abort();
+      for (const item of Object.values(cachedImagesRef.current)) {
+        URL.revokeObjectURL(item.url);
+      }
+      cachedImagesRef.current = {};
     };
   }, []);
+
+  const triggerChatImageGeneration = async (params: {
+    messageId: string;
+    conversationId: string;
+    userPrompt: string;
+    answerText: string;
+    customPrompt?: string;
+  }) => {
+    if (!user || !activeCourse || !params.conversationId || !isOnline) return;
+
+    setGeneratingImageIds((prev) => {
+      const next = new Set(prev);
+      next.add(params.messageId);
+      return next;
+    });
+    setImageErrors((prev) => {
+      if (!(params.messageId in prev)) return prev;
+      const next = { ...prev };
+      delete next[params.messageId];
+      return next;
+    });
+
+    const prompt =
+      params.customPrompt ||
+      buildChatImagePrompt({
+        courseCode: activeCourse.code,
+        courseName: activeCourse.name,
+        userRequest: params.userPrompt,
+        answerExcerpt: params.answerText,
+      });
+    const caption = params.userPrompt.trim().slice(0, 110);
+
+    try {
+      const result = await generateAndCacheStudyImage({
+        id: params.messageId,
+        userId: user.uid,
+        courseId: activeCourse.id,
+        scopeId: params.conversationId,
+        feature: 'tutor',
+        prompt,
+        caption,
+        aspectRatio: '16:9',
+      });
+
+      if (activeConversationIdRef.current !== params.conversationId) return;
+
+      const objectUrl = URL.createObjectURL(result.blob);
+      setCachedImages((prev) => {
+        if (prev[params.messageId]) {
+          URL.revokeObjectURL(prev[params.messageId].url);
+        }
+        const next: Record<string, LoadedChatImage> = {
+          ...prev,
+          [params.messageId]: {
+            url: objectUrl,
+            caption: result.caption,
+            providerLabel: formatChatImageProviderLabel(result.provider),
+            prompt: result.prompt,
+          },
+        };
+        cachedImagesRef.current = next;
+        return next;
+      });
+    } catch (err) {
+      if (activeConversationIdRef.current !== params.conversationId) return;
+      setImageErrors((prev) => ({
+        ...prev,
+        [params.messageId]: formatReadableError(err),
+      }));
+    } finally {
+      setGeneratingImageIds((prev) => {
+        if (!prev.has(params.messageId)) return prev;
+        const next = new Set(prev);
+        next.delete(params.messageId);
+        return next;
+      });
+    }
+  };
 
   // Reset state when active course changes and restore stored conversation id immediately
   useEffect(() => {
@@ -541,6 +681,7 @@ export const TutorPage: React.FC = () => {
     try {
       await deleteConversation(user.uid, activeCourse.id, id);
       void deleteCachedTutorAudioByConversation(id);
+      void deleteCachedGeneratedImagesByScope(id);
       if (activeConversationId === id) {
         explicitNewThreadRef.current = false;
         writeStoredConversationId(lastConvStorageKey, null);
@@ -618,6 +759,7 @@ export const TutorPage: React.FC = () => {
       });
 
       const assistantMsgId = generateDocumentId('msg');
+      const wantsImage = detectExplicitImageRequest(questionText);
 
       const persistMeta = {
         userId: user.uid,
@@ -698,6 +840,17 @@ export const TutorPage: React.FC = () => {
           content: turn.answer,
           sourceReferences: turn.sourceReferences,
           nextMessageCount: baseCount + 2,
+        });
+      }
+
+      // Generate & cache an image locally ONLY if the student explicitly asked for an image in chat
+      if (wantsImage) {
+        activeConversationIdRef.current = conversationId;
+        void triggerChatImageGeneration({
+          messageId: assistantMsgId,
+          conversationId,
+          userPrompt: questionText,
+          answerText: turn.answer,
         });
       }
 
@@ -1423,6 +1576,36 @@ export const TutorPage: React.FC = () => {
                     {audioErrorForMsg && (
                       <p className="mt-2 text-xs text-red-700 dark:text-red-400">{audioErrorForMsg}</p>
                     )}
+
+                    {!isUser &&
+                      (Boolean(cachedImages[msg.id]) ||
+                        generatingImageIds.has(msg.id) ||
+                        Boolean(imageErrors[msg.id])) && (
+                        <GeneratedStudyImageCard
+                          imageUrl={cachedImages[msg.id]?.url}
+                          caption={cachedImages[msg.id]?.caption}
+                          providerLabel={cachedImages[msg.id]?.providerLabel}
+                          loading={generatingImageIds.has(msg.id)}
+                          error={imageErrors[msg.id] ?? null}
+                          canGenerate={false}
+                          isOnline={isOnline}
+                          onRegenerate={
+                            activeConversationId
+                              ? () =>
+                                  void triggerChatImageGeneration({
+                                    messageId: msg.id,
+                                    conversationId: activeConversationId,
+                                    userPrompt:
+                                      getPrecedingQuestion(msg) ||
+                                      cachedImages[msg.id]?.caption ||
+                                      'Concept visual',
+                                    answerText: typeof msg.content === 'string' ? msg.content : '',
+                                    customPrompt: cachedImages[msg.id]?.prompt,
+                                  })
+                              : undefined
+                          }
+                        />
+                      )}
 
                     {!isUser &&
                       (!streamingReply || streamingReply.messageId !== msg.id) &&

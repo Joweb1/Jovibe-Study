@@ -3,7 +3,11 @@ import {
   type AiErrorCode,
 } from './errors';
 import { callGeminiEndpoint } from './geminiTransport';
-import { PROVIDER_JSON_TIMEOUT_MS, PROVIDER_VISION_TIMEOUT_MS } from './http';
+import {
+  PROVIDER_IMAGE_TIMEOUT_MS,
+  PROVIDER_JSON_TIMEOUT_MS,
+  PROVIDER_VISION_TIMEOUT_MS,
+} from './http';
 import { callProviderTask } from './providerTransport';
 import { runAiTask, type RouteAttempt } from './aiRouter';
 import { toProviderSafeAudio } from './audioTranscode';
@@ -96,6 +100,12 @@ interface ProviderTtsBody {
   audioBase64?: string;
   mimeType?: string;
   voiceName?: string;
+  model?: string;
+}
+
+interface ProviderImageBody {
+  imageBase64?: string;
+  mimeType?: string;
   model?: string;
 }
 
@@ -402,6 +412,70 @@ export async function transcribeAudioWithClient(params: {
   });
 
   return { text: value.text, meta };
+}
+
+export async function generateStudyImageWithClient(params: {
+  prompt: string;
+  aspectRatio?: '16:9' | '4:3' | '1:1' | '3:4';
+  signal?: AbortSignal;
+}): Promise<{
+  imageBase64: string;
+  mimeType: string;
+  meta: AiRequestMeta;
+}> {
+  const aspectRatio = params.aspectRatio || '16:9';
+
+  const { value, meta } = await runAiTask<ProviderImageBody>({
+    task: 'image_generation',
+    requestedModel: 'gemini-3.1-flash-image',
+    signal: params.signal,
+    execute: async (attempt) => {
+      if (attempt.provider === 'gemini') {
+        const body = await callGeminiEndpoint<ProviderImageBody>({
+          endpoint: '/api/ai/generate-image',
+          apiKey: attempt.apiKey,
+          timeoutMs: PROVIDER_IMAGE_TIMEOUT_MS,
+          signal: params.signal,
+          payload: {
+            prompt: params.prompt,
+            aspectRatio,
+          },
+        });
+        return {
+          value: body,
+          model: normalizeModel(body.model, 'gemini-3.1-flash-image'),
+        };
+      }
+
+      const body = await callProviderTask<ProviderImageBody>({
+        provider: providerForAttempt(attempt),
+        task: 'image_generation',
+        apiKey: attempt.apiKey,
+        timeoutMs: PROVIDER_IMAGE_TIMEOUT_MS,
+        signal: params.signal,
+        payload: {
+          prompt: params.prompt,
+          aspectRatio,
+        },
+      });
+      return {
+        value: body,
+        model: normalizeModel(body.model, `${attempt.provider}-image`),
+      };
+    },
+  });
+
+  if (!value.imageBase64) {
+    throw new AiServiceError('Image provider returned no image data.', 'SERVER_ERROR', {
+      retryable: true,
+    });
+  }
+
+  return {
+    imageBase64: value.imageBase64,
+    mimeType: value.mimeType || 'image/jpeg',
+    meta,
+  };
 }
 
 // ---------------------------------------------------------------------------

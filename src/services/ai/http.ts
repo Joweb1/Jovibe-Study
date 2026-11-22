@@ -6,6 +6,7 @@ export const GEMINI_KEY_TEST_TIMEOUT_MS = 18_000;
 export const PROVIDER_GENERATION_TIMEOUT_MS = 35_000;
 export const PROVIDER_JSON_TIMEOUT_MS = 55_000;
 export const PROVIDER_VISION_TIMEOUT_MS = 65_000;
+export const PROVIDER_IMAGE_TIMEOUT_MS = 55_000;
 export const PROVIDER_KEY_TEST_TIMEOUT_MS = 20_000;
 
 export function sleep(ms: number): Promise<void> {

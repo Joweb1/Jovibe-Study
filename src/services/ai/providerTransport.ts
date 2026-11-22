@@ -17,6 +17,7 @@ const TASK_PATHS: Record<AiTask, string> = {
   vision: 'vision',
   transcription: 'transcribe',
   tts: 'tts',
+  image_generation: 'generate-image',
 };
 
 export interface ProviderCallParams {

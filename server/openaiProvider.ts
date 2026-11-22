@@ -2,7 +2,13 @@ import { buildVisionPrompt, VISION_JSON_SCHEMA, toJsonSchema } from './prompts';
 
 export type OpenAiProviderId = 'nvidia_nim' | 'openrouter' | 'cerebras' | 'groq' | 'cloudflare';
 
-export type ProviderTask = 'chat' | 'structured_json' | 'vision' | 'transcription' | 'tts';
+export type ProviderTask =
+  | 'chat'
+  | 'structured_json'
+  | 'vision'
+  | 'transcription'
+  | 'tts'
+  | 'image_generation';
 
 export interface ProviderKeyContext {
   apiKey: string;
@@ -71,6 +77,7 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
         transcription:
           env('NVIDIA_TRANSCRIBE_MODEL') || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
         tts: '',
+        image_generation: env('NVIDIA_IMAGE_MODEL') || 'black-forest-labs/flux.1-schnell',
       },
       disableThinking: true,
       extraHeaders: {},
@@ -89,6 +96,7 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
         vision: env('OPENROUTER_VISION_MODEL') || defaultModel,
         transcription: env('OPENROUTER_TRANSCRIBE_MODEL') || 'openai/gpt-4o-audio-preview',
         tts: env('OPENROUTER_TTS_MODEL') || '',
+        image_generation: env('OPENROUTER_IMAGE_MODEL') || 'black-forest-labs/flux-1-schnell',
       },
       disableThinking: false,
       extraHeaders: {
@@ -110,6 +118,7 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
         vision: '',
         transcription: env('GROQ_TRANSCRIBE_MODEL') || 'whisper-large-v3-turbo',
         tts: env('GROQ_TTS_MODEL') || 'canopylabs/orpheus-v1-english',
+        image_generation: '',
       },
       disableThinking: false,
       extraHeaders: {},
@@ -135,6 +144,7 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
         vision: env('CLOUDFLARE_VISION_MODEL') || '',
         transcription: '',
         tts: '',
+        image_generation: env('CLOUDFLARE_IMAGE_MODEL') || '@cf/black-forest-labs/flux-1-schnell',
       },
       disableThinking: false,
       extraHeaders: {},
@@ -151,6 +161,7 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
       vision: '',
       transcription: '',
       tts: '',
+      image_generation: '',
     },
     disableThinking: false,
     extraHeaders: {},
@@ -1029,6 +1040,219 @@ export async function synthesizeProviderSpeech(params: {
     voiceName: voice,
     model,
   };
+}
+
+export async function generateProviderImage(params: {
+  provider: OpenAiProviderId;
+  apiKey: string;
+  prompt: string;
+  aspectRatio?: string;
+  model?: string;
+  timeoutMs?: number;
+}): Promise<{ imageBase64: string; mimeType: string; model: string }> {
+  const def = getProviderDefinition(params.provider);
+  const rawOverride = params.model?.trim() || '';
+  const model =
+    (rawOverride && !/^gemini-/i.test(rawOverride) ? rawOverride : '') ||
+    def.models.image_generation;
+
+  if (!model) {
+    throw new ProviderRequestError({
+      status: 501,
+      code: 'MODEL_UNAVAILABLE',
+      message: `${def.label} does not support image generation in SOTAL Study.`,
+      retryable: false,
+      cooldownMs: 0,
+    });
+  }
+
+  const cleanPrompt = params.prompt.trim().slice(0, 1600);
+  const timeoutMs = params.timeoutMs ?? 45_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('TIMEOUT')), timeoutMs);
+
+  try {
+    if (params.provider === 'cloudflare') {
+      const { accountId, apiToken } = parseCloudflareCredential(params.apiKey);
+      const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: cleanPrompt,
+          steps: 4,
+        }),
+        signal: controller.signal,
+      });
+
+      const ct = (response.headers.get('content-type') || '').toLowerCase();
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        let json: unknown = null;
+        try {
+          json = JSON.parse(errText);
+        } catch {
+          // ignore
+        }
+        const message = extractProviderMessage(json, errText.slice(0, 240));
+        throw new ProviderRequestError(classifyStatus('cloudflare', response.status, message));
+      }
+
+      if (ct.includes('application/json')) {
+        const json = (await response.json()) as {
+          success?: boolean;
+          result?: { image?: string };
+          image?: string;
+        };
+        const imageBase64 = (json?.result?.image || json?.image || '').trim();
+        if (!imageBase64) {
+          throw new ProviderRequestError({
+            status: 502,
+            code: 'SERVER_ERROR',
+            message: 'Cloudflare Workers AI returned an empty image payload.',
+            retryable: true,
+            cooldownMs: 3_000,
+          });
+        }
+        return { imageBase64, mimeType: 'image/jpeg', model };
+      }
+
+      const buf = Buffer.from(await response.arrayBuffer());
+      if (buf.length < 100) {
+        throw new ProviderRequestError({
+          status: 502,
+          code: 'SERVER_ERROR',
+          message: 'Cloudflare Workers AI returned an empty image buffer.',
+          retryable: true,
+          cooldownMs: 3_000,
+        });
+      }
+      return {
+        imageBase64: buf.toString('base64'),
+        mimeType: ct.includes('png') ? 'image/png' : 'image/jpeg',
+        model,
+      };
+    }
+
+    if (params.provider === 'openrouter') {
+      const response = await fetch(`${def.baseUrl.replace(/\/+$/, '')}/images`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          'Content-Type': 'application/json',
+          ...def.extraHeaders,
+        },
+        body: JSON.stringify({
+          model,
+          prompt: cleanPrompt,
+          aspect_ratio: params.aspectRatio || '16:9',
+        }),
+        signal: controller.signal,
+      });
+
+      const text = await response.text();
+      let json: unknown = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // ignore
+      }
+
+      if (!response.ok) {
+        const message = extractProviderMessage(json, text.slice(0, 240));
+        throw new ProviderRequestError(classifyStatus('openrouter', response.status, message));
+      }
+
+      const first = (json as { data?: Array<{ b64_json?: string; media_type?: string }> })?.data?.[0];
+      const imageBase64 = (first?.b64_json || '').trim();
+      if (!imageBase64) {
+        throw new ProviderRequestError({
+          status: 502,
+          code: 'SERVER_ERROR',
+          message: 'OpenRouter returned an empty image payload.',
+          retryable: true,
+          cooldownMs: 3_000,
+        });
+      }
+      return {
+        imageBase64,
+        mimeType: first?.media_type || 'image/png',
+        model,
+      };
+    }
+
+    if (params.provider === 'nvidia_nim') {
+      const response = await fetch(`https://ai.api.nvidia.com/v1/genai/${model}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: cleanPrompt,
+          width: 1024,
+          height: 768,
+          steps: 4,
+          seed: 0,
+        }),
+        signal: controller.signal,
+      });
+
+      const text = await response.text();
+      let json: unknown = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // ignore
+      }
+
+      if (!response.ok) {
+        const message = extractProviderMessage(json, text.slice(0, 240));
+        throw new ProviderRequestError(classifyStatus('nvidia_nim', response.status, message));
+      }
+
+      const record = json as { artifacts?: Array<{ base64?: string }>; image?: string };
+      const imageBase64 = (record?.artifacts?.[0]?.base64 || record?.image || '').trim();
+      if (!imageBase64) {
+        throw new ProviderRequestError({
+          status: 502,
+          code: 'SERVER_ERROR',
+          message: 'NVIDIA NIM returned an empty image payload.',
+          retryable: true,
+          cooldownMs: 3_000,
+        });
+      }
+      return { imageBase64, mimeType: 'image/jpeg', model };
+    }
+
+    throw new ProviderRequestError({
+      status: 501,
+      code: 'MODEL_UNAVAILABLE',
+      message: `${def.label} does not support image generation.`,
+      retryable: false,
+      cooldownMs: 0,
+    });
+  } catch (err) {
+    if (err instanceof ProviderRequestError) throw err;
+    const isTimeout =
+      (err instanceof DOMException && err.name === 'AbortError') ||
+      (err instanceof Error && err.message === 'TIMEOUT');
+    throw new ProviderRequestError({
+      status: isTimeout ? 504 : 502,
+      code: isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR',
+      message: isTimeout
+        ? `${def.label} timed out while generating an image.`
+        : `${def.label} image generation failed: ${err instanceof Error ? err.message : 'unknown error'}`,
+      retryable: true,
+      cooldownMs: 5_000,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function testProviderConnection(params: {
