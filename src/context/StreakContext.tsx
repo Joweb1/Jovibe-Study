@@ -148,7 +148,7 @@ function writePendingLocalSeconds(userId: string, data: StoredPendingSeconds | n
 }
 
 export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isOnline } = useAuth();
+  const { user, isOnline, justReconnected } = useAuth();
   const userId = user?.uid ?? '';
 
   const [todayKey, setTodayKey] = useState<string>(() => getLocalDateKey());
@@ -467,8 +467,10 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (!isOnline || !userId || auth.currentUser?.uid !== userId) return;
 
-    void ensureAndReconcileStreak(userId, getLocalDateKey()).catch(() => {});
-    void flushAccumulatedAppTime();
+    if (justReconnected) {
+      void ensureAndReconcileStreak(userId, getLocalDateKey()).catch(() => {});
+      void flushAccumulatedAppTime();
+    }
 
     const pendingActivities = readQueuedOfflineActivities(userId);
     if (pendingActivities.length > 0) {

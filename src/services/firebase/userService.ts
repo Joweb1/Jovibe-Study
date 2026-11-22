@@ -4,8 +4,8 @@ import {
   getDoc,
   getDocFromCache,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
-  setDoc,
   updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
@@ -97,7 +97,22 @@ function isOfflineReadError(error: unknown): boolean {
   );
 }
 
+const inFlightEnsureProfile = new Map<string, Promise<UserProfile>>();
+
 export async function ensureUserProfile(user: User): Promise<UserProfile> {
+  const existingPromise = inFlightEnsureProfile.get(user.uid);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const run = ensureUserProfileInternal(user).finally(() => {
+    inFlightEnsureProfile.delete(user.uid);
+  });
+  inFlightEnsureProfile.set(user.uid, run);
+  return run;
+}
+
+async function ensureUserProfileInternal(user: User): Promise<UserProfile> {
   const path = `users/${user.uid}`;
   const ref = doc(db, 'users', user.uid);
   const isBrowserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -163,26 +178,38 @@ export async function ensureUserProfile(user: User): Promise<UserProfile> {
   };
 
   try {
-    await setDoc(ref, newProfilePayload);
+    const ensured = await runTransaction(db, async (tx) => {
+      const latestSnap = await tx.get(ref);
+      if (latestSnap.exists()) {
+        const existingData = latestSnap.data() as UserProfile;
+        return {
+          ...existingData,
+          preferences: {
+            ...DEFAULT_USER_PREFERENCES,
+            ...(existingData.preferences || {}),
+          },
+        };
+      }
+      tx.set(ref, newProfilePayload);
+      return {
+        userId: user.uid,
+        displayName,
+        email,
+        photoURL,
+        activeCourseId: '',
+        preferences: { ...DEFAULT_USER_PREFERENCES },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } satisfies UserProfile;
+    });
+    writeCachedLocalProfile(ensured);
+    return ensured;
   } catch (error) {
     if (isOfflineReadError(error)) {
       return buildFallbackProfile(user);
     }
     handleFirestoreError(error, OperationType.CREATE, path);
   }
-
-  const created: UserProfile = {
-    userId: user.uid,
-    displayName,
-    email,
-    photoURL,
-    activeCourseId: '',
-    preferences: { ...DEFAULT_USER_PREFERENCES },
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  };
-  writeCachedLocalProfile(created);
-  return created;
 }
 
 export function subscribeUserProfile(

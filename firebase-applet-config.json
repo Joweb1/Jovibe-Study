@@ -1,12 +1,12 @@
 {
-  "projectId": "speedy-timing-4dpgw",
-  "appId": "1:847875402044:web:d23c8533aad61be2c71639",
-  "apiKey": "AIzaSyDP0CuNOFJNUY4t-Zk3Y3jWCHA631ARJps",
-  "authDomain": "speedy-timing-4dpgw.firebaseapp.com",
+  "projectId": "sotal-study",
+  "appId": "1:262185040872:web:10fa77d2510aee0b24025d",
+  "apiKey": "AIzaSyCZGU1yS0lfOdTxs58dvCuoyU7rDPFByTY",
+  "authDomain": "sotal-study.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-e33c9641-e189-494c-b7a8-ce936f79f7cc",
-  "storageBucket": "speedy-timing-4dpgw.firebasestorage.app",
-  "messagingSenderId": "847875402044",
+  "storageBucket": "sotal-study.firebasestorage.app",
+  "messagingSenderId": "262185040872",
   "measurementId": "",
-  "oAuthClientId": "847875402044-s72c577dq9tkjcro0eio19fjc5rhhj98.apps.googleusercontent.com",
+  "oAuthClientId": "262185040872-qo4ooddmt0jjap0bs6hnhj254o1tekta.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

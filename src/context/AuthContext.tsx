@@ -124,15 +124,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Re-ensure profile cleanly when coming back online after booting offline
+  // Re-ensure profile cleanly only when returning online after booting/going offline
   useEffect(() => {
-    if (!isOnline || !user) return;
+    if (!isOnline || !justReconnected || !user) return;
     void ensureUserProfile(user)
       .then((ensured) => setProfile(ensured))
       .catch(() => {
         // Non-fatal background sync retry
       });
-  }, [isOnline, user]);
+  }, [isOnline, justReconnected, user]);
 
   const signInWithGoogle = useCallback(async () => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {

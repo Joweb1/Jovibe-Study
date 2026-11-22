@@ -77,6 +77,8 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
+const inFlightReconcile = new Map<string, Promise<StreakProfile>>();
+
 /**
  * Ensures the user's StreakProfile exists (initializing internal freezeBalance = 10)
  * and reconciles any missed days strictly before `todayKey` atomically inside a transaction.
@@ -84,6 +86,23 @@ function clampInt(value: number, min: number, max: number): number {
 export async function ensureAndReconcileStreak(
   userId: string,
   todayKey: string = getLocalDateKey()
+): Promise<StreakProfile> {
+  const dedupeKey = `${userId}:${todayKey}`;
+  const existingPromise = inFlightReconcile.get(dedupeKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const run = ensureAndReconcileStreakInternal(userId, todayKey).finally(() => {
+    inFlightReconcile.delete(dedupeKey);
+  });
+  inFlightReconcile.set(dedupeKey, run);
+  return run;
+}
+
+async function ensureAndReconcileStreakInternal(
+  userId: string,
+  todayKey: string
 ): Promise<StreakProfile> {
   const path = `users/${userId}/streakProfile/current`;
   const tzOffset = new Date().getTimezoneOffset();
@@ -98,7 +117,11 @@ export async function ensureAndReconcileStreak(
 
       resultProfile = await runTransaction(db, async (tx) => {
         const profRef = streakProfileRef(userId);
-        const profSnap = await tx.get(profRef);
+        const initGrantRef = freezeLedgerRef(userId, 'init_grant');
+        const [profSnap, initGrantSnap] = await Promise.all([
+          tx.get(profRef),
+          tx.get(initGrantRef),
+        ]);
 
         if (!profSnap.exists()) {
           const initial = createInitialStreakProfile(userId, todayKey, tzOffset);
@@ -107,14 +130,16 @@ export async function ensureAndReconcileStreak(
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
-          tx.set(freezeLedgerRef(userId, 'init_grant'), {
-            userId,
-            dateKey: todayKey,
-            action: 'initial_grant',
-            delta: INITIAL_STREAK_FREEZES,
-            balanceAfter: INITIAL_STREAK_FREEZES,
-            createdAt: serverTimestamp(),
-          });
+          if (!initGrantSnap.exists()) {
+            tx.set(initGrantRef, {
+              userId,
+              dateKey: todayKey,
+              action: 'initial_grant',
+              delta: INITIAL_STREAK_FREEZES,
+              balanceAfter: INITIAL_STREAK_FREEZES,
+              createdAt: serverTimestamp(),
+            });
+          }
           return initial;
         }
 
@@ -333,8 +358,13 @@ export async function recordQualifyingLearningActivity(
     return await runTransaction(db, async (tx) => {
       const profRef = streakProfileRef(userId);
       const dayRef = streakDayRef(userId, todayKey);
+      const initGrantRef = freezeLedgerRef(userId, 'init_grant');
 
-      const [profSnap, daySnap] = await Promise.all([tx.get(profRef), tx.get(dayRef)]);
+      const [profSnap, daySnap, initGrantSnap] = await Promise.all([
+        tx.get(profRef),
+        tx.get(dayRef),
+        tx.get(initGrantRef),
+      ]);
       const currentProfile = profSnap.exists()
         ? (profSnap.data() as StreakProfile)
         : createInitialStreakProfile(userId, todayKey, tzOffset);
@@ -359,14 +389,16 @@ export async function recordQualifyingLearningActivity(
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        tx.set(freezeLedgerRef(userId, 'init_grant'), {
-          userId,
-          dateKey: todayKey,
-          action: 'initial_grant',
-          delta: INITIAL_STREAK_FREEZES,
-          balanceAfter: INITIAL_STREAK_FREEZES,
-          createdAt: serverTimestamp(),
-        });
+        if (!initGrantSnap.exists()) {
+          tx.set(initGrantRef, {
+            userId,
+            dateKey: todayKey,
+            action: 'initial_grant',
+            delta: INITIAL_STREAK_FREEZES,
+            balanceAfter: INITIAL_STREAK_FREEZES,
+            createdAt: serverTimestamp(),
+          });
+        }
       } else {
         tx.update(profRef, {
           pendingClaimDate: outcome.profile.pendingClaimDate,
