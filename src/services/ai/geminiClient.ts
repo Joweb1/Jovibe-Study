@@ -76,12 +76,14 @@ const TRANSIENT_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
 interface ProviderTextBody {
   text?: string;
   model?: string;
+  switchedFromModel?: string;
 }
 
 interface ProviderJsonBody<T> {
   data?: T;
   rawText?: string;
   model?: string;
+  switchedFromModel?: string;
 }
 
 interface ProviderVisionBody {
@@ -89,11 +91,13 @@ interface ProviderVisionBody {
   uncertainCount?: number;
   notes?: string;
   model?: string;
+  switchedFromModel?: string;
 }
 
 interface ProviderTranscribeBody {
   text?: string;
   model?: string;
+  switchedFromModel?: string;
 }
 
 interface ProviderTtsBody {
@@ -101,12 +105,14 @@ interface ProviderTtsBody {
   mimeType?: string;
   voiceName?: string;
   model?: string;
+  switchedFromModel?: string;
 }
 
 interface ProviderImageBody {
   imageBase64?: string;
   mimeType?: string;
   model?: string;
+  switchedFromModel?: string;
 }
 
 function providerForAttempt(attempt: RouteAttempt): Exclude<AiRequestMeta['provider'], 'gemini'> {
@@ -139,6 +145,7 @@ export async function generateText(params: {
     signal: params.signal,
     execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
+        const activeModel = ctx.overrideModel || model;
         const body = await callGeminiEndpoint<ProviderTextBody>({
           endpoint: '/api/ai/generate',
           apiKey: attempt.apiKey,
@@ -149,10 +156,14 @@ export async function generateText(params: {
             prompt: params.prompt,
             messages: params.messages,
             systemInstruction: params.systemInstruction,
-            model,
+            model: activeModel,
           },
         });
-        return { value: { text: body.text || '' }, model: normalizeModel(body.model, model) };
+        return {
+          value: { text: body.text || '' },
+          model: normalizeModel(body.model, activeModel),
+          switchedFromModel: body.switchedFromModel,
+        };
       }
 
       const body = await callProviderTask<ProviderTextBody>({
@@ -206,6 +217,7 @@ export async function generateStructuredJson<T>(params: {
     validate,
     execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
+        const activeModel = ctx.overrideModel || model;
         const body = await callGeminiEndpoint<ProviderJsonBody<T>>({
           endpoint: '/api/ai/generate-json',
           apiKey: attempt.apiKey,
@@ -216,10 +228,14 @@ export async function generateStructuredJson<T>(params: {
             prompt: params.prompt,
             systemInstruction: params.systemInstruction,
             responseSchema: params.responseSchema,
-            model,
+            model: activeModel,
           },
         });
-        return { value: (body.data ?? undefined) as T, model: normalizeModel(body.model, model) };
+        return {
+          value: (body.data ?? undefined) as T,
+          model: normalizeModel(body.model, activeModel),
+          switchedFromModel: body.switchedFromModel,
+        };
       }
 
       const body = await callProviderTask<ProviderJsonBody<T>>({
@@ -272,6 +288,7 @@ export async function extractVisionWithClient(params: {
     signal: params.signal,
     execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
+        const activeModel = ctx.overrideModel || model;
         const body = await callGeminiEndpoint<ProviderVisionBody>({
           endpoint: '/api/extract/vision',
           apiKey: attempt.apiKey,
@@ -283,10 +300,14 @@ export async function extractVisionWithClient(params: {
             mimeType: params.mimeType,
             mode: params.mode,
             pageNumber: params.pageNumber,
-            model,
+            model: activeModel,
           },
         });
-        return { value: body, model: normalizeModel(body.model, model) };
+        return {
+          value: body,
+          model: normalizeModel(body.model, activeModel),
+          switchedFromModel: body.switchedFromModel,
+        };
       }
 
       const body = await callProviderTask<ProviderVisionBody>({
@@ -335,6 +356,7 @@ export async function synthesizeSpeechWithClient(params: {
     signal: params.signal,
     execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
+        const activeModel = ctx.overrideModel || 'gemini-3.8-flash-lite-tts';
         const body = await callGeminiEndpoint<ProviderTtsBody>({
           endpoint: '/api/ai/tts',
           apiKey: attempt.apiKey,
@@ -345,9 +367,14 @@ export async function synthesizeSpeechWithClient(params: {
             text: params.text,
             voiceName: params.voiceName || 'Kore',
             style: params.style,
+            ...(ctx.overrideModel ? { model: ctx.overrideModel } : {}),
           },
         });
-        return { value: body, model: normalizeModel(body.model, 'gemini-3.8-flash-lite-tts') };
+        return {
+          value: body,
+          model: normalizeModel(body.model, activeModel),
+          switchedFromModel: body.switchedFromModel,
+        };
       }
 
       // Non-Gemini audio playback fallback (Groq Orpheus TTS)
@@ -397,6 +424,7 @@ export async function transcribeAudioWithClient(params: {
     signal: params.signal,
     execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
+        const activeModel = ctx.overrideModel || 'gemini-3.5-transcribe';
         const body = await callGeminiEndpoint<ProviderTranscribeBody>({
           endpoint: '/api/ai/transcribe',
           apiKey: attempt.apiKey,
@@ -407,11 +435,13 @@ export async function transcribeAudioWithClient(params: {
             audioBase64: params.audioBase64,
             mimeType: params.mimeType,
             courseContextHint: params.courseContextHint,
+            ...(ctx.overrideModel ? { model: ctx.overrideModel } : {}),
           },
         });
         return {
           value: { text: (body.text || '').trim() },
-          model: normalizeModel(body.model, 'gemini-3.5-transcribe'),
+          model: normalizeModel(body.model, activeModel),
+          switchedFromModel: body.switchedFromModel,
         };
       }
 
@@ -460,6 +490,7 @@ export async function generateStudyImageWithClient(params: {
     signal: params.signal,
     execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
+        const activeModel = ctx.overrideModel || 'gemini-3.1-flash-image';
         const body = await callGeminiEndpoint<ProviderImageBody>({
           endpoint: '/api/ai/generate-image',
           apiKey: attempt.apiKey,
@@ -470,11 +501,13 @@ export async function generateStudyImageWithClient(params: {
           payload: {
             prompt: params.prompt,
             aspectRatio,
+            ...(ctx.overrideModel ? { model: ctx.overrideModel } : {}),
           },
         });
         return {
           value: body,
-          model: normalizeModel(body.model, 'gemini-3.1-flash-image'),
+          model: normalizeModel(body.model, activeModel),
+          switchedFromModel: body.switchedFromModel,
         };
       }
 

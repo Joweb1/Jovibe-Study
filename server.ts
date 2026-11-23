@@ -19,6 +19,7 @@ import {
   checkSafetyBlock,
   classifyAiError,
   createGeminiClient,
+  executeGeminiWithModelFallback,
   extractFinishReason,
   IMAGE_MODEL,
   resolveApiKey,
@@ -156,11 +157,16 @@ export function createApiApp(): express.Express {
 
     if (trimmedByok) {
       try {
-        const model = resolveModelName(req.body?.model);
+        const requestedModel = resolveModelName(req.body?.model);
         const ai = createGeminiClient(trimmedByok);
-        const response = await ai.models.generateContent({
-          model,
-          contents: 'Reply with the single word OK.',
+        const { result: response, model, switchedFromModel } = await executeGeminiWithModelFallback({
+          primaryModel: requestedModel,
+          task: 'text',
+          run: (activeModel) =>
+            ai.models.generateContent({
+              model: activeModel,
+              contents: 'Reply with the single word OK.',
+            }),
         });
         checkSafetyBlock(response);
         const text = (response.text ?? '').trim();
@@ -168,6 +174,7 @@ export function createApiApp(): express.Express {
           ok: true,
           keySource: 'byok',
           model,
+          ...(switchedFromModel ? { switchedFromModel } : {}),
           latencyMs: Date.now() - startMs,
           sampleReply: text.slice(0, 40),
         });
@@ -189,17 +196,23 @@ export function createApiApp(): express.Express {
     // If testing without a personal key, still enforce shared-key eligibility & admin key pool
     try {
       const resolved = resolveApiKey(undefined, req.headers['x-sotal-byok-only']);
-      const model = resolveModelName(req.body?.model);
+      const requestedModel = resolveModelName(req.body?.model);
       const ai = createGeminiClient(resolved.apiKey);
-      const response = await ai.models.generateContent({
-        model,
-        contents: 'Reply with the single word OK.',
+      const { result: response, model, switchedFromModel } = await executeGeminiWithModelFallback({
+        primaryModel: requestedModel,
+        task: 'text',
+        run: (activeModel) =>
+          ai.models.generateContent({
+            model: activeModel,
+            contents: 'Reply with the single word OK.',
+          }),
       });
       checkSafetyBlock(response);
       res.json({
         ok: true,
         keySource: 'server_fallback',
         model,
+        ...(switchedFromModel ? { switchedFromModel } : {}),
         latencyMs: Date.now() - startMs,
         sampleReply: (response.text ?? '').trim().slice(0, 40),
       });
@@ -254,19 +267,26 @@ export function createApiApp(): express.Express {
       keyHeaderName: 'x-sotal-gemini-key',
       run: async (ctx) => {
         const ai = createGeminiClient(ctx.apiKey);
-        const response = await ai.models.generateContent({
-          model,
-          contents: contents as string,
-          config:
-            typeof systemInstruction === 'string' && systemInstruction.trim()
-              ? { systemInstruction: systemInstruction.trim() }
-              : undefined,
-        });
+        const { result: response, model: actualModel, switchedFromModel } =
+          await executeGeminiWithModelFallback({
+            primaryModel: model,
+            task: 'text',
+            run: (activeModel) =>
+              ai.models.generateContent({
+                model: activeModel,
+                contents: contents as string,
+                config:
+                  typeof systemInstruction === 'string' && systemInstruction.trim()
+                    ? { systemInstruction: systemInstruction.trim() }
+                    : undefined,
+              }),
+          });
         checkSafetyBlock(response);
         const text = (response.text ?? '').trim();
         return {
           payload: { text, finishReason: extractFinishReason(response) },
-          model,
+          model: actualModel,
+          switchedFromModel,
           tokens: extractGeminiTokenUsage(response),
         };
       },
@@ -276,6 +296,9 @@ export function createApiApp(): express.Express {
     res.json({
       text: executed.result.payload.text,
       model: executed.result.model,
+      ...(executed.result.switchedFromModel
+        ? { switchedFromModel: executed.result.switchedFromModel }
+        : {}),
       keySource: executed.keySource,
       finishReason: executed.result.payload.finishReason,
       quota: executed.quota,
@@ -316,11 +339,17 @@ export function createApiApp(): express.Express {
           config.responseSchema = responseSchema;
         }
 
-        const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config,
-        });
+        const { result: response, model: actualModel, switchedFromModel } =
+          await executeGeminiWithModelFallback({
+            primaryModel: model,
+            task: 'text',
+            run: (activeModel) =>
+              ai.models.generateContent({
+                model: activeModel,
+                contents: prompt,
+                config,
+              }),
+          });
 
         checkSafetyBlock(response);
         const rawText = (response.text ?? '').trim();
@@ -349,7 +378,8 @@ export function createApiApp(): express.Express {
 
         return {
           payload: { data, rawText, finishReason: extractFinishReason(response) },
-          model,
+          model: actualModel,
+          switchedFromModel,
           tokens: extractGeminiTokenUsage(response),
         };
       },
@@ -360,6 +390,9 @@ export function createApiApp(): express.Express {
       data: executed.result.payload.data,
       rawText: executed.result.payload.rawText,
       model: executed.result.model,
+      ...(executed.result.switchedFromModel
+        ? { switchedFromModel: executed.result.switchedFromModel }
+        : {}),
       keySource: executed.keySource,
       finishReason: executed.result.payload.finishReason,
       quota: executed.quota,
@@ -414,44 +447,50 @@ export function createApiApp(): express.Express {
       keyHeaderName: 'x-sotal-gemini-key',
       run: async (ctx) => {
         const ai = createGeminiClient(ctx.apiKey);
-        const response = await ai.models.generateContent({
-          model,
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: normalizedMime,
-                  data: imageBase64,
+        const { result: response, model: actualModel, switchedFromModel } =
+          await executeGeminiWithModelFallback({
+            primaryModel: model,
+            task: 'text',
+            run: (activeModel) =>
+              ai.models.generateContent({
+                model: activeModel,
+                contents: {
+                  parts: [
+                    {
+                      inlineData: {
+                        mimeType: normalizedMime,
+                        data: imageBase64,
+                      },
+                    },
+                    { text: prompt },
+                  ],
                 },
-              },
-              { text: prompt },
-            ],
-          },
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                sections: {
-                  type: Type.ARRAY,
-                  description: 'Ordered structured sections extracted from the image.',
-                  items: {
+                config: {
+                  responseMimeType: 'application/json',
+                  responseSchema: {
                     type: Type.OBJECT,
                     properties: {
-                      heading: { type: Type.STRING },
-                      level: { type: Type.INTEGER },
-                      content: { type: Type.STRING },
+                      sections: {
+                        type: Type.ARRAY,
+                        description: 'Ordered structured sections extracted from the image.',
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            heading: { type: Type.STRING },
+                            level: { type: Type.INTEGER },
+                            content: { type: Type.STRING },
+                          },
+                          required: ['heading', 'level', 'content'],
+                        },
+                      },
+                      uncertainCount: { type: Type.INTEGER },
+                      notes: { type: Type.STRING },
                     },
-                    required: ['heading', 'level', 'content'],
+                    required: ['sections', 'uncertainCount', 'notes'],
                   },
                 },
-                uncertainCount: { type: Type.INTEGER },
-                notes: { type: Type.STRING },
-              },
-              required: ['sections', 'uncertainCount', 'notes'],
-            },
-          },
-        });
+              }),
+          });
 
         checkSafetyBlock(response);
         const rawJson = (response.text ?? '').trim();
@@ -493,7 +532,8 @@ export function createApiApp(): express.Express {
             uncertainCount: typeof parsed.uncertainCount === 'number' ? parsed.uncertainCount : 0,
             notes: typeof parsed.notes === 'string' ? parsed.notes.trim() : '',
           },
-          model,
+          model: actualModel,
+          switchedFromModel,
           tokens: extractGeminiTokenUsage(response),
         };
       },
@@ -504,13 +544,16 @@ export function createApiApp(): express.Express {
       ...executed.result.payload,
       keySource: executed.keySource,
       model: executed.result.model,
+      ...(executed.result.switchedFromModel
+        ? { switchedFromModel: executed.result.switchedFromModel }
+        : {}),
       quota: executed.quota,
     });
   });
 
   // Gemini Text-to-Speech
   app.post('/api/ai/tts', requireAuth, async (req, res) => {
-    const { text, voiceName: requestedVoice, style } = req.body ?? {};
+    const { text, voiceName: requestedVoice, style, model: requestedModel } = req.body ?? {};
 
     if (typeof text !== 'string' || !text.trim()) {
       res.status(400).json({
@@ -525,6 +568,7 @@ export function createApiApp(): express.Express {
 
     const cleanText = text.trim().slice(0, 3500);
     const voiceName = resolveTtsVoice(requestedVoice);
+    const primaryTtsModel = resolveModelName(requestedModel, TTS_MODEL);
     const speechStyle =
       typeof style === 'string' && style.trim()
         ? style.trim().slice(0, 160)
@@ -538,28 +582,34 @@ export function createApiApp(): express.Express {
       keyHeaderName: 'x-sotal-gemini-key',
       run: async (ctx) => {
         const ai = createGeminiClient(ctx.apiKey, 'v1beta');
-        const response = await ai.models.generateContent({
-          model: TTS_MODEL,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: cleanText,
-                  speechMetadata: { style: speechStyle },
-                } as Record<string, unknown>,
-              ],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName },
-              },
-            },
-          },
-        });
+        const { result: response, model: actualModel, switchedFromModel } =
+          await executeGeminiWithModelFallback({
+            primaryModel: primaryTtsModel,
+            task: 'tts',
+            run: (activeModel) =>
+              ai.models.generateContent({
+                model: activeModel,
+                contents: [
+                  {
+                    role: 'user',
+                    parts: [
+                      {
+                        text: cleanText,
+                        speechMetadata: { style: speechStyle },
+                      } as Record<string, unknown>,
+                    ],
+                  },
+                ],
+                config: {
+                  responseModalities: ['AUDIO'],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: { voiceName },
+                    },
+                  },
+                },
+              }),
+          });
 
         checkSafetyBlock(response);
         const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
@@ -578,7 +628,8 @@ export function createApiApp(): express.Express {
 
         return {
           payload: { audioBase64, mimeType, voiceName },
-          model: TTS_MODEL,
+          model: actualModel,
+          switchedFromModel,
           tokens: extractGeminiTokenUsage(response),
         };
       },
@@ -588,6 +639,9 @@ export function createApiApp(): express.Express {
     res.json({
       ...executed.result.payload,
       model: executed.result.model,
+      ...(executed.result.switchedFromModel
+        ? { switchedFromModel: executed.result.switchedFromModel }
+        : {}),
       keySource: executed.keySource,
       quota: executed.quota,
     });
@@ -596,6 +650,7 @@ export function createApiApp(): express.Express {
   // Gemini Concept Infographic / Illustrative Image Generation
   app.post('/api/ai/generate-image', requireAuth, async (req, res) => {
     const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    const primaryImageModel = resolveModelName(req.body?.model, IMAGE_MODEL);
 
     if (!prompt) {
       res.status(400).json({
@@ -616,11 +671,17 @@ export function createApiApp(): express.Express {
       keyHeaderName: 'x-sotal-gemini-key',
       run: async (ctx) => {
         const ai = createGeminiClient(ctx.apiKey, 'v1beta');
-        const response = await ai.models.generateContent({
-          model: IMAGE_MODEL,
-          contents: prompt.slice(0, 1600),
-          config: { responseModalities: ['IMAGE'] },
-        });
+        const { result: response, model: actualModel, switchedFromModel } =
+          await executeGeminiWithModelFallback({
+            primaryModel: primaryImageModel,
+            task: 'image',
+            run: (activeModel) =>
+              ai.models.generateContent({
+                model: activeModel,
+                contents: prompt.slice(0, 1600),
+                config: { responseModalities: ['IMAGE'] },
+              }),
+          });
 
         checkSafetyBlock(response);
         const parts = response.candidates?.[0]?.content?.parts ?? [];
@@ -642,7 +703,8 @@ export function createApiApp(): express.Express {
 
         return {
           payload: { imageBase64, mimeType },
-          model: IMAGE_MODEL,
+          model: actualModel,
+          switchedFromModel,
           tokens: extractGeminiTokenUsage(response),
         };
       },
@@ -652,6 +714,9 @@ export function createApiApp(): express.Express {
     res.json({
       ...executed.result.payload,
       model: executed.result.model,
+      ...(executed.result.switchedFromModel
+        ? { switchedFromModel: executed.result.switchedFromModel }
+        : {}),
       keySource: executed.keySource,
       quota: executed.quota,
     });
@@ -659,7 +724,8 @@ export function createApiApp(): express.Express {
 
   // Gemini Voice Note Transcription
   app.post('/api/ai/transcribe', requireAuth, async (req, res) => {
-    const { audioBase64, mimeType, courseContextHint } = req.body ?? {};
+    const { audioBase64, mimeType, courseContextHint, model: requestedModel } = req.body ?? {};
+    const primaryTranscribeModel = resolveModelName(requestedModel, TRANSCRIBE_MODEL);
 
     if (typeof audioBase64 !== 'string' || audioBase64.length < 40) {
       res.status(400).json({
@@ -699,26 +765,33 @@ export function createApiApp(): express.Express {
       keyHeaderName: 'x-sotal-gemini-key',
       run: async (ctx) => {
         const ai = createGeminiClient(ctx.apiKey, 'v1beta');
-        const response = await ai.models.generateContent({
-          model: TRANSCRIBE_MODEL,
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: normalizedMime,
-                  data: audioBase64,
+        const { result: response, model: actualModel, switchedFromModel } =
+          await executeGeminiWithModelFallback({
+            primaryModel: primaryTranscribeModel,
+            task: 'transcribe',
+            run: (activeModel) =>
+              ai.models.generateContent({
+                model: activeModel,
+                contents: {
+                  parts: [
+                    {
+                      inlineData: {
+                        mimeType: normalizedMime,
+                        data: audioBase64,
+                      },
+                    },
+                    {
+                      text: `Transcribe this student voice note accurately into clean text with proper punctuation. Return only the transcription text without commentary.${hint}`,
+                    },
+                  ],
                 },
-              },
-              {
-                text: `Transcribe this student voice note accurately into clean text with proper punctuation. Return only the transcription text without commentary.${hint}`,
-              },
-            ],
-          },
-        });
+              }),
+          });
         checkSafetyBlock(response);
         return {
           payload: { text: (response.text ?? '').trim() },
-          model: TRANSCRIBE_MODEL,
+          model: actualModel,
+          switchedFromModel,
           tokens: extractGeminiTokenUsage(response),
         };
       },
@@ -728,6 +801,9 @@ export function createApiApp(): express.Express {
     res.json({
       text: executed.result.payload.text,
       model: executed.result.model,
+      ...(executed.result.switchedFromModel
+        ? { switchedFromModel: executed.result.switchedFromModel }
+        : {}),
       keySource: executed.keySource,
       quota: executed.quota,
     });
@@ -1238,7 +1314,7 @@ export class ErrorOverlay extends HTMLElement {}
   attachLiveWebSocketServer(httpServer);
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`SOTAL Study server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Jovibe Study server listening on http://0.0.0.0:${PORT}`);
   });
 }
 

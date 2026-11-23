@@ -252,7 +252,7 @@ export const ApiKeyLimitModal: React.FC = () => {
                     : limitEvent.reason === 'shared_quota_exhausted'
                     ? limitEvent.message ||
                       'You have used all of your shared AI requests for today (resets at 12:00 AM WAT / Africa/Lagos). Add your own free API key in Settings to continue right away.'
-                    : 'Add another Gemini API key from a different Google account, or grab a free fallback key from any provider below so SOTAL rotates automatically.'}
+                    : 'Add another Gemini API key from a different Google account, or grab a free fallback key from any provider below so Jovibe rotates automatically.'}
                 </p>
                 {limitEvent.reason === 'shared_quota_exhausted' && limitEvent.quota && (
                   <div className="mt-2 inline-flex flex-wrap items-center justify-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-xs text-amber-900 dark:text-amber-200 font-mono tabular-nums">
@@ -320,7 +320,7 @@ export const ApiKeyLimitModal: React.FC = () => {
                   ? 'Shared keys are disabled once your 7-day free access ends. Your personal keys are stored locally on your device.'
                   : limitEvent.reason === 'shared_quota_exhausted'
                   ? 'Personal API keys bypass shared daily limits and stay stored privately on your device.'
-                  : 'Personal key mode is active — SOTAL will not switch back to the app’s default key once you add your own.'}
+                  : 'Personal key mode is active — Jovibe will not switch back to the app’s default key once you add your own.'}
               </p>
             </div>
 

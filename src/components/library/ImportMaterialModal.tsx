@@ -841,7 +841,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                 />
               </div>
               <p className="mx-auto max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-                Your file is temporarily cached locally while extraction runs in the background. You can hide this popup and continue using SOTAL Study — live progress will show in your Library and automatically save when finished.
+                Your file is temporarily cached locally while extraction runs in the background. You can hide this popup and continue using Jovibe Study — live progress will show in your Library and automatically save when finished.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
                 <Button size="sm" onClick={handleHideToBackground}>

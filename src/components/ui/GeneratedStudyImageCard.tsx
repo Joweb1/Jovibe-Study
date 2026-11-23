@@ -48,14 +48,14 @@ export const GeneratedStudyImageCard: React.FC<GeneratedStudyImageCardProps> = (
 
   const handleDownload = () => {
     if (!imageUrl) return;
-    const slug = (caption || 'sotal-concept-visual')
+    const slug = (caption || 'jovibe-concept-visual')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 48);
     const a = document.createElement('a');
     a.href = imageUrl;
-    a.download = `${slug || 'sotal-concept-visual'}.jpg`;
+    a.download = `${slug || 'jovibe-concept-visual'}.jpg`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

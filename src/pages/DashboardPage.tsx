@@ -34,7 +34,7 @@ const ACTIVITY_META: Record<
   exam_prep: { label: 'Oral Exam Prep', icon: Mic },
   automatic_study: { label: 'Automatic Study', icon: GraduationCap },
   tutor: { label: 'AI Tutor', icon: MessageSquare },
-  live: { label: 'SOTAL Live', icon: AudioLines },
+  live: { label: 'Jovibe Live', icon: AudioLines },
   shared_library: { label: 'Shared Library', icon: Users },
 };
 

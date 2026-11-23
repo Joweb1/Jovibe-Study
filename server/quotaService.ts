@@ -606,7 +606,7 @@ export function reserveAiExecution(params: ReserveAiExecutionParams): ReservedAi
         message:
           override === 'force_block'
             ? 'Shared AI access is disabled for your account. Add your own free API key in Settings to continue using AI features.'
-            : 'Your 7-day free AI access has expired. Add your own free API key in Settings to continue using SOTAL Study AI features.',
+            : 'Your 7-day free AI access has expired. Add your own free API key in Settings to continue using Jovibe Study AI features.',
         retryable: false,
         meta: {
           expiresAtMs,

@@ -114,7 +114,7 @@ export const SettingsPage: React.FC = () => {
     setError(null);
     await geminiAudioPlayer.playMessage({
       id: previewId,
-      text: `Hello, I am ${prefs.ttsVoice}. I will read your SOTAL Study tutor explanations and course summaries clearly at your preferred pace.`,
+      text: `Hello, I am ${prefs.ttsVoice}. I will read your Jovibe Study tutor explanations and course summaries clearly at your preferred pace.`,
       voiceName: prefs.ttsVoice,
       playbackRate: prefs.voiceRate,
     });

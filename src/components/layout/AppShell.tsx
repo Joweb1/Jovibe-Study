@@ -177,7 +177,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               className="inline-flex items-center gap-2 font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 whitespace-nowrap shrink-0 cursor-pointer"
             >
               <SotalLogo size="md" />
-              <span>SOTAL Study</span>
+              <span>Jovibe Study</span>
             </button>
 
             {/* Zone 2: Primary Desktop Navigation */}
@@ -457,7 +457,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             <div className="flex min-w-0 items-center gap-2">
               <KeyRound className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-400" />
               <span className="truncate">
-                Gemini API key not set up yet — add your free key to power SOTAL AI features.
+                Gemini API key not set up yet — add your free key to power Jovibe AI features.
               </span>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -542,7 +542,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 </span>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-950 dark:text-zinc-100">
-                    <span>SOTAL Live</span>
+                    <span>Jovibe Live</span>
                     <span aria-hidden="true" className="text-zinc-400">
                       ·
                     </span>
@@ -558,7 +558,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               <button
                 type="button"
                 onClick={() => setMinimizedLiveSession(null)}
-                aria-label="End minimized SOTAL Live session"
+                aria-label="End minimized Jovibe Live session"
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 transition-colors cursor-pointer"
               >
                 <X className="h-4 w-4" />

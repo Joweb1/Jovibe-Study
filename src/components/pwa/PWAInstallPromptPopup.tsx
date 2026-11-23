@@ -125,7 +125,7 @@ export const PWAInstallPromptPopup: React.FC = () => {
         <motion.aside
           key="pwa-install-occasional-popup"
           role="region"
-          aria-label="Install SOTAL Study app"
+          aria-label="Install Jovibe Study app"
           initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 20, scale: 0.96 }}
           animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
           exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.96 }}
@@ -154,10 +154,10 @@ export const PWAInstallPromptPopup: React.FC = () => {
               </div>
               <div className="min-w-0 space-y-1">
                 <h2 className="font-display text-sm font-semibold tracking-tight text-zinc-950 dark:text-zinc-100">
-                  Install SOTAL Study
+                  Install Jovibe Study
                 </h2>
                 <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
-                  Add SOTAL Study to your device for full-screen focus, faster launch, and offline study with your cached library and chat history.
+                  Add Jovibe Study to your device for full-screen focus, faster launch, and offline study with your cached library and chat history.
                 </p>
               </div>
             </div>

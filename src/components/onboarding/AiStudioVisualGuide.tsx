@@ -10,12 +10,12 @@ import { ArrowRight, Check, Copy, ExternalLink, KeyRound, Plus } from 'lucide-re
 export const AiStudioVisualGuide: React.FC = () => {
   return (
     <figure
-      aria-label="Visual walkthrough showing how to create and copy a Gemini API key in Google AI Studio and paste it into SOTAL Settings"
+      aria-label="Visual walkthrough showing how to create and copy a Gemini API key in Google AI Studio and paste it into Jovibe Settings"
       className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 p-3.5 sm:p-4"
     >
       <div className="flex items-center justify-between gap-2 pb-2.5 mb-3 border-b border-zinc-200/80 dark:border-zinc-800">
         <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-          Visual guide · Google AI Studio → SOTAL
+          Visual guide · Google AI Studio → Jovibe
         </span>
         <span className="font-mono text-[10px] text-zinc-500 dark:text-zinc-500">
           aistudio.google.com/app/apikey
@@ -73,15 +73,15 @@ export const AiStudioVisualGuide: React.FC = () => {
           </p>
         </div>
 
-        {/* Stage 3: Paste & Save in SOTAL */}
+        {/* Stage 3: Paste & Save in Jovibe */}
         <div className="flex flex-col justify-between rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3">
           <div>
             <div className="flex items-center justify-between gap-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-              <span>3. Save in SOTAL</span>
+              <span>3. Save in Jovibe</span>
               <KeyRound className="h-3 w-3 shrink-0" />
             </div>
             <div className="mt-2.5 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-2 space-y-2">
-              <div className="text-[10px] text-zinc-500 dark:text-zinc-400">SOTAL Settings</div>
+              <div className="text-[10px] text-zinc-500 dark:text-zinc-400">Jovibe Settings</div>
               <div className="flex items-center gap-1">
                 <span className="flex-1 truncate rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-1.5 py-1 font-mono text-[10px] text-zinc-700 dark:text-zinc-300">
                   ••••••••••••
@@ -102,7 +102,7 @@ export const AiStudioVisualGuide: React.FC = () => {
       <figcaption className="mt-2.5 flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
         <ArrowRight className="h-3 w-3 shrink-0 text-zinc-400 dark:text-zinc-500" />
         <span>
-          Your progress stays saved automatically even if you leave SOTAL or reload while creating your key.
+          Your progress stays saved automatically even if you leave Jovibe or reload while creating your key.
         </span>
       </figcaption>
     </figure>

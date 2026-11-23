@@ -71,8 +71,8 @@ const WorkspaceRouter: React.FC = () => {
         </h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           {platformStatus.accountStatus === 'suspended'
-            ? 'Your SOTAL Study account has been suspended by an administrator. Please contact support if you believe this is an error.'
-            : 'This SOTAL Study account is no longer active.'}
+            ? 'Your Jovibe Study account has been suspended by an administrator. Please contact support if you believe this is an error.'
+            : 'This Jovibe Study account is no longer active.'}
         </p>
         <button
           type="button"
@@ -158,7 +158,7 @@ const AuthenticatedApp: React.FC = () => {
               aria-hidden="true"
               className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-950 dark:border-zinc-200 border-t-transparent"
             />
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading SOTAL Study...</p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading Jovibe Study...</p>
           </div>
         </div>
       </div>

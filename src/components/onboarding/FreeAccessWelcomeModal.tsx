@@ -72,7 +72,7 @@ export const FreeAccessWelcomeModal: React.FC = () => {
               Welcome! You have {status.freeAccess.daysTotal} Days of Free AI Access
             </h2>
             <p className="mt-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
-              Start studying right away with AI Tutor, Automatic Study, Practice CBT, Flashcards, and SOTAL Live using our shared AI keys.
+              Start studying right away with AI Tutor, Automatic Study, Practice CBT, Flashcards, and Jovibe Live using our shared AI keys.
             </p>
           </div>
 

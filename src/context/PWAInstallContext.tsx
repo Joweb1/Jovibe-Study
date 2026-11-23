@@ -299,12 +299,12 @@ const PWAInstallGuideModal: React.FC<PWAInstallGuideModalProps> = ({
 }) => {
   const title =
     platform === 'ios'
-      ? 'Install SOTAL Study on iPhone or iPad'
+      ? 'Install Jovibe Study on iPhone or iPad'
       : platform === 'android'
-      ? 'Install SOTAL Study on Android'
+      ? 'Install Jovibe Study on Android'
       : platform === 'desktop_safari'
-      ? 'Install SOTAL Study on Mac'
-      : 'Install SOTAL Study on your device';
+      ? 'Install Jovibe Study on Mac'
+      : 'Install Jovibe Study on your device';
 
   return (
     <Modal
@@ -318,7 +318,7 @@ const PWAInstallGuideModal: React.FC<PWAInstallGuideModalProps> = ({
           <SotalLogo size="md" />
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
-              SOTAL Study
+              Jovibe Study
             </div>
             <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
               <WifiOff className="h-3 w-3 shrink-0" />
@@ -330,11 +330,11 @@ const PWAInstallGuideModal: React.FC<PWAInstallGuideModalProps> = ({
         {hasNativePrompt ? (
           <div className="space-y-3">
             <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
-              Your browser supports direct installation. Tap the button below to add SOTAL Study right to your device.
+              Your browser supports direct installation. Tap the button below to add Jovibe Study right to your device.
             </p>
             <Button size="md" className="w-full" onClick={onTriggerNativeInstall}>
               <Download className="h-4 w-4" />
-              Install SOTAL Study now
+              Install Jovibe Study now
             </Button>
           </div>
         ) : platform === 'ios' ? (
@@ -379,7 +379,7 @@ const PWAInstallGuideModal: React.FC<PWAInstallGuideModalProps> = ({
               Select <span className="font-medium text-zinc-950 dark:text-zinc-100">Add to Dock</span>.
             </li>
             <li>
-              Click <span className="font-medium text-zinc-950 dark:text-zinc-100">Add</span> to launch SOTAL Study as a desktop app.
+              Click <span className="font-medium text-zinc-950 dark:text-zinc-100">Add</span> to launch Jovibe Study as a desktop app.
             </li>
           </ol>
         ) : (
@@ -391,7 +391,7 @@ const PWAInstallGuideModal: React.FC<PWAInstallGuideModalProps> = ({
             </li>
             <li>
               Or open your browser menu and select{' '}
-              <span className="font-medium text-zinc-950 dark:text-zinc-100">Install SOTAL Study</span> /{' '}
+              <span className="font-medium text-zinc-950 dark:text-zinc-100">Install Jovibe Study</span> /{' '}
               <span className="font-medium text-zinc-950 dark:text-zinc-100">Save and share → Install page as app</span>.
             </li>
             <li>

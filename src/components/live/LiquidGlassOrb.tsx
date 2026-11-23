@@ -949,7 +949,7 @@ ${SIMPLEX_3D_GLSL}
       <button
         type="button"
         onClick={onOrbTap}
-        aria-label="SOTAL Live companion orb"
+        aria-label="Jovibe Live companion orb"
         className={`relative flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-4 cursor-pointer ${className}`}
       >
         <div
@@ -973,8 +973,8 @@ ${SIMPLEX_3D_GLSL}
       tabIndex={onOrbTap ? 0 : undefined}
       aria-label={
         voiceState === 'speaking'
-          ? 'SOTAL Live orb — tap to interrupt and speak'
-          : 'SOTAL Live companion orb'
+          ? 'Jovibe Live orb — tap to interrupt and speak'
+          : 'Jovibe Live companion orb'
       }
       onKeyDown={(e) => {
         if (onOrbTap && (e.key === 'Enter' || e.key === ' ')) {

@@ -163,7 +163,7 @@ const PRACTICE_PREVIEW_CARDS = [
     id: 'oral' as const,
     title: 'Oral Exam Prep',
     detail:
-      'Speak or type your explanation while SOTAL evaluates reasoning, spots gaps, and follows up like an examiner.',
+      'Speak or type your explanation while Jovibe evaluates reasoning, spots gaps, and follows up like an examiner.',
     icon: Mic,
     accentClass: 'text-violet-600 dark:text-violet-400',
   },
@@ -221,14 +221,14 @@ export const FeatureShowcaseSections: React.FC<FeatureShowcaseSectionsProps> = (
             </div>
             <div className="lg:col-span-5">
               <p className="text-sm sm:text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
-                Upload lecture slides, PDFs, handwritten notes, or voice recordings once. SOTAL connects them across your AI Tutor, SOTAL Live voice sessions, structured practice, and daily progress tracking.
+                Upload lecture slides, PDFs, handwritten notes, or voice recordings once. Jovibe connects them across your AI Tutor, Jovibe Live voice sessions, structured practice, and daily progress tracking.
               </p>
             </div>
           </div>
         </motion.div>
       </section>
 
-      {/* ── Section 1: AI Tutor & SOTAL Live Voice (Blue + Cyan Accents) ─────── */}
+      {/* ── Section 1: AI Tutor & Jovibe Live Voice (Blue + Cyan Accents) ─────── */}
       <section
         id="tutor"
         className="mx-auto max-w-[1120px] scroll-mt-24 px-5 sm:px-6 pb-24 sm:pb-32"
@@ -243,13 +243,13 @@ export const FeatureShowcaseSections: React.FC<FeatureShowcaseSectionsProps> = (
             className="lg:col-span-5 space-y-5"
           >
             <div className="flex items-center gap-2.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-              <span>02. AI Tutor & SOTAL Live</span>
+              <span>02. AI Tutor & Jovibe Live</span>
             </div>
             <h2 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-100 leading-[1.18]">
               Ask deep questions in chat, or talk through tough concepts aloud.
             </h2>
             <p className="text-sm sm:text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
-              Your AI Tutor answers with clear traceability back to your uploaded course materials. Switch between Library Only, Library First, or General modes, listen to cached voice replies, or enter SOTAL Live for natural, interruptible voice conversations.
+              Your AI Tutor answers with clear traceability back to your uploaded course materials. Switch between Library Only, Library First, or General modes, listen to cached voice replies, or enter Jovibe Live for natural, interruptible voice conversations.
             </p>
             <div className="space-y-3 border-t border-zinc-200 dark:border-zinc-800 pt-5 text-sm text-zinc-700 dark:text-zinc-300">
               <div className="flex items-start gap-3">
@@ -258,7 +258,7 @@ export const FeatureShowcaseSections: React.FC<FeatureShowcaseSectionsProps> = (
               </div>
               <div className="flex items-start gap-3">
                 <AudioLines className="mt-0.5 h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-400" />
-                <span>Real-time SOTAL Live voice companion that adapts to your pace and topic.</span>
+                <span>Real-time Jovibe Live voice companion that adapts to your pace and topic.</span>
               </div>
             </div>
           </motion.div>
@@ -402,7 +402,7 @@ export const FeatureShowcaseSections: React.FC<FeatureShowcaseSectionsProps> = (
                 Automatic Study with saved checkpoints.
               </h3>
               <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-                Step through your course topic by topic. SOTAL teaches each unit, checks your understanding with adaptive questions, and saves your exact progress so you can close the tab and resume seamlessly later.
+                Step through your course topic by topic. Jovibe teaches each unit, checks your understanding with adaptive questions, and saves your exact progress so you can close the tab and resume seamlessly later.
               </p>
             </div>
 

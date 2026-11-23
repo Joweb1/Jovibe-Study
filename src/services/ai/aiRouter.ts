@@ -45,6 +45,7 @@ export interface RouteAttempt {
 export interface AiExecuteResult<T> {
   value: T;
   model: string;
+  switchedFromModel?: string;
 }
 
 export interface RunAiTaskParams<T> {
@@ -56,10 +57,43 @@ export interface RunAiTaskParams<T> {
   signal?: AbortSignal;
   /** Optional post-processing gate (e.g. structured-output schema validation). */
   validate?: (value: T) => T;
-  execute: (attempt: RouteAttempt, context: { requestId: string; feature?: string }) => Promise<AiExecuteResult<T>>;
+  execute: (
+    attempt: RouteAttempt,
+    context: { requestId: string; feature?: string; overrideModel?: string }
+  ) => Promise<AiExecuteResult<T>>;
 }
 
 let aiOperationSequence = 0;
+
+function getLowerGeminiModelForTask(task: AiTask, currentModel?: string): string | null {
+  const normalized = (currentModel || '').trim().toLowerCase();
+
+  if (task === 'image_generation') {
+    return normalized === 'gemini-3.1-flash-lite-image' ? null : 'gemini-3.1-flash-lite-image';
+  }
+  if (task === 'tts') {
+    return normalized === 'gemini-3.8-flash-lite-tts' ? null : 'gemini-3.8-flash-lite-tts';
+  }
+  if (task === 'transcription') {
+    return normalized === 'gemini-3.1-flash-lite' ? null : 'gemini-3.1-flash-lite';
+  }
+
+  // chat, structured_json, vision
+  if (normalized === 'gemini-3.1-flash-lite') return null;
+  if (normalized === 'gemini-4-carbon') return 'gemini-4-neon';
+  if (normalized === 'gemini-4-neon' || normalized === 'gemini-4-argon') {
+    return 'gemini-4-hydrogen';
+  }
+  return 'gemini-3.1-flash-lite';
+}
+
+function isHighTraffic503Error(error: AiServiceError): boolean {
+  if (error.status === 503 || Boolean(error.meta?.highTraffic503)) return true;
+  return (
+    error.code === 'SERVER_ERROR' &&
+    /503|unavailable|overloaded|high demand|high traffic/i.test(error.message)
+  );
+}
 
 function formatSwitchReason(code: AiServiceError['code']): string {
   switch (code) {
@@ -70,6 +104,8 @@ function formatSwitchReason(code: AiServiceError['code']): string {
       return 'Key rejected — switching';
     case 'MODEL_UNAVAILABLE':
       return 'Model unavailable — switching';
+    case 'SERVER_ERROR':
+      return 'High traffic — switching fallback';
     case 'TIMEOUT':
       return 'Timed out — switching';
     default:
@@ -286,13 +322,17 @@ export async function runAiTask<T>(
       });
 
       let transientAttempts = 0;
+      let modelDowngradeAttempts = 0;
+      let activeOverrideModel: string | undefined;
 
-      // Key-level loop: one candidate may be retried for transient failures.
+      // Key-level loop: on Gemini 503 high traffic, downgrade to a lower Gemini model
+      // on the SAME key first, and finish any transient retries before rotating keys/providers.
       for (;;) {
         try {
           const result = await params.execute(attempt, {
             requestId: opId,
             feature: params.feature,
+            overrideModel: activeOverrideModel,
           });
           const value = params.validate ? params.validate(result.value) : result.value;
 
@@ -309,7 +349,8 @@ export async function runAiTask<T>(
             model: result.model,
             keyLabel: attempt.label,
             keySource: attempt.kind,
-            isFallback: isFallbackAttempt,
+            isFallback:
+              isFallbackAttempt || Boolean(activeOverrideModel) || Boolean(result.switchedFromModel),
           });
 
           return {
@@ -367,17 +408,6 @@ export async function runAiTask<T>(
           const isProviderLevelFailure =
             error.code === 'VALIDATION_ERROR' || error.code === 'MODEL_UNAVAILABLE';
 
-          if (attempt.keyId && !isProviderLevelFailure) {
-            recordApiKeyFailure(
-              attempt.keyId,
-              error.code,
-              error.message,
-              error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED'
-                ? error.cooldownMs || 60_000
-                : error.cooldownMs
-            );
-          }
-
           if (
             attempt.kind === 'byok' &&
             (error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED')
@@ -400,7 +430,7 @@ export async function runAiTask<T>(
               id: opId,
               task: params.task,
               provider: attempt.provider,
-              model: modelHint,
+              model: activeOverrideModel || modelHint,
               keyLabel: attempt.label,
               keySource: attempt.kind,
               isFallback: true,
@@ -416,7 +446,47 @@ export async function runAiTask<T>(
               !skippedProviders.has(candidate.provider) &&
               (candidate.provider !== attempt.provider || candidate.keyId !== attempt.keyId)
           );
+
+          const serverAlreadyDowngradedModel = Boolean(error.meta?.modelFallbackAttempted);
+
+          // Step 1 on Gemini 503 high traffic (when server hasn't already downgraded):
+          // Switch to a lower Gemini model and retry on the SAME key BEFORE rotating keys or providers.
+          if (
+            attempt.provider === 'gemini' &&
+            (isHighTraffic503Error(error) || error.code === 'TIMEOUT') &&
+            !serverAlreadyDowngradedModel &&
+            modelDowngradeAttempts < 2
+          ) {
+            const currentModel = activeOverrideModel || params.requestedModel || modelHint;
+            const lowerModel = getLowerGeminiModelForTask(params.task, currentModel);
+            if (lowerModel) {
+              activeOverrideModel = lowerModel;
+              modelDowngradeAttempts += 1;
+              startAiActivity({
+                id: opId,
+                task: params.task,
+                provider: attempt.provider,
+                model: lowerModel,
+                keyLabel: attempt.label,
+                keySource: attempt.kind,
+                isFallback: true,
+                status: 'switching',
+                note: 'High traffic (503) — retrying lighter model',
+              });
+              await sleep(300);
+              continue;
+            }
+          }
+
+          // If server already tried primary + lower Gemini model(s) on this key and another key/provider
+          // is available, rotate immediately instead of repeating the same exhausted key.
+          const skipRedundantClientRetry =
+            attempt.provider === 'gemini' &&
+            serverAlreadyDowngradedModel &&
+            hasAnotherCandidateInPlan;
+
           const shouldRetryTransient =
+            !skipRedundantClientRetry &&
             TRANSIENT_CODES.has(error.code) &&
             transientAttempts < MAX_TRANSIENT_ATTEMPTS &&
             !(error.code === 'TIMEOUT' && hasAnotherCandidateInPlan);
@@ -427,7 +497,17 @@ export async function runAiTask<T>(
             continue;
           }
 
-          if (attempt.kind === 'server_fallback') {
+          // Only mark key/provider as failed once same-key retries & model downgrades are exhausted.
+          if (attempt.keyId) {
+            recordApiKeyFailure(
+              attempt.keyId,
+              error.code,
+              error.message,
+              error.code === 'RATE_LIMIT' || error.code === 'QUOTA_EXHAUSTED'
+                ? error.cooldownMs || 60_000
+                : error.cooldownMs
+            );
+          } else if (attempt.kind === 'server_fallback') {
             recordServerFallbackFailure(attempt.provider, error);
           }
 
@@ -435,7 +515,7 @@ export async function runAiTask<T>(
             id: opId,
             task: params.task,
             provider: attempt.provider,
-            model: modelHint,
+            model: activeOverrideModel || modelHint,
             keyLabel: attempt.label,
             keySource: attempt.kind,
             isFallback: true,
@@ -443,7 +523,7 @@ export async function runAiTask<T>(
             note: formatSwitchReason(error.code),
           });
 
-          // Invalid key, rate limit, quota, or transient retries exhausted →
+          // Invalid key, rate limit, quota, or same-key model/transient retries exhausted →
           // move to the next key/provider.
           break;
         }

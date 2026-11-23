@@ -89,7 +89,7 @@ export const HeroOrbStage: React.FC<HeroOrbStageProps> = ({
   return (
     <section
       ref={heroSectionRef}
-      aria-label="SOTAL Tutor introduction"
+      aria-label="Jovibe Tutor introduction"
       className="relative z-10 flex min-h-[100dvh] w-full flex-col items-center justify-center px-5 sm:px-6 pt-20 pb-14"
     >
       <div className="mx-auto flex w-full max-w-[980px] flex-col items-center text-center">
@@ -106,7 +106,7 @@ export const HeroOrbStage: React.FC<HeroOrbStageProps> = ({
           />
         </motion.div>
 
-        {/* Hero Typography — SOTAL Tutor */}
+        {/* Hero Typography — Jovibe Tutor */}
         <motion.div
           initial={reducedMotion ? false : { opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
@@ -114,7 +114,7 @@ export const HeroOrbStage: React.FC<HeroOrbStageProps> = ({
           className="mt-4 sm:mt-6 max-w-2xl"
         >
           <h1 className="font-display text-4xl sm:text-5xl lg:text-[3.75rem] font-semibold tracking-[-0.03em] text-zinc-950 dark:text-zinc-50 leading-[1.06]">
-            SOTAL Tutor
+            Jovibe Tutor
           </h1>
           <p className="mx-auto mt-3.5 sm:mt-4 max-w-lg text-sm sm:text-base lg:text-[1.0625rem] leading-relaxed text-zinc-600 dark:text-zinc-400">
             Your personal academic workspace. Learn, practice, explore, and grow with AI — grounded in your own courses and notes.

@@ -191,7 +191,7 @@ export async function deliverStudyUnitLesson(params: {
   });
 
   const prompt = [
-    `You are SOTAL Study's adaptive personal lecturer for "${params.course.code} — ${params.course.name}" (${params.difficulty} level).`,
+    `You are Jovibe Study's adaptive personal lecturer for "${params.course.code} — ${params.course.name}" (${params.difficulty} level).`,
     `Teach Unit ${params.unit.index + 1}: "${params.unit.title}".`,
     `Core concept: ${params.unit.concept}`,
     `Learning objective: ${params.unit.objective}`,
@@ -304,7 +304,7 @@ export async function evaluateStudyUnitAnswer(params: {
   model: string;
 }): Promise<AdaptiveEvaluationPayload> {
   const prompt = [
-    `You are SOTAL Study's adaptive lecturer evaluating a student's comprehension check for "${params.course.code} — ${params.course.name}" (${params.difficulty} level).`,
+    `You are Jovibe Study's adaptive lecturer evaluating a student's comprehension check for "${params.course.code} — ${params.course.name}" (${params.difficulty} level).`,
     `Current unit: "${params.unit.title}" — ${params.unit.objective}`,
     `Attempt #${params.attemptNumberOnUnit} on this unit.`,
     `Question asked: ${params.questionAsked}`,

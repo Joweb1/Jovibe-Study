@@ -164,7 +164,7 @@ export const SotalLivePage: React.FC = () => {
     text: string;
   }>({
     speaker: 'system',
-    text: 'Opening your SOTAL Live space...',
+    text: 'Opening your Jovibe Live space...',
   });
 
   const [statusDetail, setStatusDetail] = useState<string | null>(null);
@@ -229,11 +229,11 @@ export const SotalLivePage: React.FC = () => {
         setStatusDetail('Offline');
         setNetworkStatus({ quality: 'offline', rttMs: null });
         setErrorMessage(
-          'SOTAL Live needs an internet connection for real-time voice conversations. Turn on your internet to reconnect, or study your cached notes and chat history in Library and Tutor.'
+          'Jovibe Live needs an internet connection for real-time voice conversations. Turn on your internet to reconnect, or study your cached notes and chat history in Library and Tutor.'
         );
         setSubtitle({
           speaker: 'system',
-          text: 'You are currently offline. Turn on your internet connection to start SOTAL Live.',
+          text: 'You are currently offline. Turn on your internet connection to start Jovibe Live.',
         });
         return;
       }
@@ -242,7 +242,7 @@ export const SotalLivePage: React.FC = () => {
       setStatusDetail('Connecting...');
       setSubtitle({
         speaker: 'system',
-        text: `Joining SOTAL Live for "${targetLesson.lessonTitle}"...`,
+        text: `Joining Jovibe Live for "${targetLesson.lessonTitle}"...`,
       });
 
       const sessionQualificationKey = `${targetLesson.courseCode}:${targetLesson.sourceId || targetLesson.lessonTitle}`;
@@ -622,7 +622,7 @@ export const SotalLivePage: React.FC = () => {
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex items-baseline gap-1.5 shrink-0 select-none">
               <span className="font-display text-[15px] font-semibold tracking-tight text-zinc-950 dark:text-zinc-100">
-                SOTAL
+                Jovibe
               </span>
               <span className="font-display text-[15px] font-normal tracking-tight text-sky-600 dark:text-cyan-300/90">
                 Live
@@ -741,7 +741,7 @@ export const SotalLivePage: React.FC = () => {
             <button
               type="button"
               onClick={handleMinimize}
-              aria-label="Minimize SOTAL Live"
+              aria-label="Minimize Jovibe Live"
               title="Minimize to Library"
               className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-900/6 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/8 dark:hover:text-zinc-100 transition-colors cursor-pointer"
             >
@@ -751,7 +751,7 @@ export const SotalLivePage: React.FC = () => {
             <button
               type="button"
               onClick={handleEndSession}
-              aria-label="Close SOTAL Live"
+              aria-label="Close Jovibe Live"
               title="Close"
               className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-900/6 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/8 dark:hover:text-zinc-100 transition-colors cursor-pointer"
             >
@@ -942,7 +942,7 @@ export const SotalLivePage: React.FC = () => {
                   value={draftText}
                   onChange={(e) => setDraftText(e.target.value)}
                   placeholder="Ask or joke about this lesson..."
-                  aria-label="Send a note to SOTAL Live"
+                  aria-label="Send a note to Jovibe Live"
                   className="min-w-0 flex-1 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none"
                 />
                 <button
@@ -1031,7 +1031,7 @@ export const SotalLivePage: React.FC = () => {
             <button
               type="button"
               onClick={handleEndSession}
-              aria-label="End SOTAL Live session"
+              aria-label="End Jovibe Live session"
               title="End conversation"
               className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-rose-200/90 bg-rose-50/90 text-rose-600 hover:bg-rose-600 hover:border-rose-600 hover:text-white dark:border-rose-950/80 dark:bg-rose-950/45 dark:text-rose-300 dark:hover:bg-rose-600 dark:hover:border-rose-500 dark:hover:text-white transition-colors cursor-pointer"
             >

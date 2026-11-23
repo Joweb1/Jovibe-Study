@@ -286,7 +286,7 @@ export class LiveVoiceClient {
       return false;
     }
 
-    let lastErrorMessage = 'Could not connect to SOTAL Live right now.';
+    let lastErrorMessage = 'Could not connect to Jovibe Live right now.';
     let sawLimitFailure = false;
     const idToken = await getFirebaseIdToken(false);
     const liveRequestId = `live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -733,7 +733,7 @@ export class LiveVoiceClient {
           }
           finish({
             ok: false,
-            errorMessage: 'Connection to SOTAL Live timed out. Please try again.',
+            errorMessage: 'Connection to Jovibe Live timed out. Please try again.',
             code: 'TIMEOUT',
             shouldRotateKey: false,
           });
@@ -807,7 +807,7 @@ export class LiveVoiceClient {
         }
 
         if (msg.type === 'error') {
-          const errMsg = msg.message || 'SOTAL Live encountered an AI service error.';
+          const errMsg = msg.message || 'Jovibe Live encountered an AI service error.';
           if (!settled) {
             try {
               ws.close();
@@ -916,7 +916,7 @@ export class LiveVoiceClient {
         if (!settled) {
           finish({
             ok: false,
-            errorMessage: 'Unable to reach the SOTAL Live voice server.',
+            errorMessage: 'Unable to reach the Jovibe Live voice server.',
             code: 'NETWORK_ERROR',
             shouldRotateKey: false,
           });
@@ -927,7 +927,7 @@ export class LiveVoiceClient {
         if (!settled) {
           finish({
             ok: false,
-            errorMessage: 'Connection closed before SOTAL Live was ready.',
+            errorMessage: 'Connection closed before Jovibe Live was ready.',
             shouldRotateKey: false,
           });
         } else if (!this.disposed && this.isConnected) {

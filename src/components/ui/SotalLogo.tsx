@@ -19,7 +19,7 @@ export const SotalLogo: React.FC<SotalLogoProps> = ({ size = 'md', className = '
   return (
     <img
       src={SOTAL_LOGO_SRC}
-      alt="SOTAL Study logo"
+      alt="Jovibe Study logo"
       draggable={false}
       className={`${SIZE_CLASSES[size]} shrink-0 object-contain select-none drop-shadow-[0_1px_4px_rgba(14,165,233,0.22)] ${className}`}
     />

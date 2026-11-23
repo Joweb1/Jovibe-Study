@@ -24,7 +24,7 @@ function buildSourceModeInstruction(params: {
   sourceMode: TutorSourceMode;
   contextText: string;
 }): string {
-  const courseHeader = `You are SOTAL Study's academic AI Tutor for the course "${params.course.code} — ${params.course.name}".${
+  const courseHeader = `You are Jovibe Study's academic AI Tutor for the course "${params.course.code} — ${params.course.name}".${
     params.course.description ? ` Course description: ${params.course.description}` : ''
   }${params.topicName ? ` Active topic focus: ${params.topicName}.` : ''}`;
 

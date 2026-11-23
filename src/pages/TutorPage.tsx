@@ -1059,7 +1059,7 @@ export const TutorPage: React.FC = () => {
       <div>
         <div className="border-b border-zinc-200 dark:border-zinc-800 pb-6">
           <h1 className="font-display text-2xl font-bold tracking-tight text-zinc-950 dark:text-zinc-200">
-            SOTAL AI Tutor
+            Jovibe AI Tutor
           </h1>
         </div>
         <EmptyState
@@ -1073,7 +1073,7 @@ export const TutorPage: React.FC = () => {
   }
 
   if (activeCourseAccessRevoked) {
-    return <RevokedCourseNotice course={activeCourse} pageTitle="SOTAL AI Tutor" />;
+    return <RevokedCourseNotice course={activeCourse} pageTitle="Jovibe AI Tutor" />;
   }
 
   const isBusy = sending || transcribing;
@@ -1093,7 +1093,7 @@ export const TutorPage: React.FC = () => {
           </button>
           <div className="min-w-0">
             <h1 className="font-display text-lg sm:text-xl font-bold leading-tight tracking-tight text-zinc-950 dark:text-zinc-200 truncate">
-              SOTAL AI Tutor
+              Jovibe AI Tutor
             </h1>
             {activeConversation?.title && (
               <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
@@ -1455,7 +1455,7 @@ export const TutorPage: React.FC = () => {
                   >
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <span className="text-xs font-semibold text-zinc-950 dark:text-zinc-200">
-                        {isUser ? 'You' : 'SOTAL AI Tutor'}
+                        {isUser ? 'You' : 'Jovibe AI Tutor'}
                       </span>
                       {!isUser && (
                         <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
@@ -1655,7 +1655,7 @@ export const TutorPage: React.FC = () => {
             {sending && (
               <div className="py-3 space-y-2.5">
                 <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                  <span className="font-semibold text-zinc-950 dark:text-zinc-200">SOTAL AI Tutor</span>
+                  <span className="font-semibold text-zinc-950 dark:text-zinc-200">Jovibe AI Tutor</span>
                   <button
                     type="button"
                     onClick={() => generationAbortRef.current?.abort()}

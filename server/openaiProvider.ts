@@ -101,7 +101,7 @@ export function getProviderDefinition(provider: OpenAiProviderId): ProviderDefin
       disableThinking: false,
       extraHeaders: {
         'HTTP-Referer': env('APP_URL') || 'http://localhost:3000',
-        'X-Title': 'SOTAL Study',
+        'X-Title': 'Jovibe Study',
       },
     };
   }
@@ -413,7 +413,7 @@ async function requestChatCompletion(
     throw new ProviderRequestError({
       status: 501,
       code: 'MODEL_UNAVAILABLE',
-      message: `${definition.label} does not support ${options.task} in SOTAL Study.`,
+      message: `${definition.label} does not support ${options.task} in Jovibe Study.`,
       retryable: false,
       cooldownMs: 0,
     });
@@ -1063,7 +1063,7 @@ export async function generateProviderImage(params: {
     throw new ProviderRequestError({
       status: 501,
       code: 'MODEL_UNAVAILABLE',
-      message: `${def.label} does not support image generation in SOTAL Study.`,
+      message: `${def.label} does not support image generation in Jovibe Study.`,
       retryable: false,
       cooldownMs: 0,
     });

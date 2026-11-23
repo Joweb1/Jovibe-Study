@@ -307,7 +307,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   const token = extractBearerToken(req);
   if (!token) {
     res.status(401).json({
-      error: 'Authentication required. Please sign in to SOTAL Study.',
+      error: 'Authentication required. Please sign in to Jovibe Study.',
       code: 'UNAUTHENTICATED',
       retryable: false,
       shouldRotateKey: false,

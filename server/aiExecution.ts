@@ -8,7 +8,7 @@ import {
   type AnyAiProvider,
 } from './adminKeyPool.ts';
 import { sanitizeErrorMessage } from './crypto.ts';
-import { classifyAiError } from './geminiService.ts';
+import { classifyAiError, extractGeminiFallbackMeta } from './geminiService.ts';
 import { ProviderRequestError } from './openaiProvider.ts';
 import {
   AiAccessError,
@@ -37,6 +37,7 @@ export interface ExecutionContext {
 export interface ExecutionResult<T> {
   payload: T;
   model: string;
+  switchedFromModel?: string;
   tokens?: TokenUsage;
 }
 
@@ -209,6 +210,7 @@ export async function executeProtectedAiRoute<T>(params: {
         cooldownMs: classified.cooldownMs,
         provider,
         keySource: 'byok',
+        ...(classified.meta ? { meta: classified.meta } : {}),
       });
       return null;
     }
@@ -382,6 +384,7 @@ export async function executeProtectedAiRoute<T>(params: {
     cooldownMs: finalErr.cooldownMs,
     provider,
     keySource: 'server_fallback',
+    ...('meta' in finalErr && finalErr.meta ? { meta: finalErr.meta } : {}),
   });
   return null;
 }
@@ -398,6 +401,7 @@ function classifyProviderOrGeminiError(
   retryable: boolean;
   shouldRotateKey: boolean;
   cooldownMs: number;
+  meta?: Record<string, unknown>;
 } {
   if (err instanceof ProviderRequestError) {
     return {
@@ -415,9 +419,11 @@ function classifyProviderOrGeminiError(
 
   if (provider === 'gemini') {
     const classified = classifyAiError(err, keySource);
+    const fallbackMeta = extractGeminiFallbackMeta(err);
     return {
       ...classified,
       message: sanitizeErrorMessage(classified.message, knownSecrets),
+      ...(fallbackMeta ? { meta: { ...fallbackMeta } } : {}),
     };
   }
 

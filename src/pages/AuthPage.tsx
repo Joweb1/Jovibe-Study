@@ -60,14 +60,14 @@ export const AuthPage: React.FC = () => {
         }`}
       >
         <div className="mx-auto flex h-16 max-w-[1120px] items-center justify-between gap-8 px-5 sm:px-6">
-          {/* Left: SOTAL Study logo & wordmark */}
+          {/* Left: Jovibe Study logo & wordmark */}
           <button
             type="button"
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
             className="inline-flex items-center gap-2 font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-100 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <SotalLogo size="md" />
-            <span>SOTAL Study</span>
+            <span>Jovibe Study</span>
           </button>
 
           {/* Center: Clean single-line section links on desktop */}
@@ -160,7 +160,7 @@ export const AuthPage: React.FC = () => {
                   , a student currently studying Logistics and Supply Chain Management with a growing passion for technology, software engineering, AI, and building meaningful products.
                 </p>
                 <p>
-                  SOTAL Study started from my interest in learning and technology — and the idea of making studying smarter, more accessible, and more personalized for students. I&apos;m building it as part of my own journey of learning, experimenting with AI, writing software, and turning ideas into real products. More than just an application, it&apos;s part of my path as a student, developer, and aspiring technology builder.
+                  Jovibe Study started from my interest in learning and technology — and the idea of making studying smarter, more accessible, and more personalized for students. I&apos;m building it as part of my own journey of learning, experimenting with AI, writing software, and turning ideas into real products. More than just an application, it&apos;s part of my path as a student, developer, and aspiring technology builder.
                 </p>
               </div>
             </div>
@@ -174,7 +174,7 @@ export const AuthPage: React.FC = () => {
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2.5 gap-y-1">
             <span className="inline-flex items-center gap-2 font-display font-medium text-zinc-800 dark:text-zinc-300">
               <SotalLogo size="xs" />
-              <span>SOTAL Study</span>
+              <span>Jovibe Study</span>
             </span>
             <span aria-hidden="true" className="text-zinc-300 dark:text-zinc-700">
               ·

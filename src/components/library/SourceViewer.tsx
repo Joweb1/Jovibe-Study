@@ -231,8 +231,8 @@ export const SourceViewer: React.FC<SourceViewerProps> = ({
               <button
                 type="button"
                 onClick={onOpenLive}
-                aria-label="SOTAL Live"
-                title="SOTAL Live"
+                aria-label="Jovibe Live"
+                title="Jovibe Live"
                 className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-zinc-200 dark:text-zinc-950 dark:hover:bg-white transition-colors cursor-pointer"
               >
                 <AudioLines className="h-4 w-4" />

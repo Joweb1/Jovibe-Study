@@ -1,6 +1,12 @@
 import { createAdminAlert, createId, getDb } from './db.ts';
 import { decryptSecret, encryptSecret, maskApiKey, sanitizeErrorMessage } from './crypto.ts';
-import { createGeminiClient, DEFAULT_MODEL, checkSafetyBlock, classifyAiError } from './geminiService.ts';
+import {
+  createGeminiClient,
+  DEFAULT_MODEL,
+  checkSafetyBlock,
+  classifyAiError,
+  executeGeminiWithModelFallback,
+} from './geminiService.ts';
 import {
   areServerProviderKeysAllowed,
   getProviderDefinition,
@@ -268,16 +274,21 @@ export async function testAdminApiKeyById(id: string): Promise<{
   try {
     if (row.provider === 'gemini') {
       const ai = createGeminiClient(rawKey);
-      const response = await ai.models.generateContent({
-        model: DEFAULT_MODEL,
-        contents: 'Reply with OK.',
+      const { result: response, model } = await executeGeminiWithModelFallback({
+        primaryModel: DEFAULT_MODEL,
+        task: 'text',
+        run: (activeModel) =>
+          ai.models.generateContent({
+            model: activeModel,
+            contents: 'Reply with OK.',
+          }),
       });
       checkSafetyBlock(response);
       recordAdminKeySuccess(id);
       return {
         ok: true,
         provider: 'gemini',
-        model: DEFAULT_MODEL,
+        model,
         latencyMs: Date.now() - startMs,
       };
     }

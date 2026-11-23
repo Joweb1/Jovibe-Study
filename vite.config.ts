@@ -25,8 +25,8 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'SOTAL Study',
-          short_name: 'SOTAL Study',
+          name: 'Jovibe Study',
+          short_name: 'Jovibe Study',
           description:
             'AI-powered personal academic workspace for course materials, grounded AI Tutor, active practice, and adaptive Automatic Study.',
           theme_color: '#09090b',
@@ -83,7 +83,7 @@ export default defineConfig(() => {
               icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
             },
             {
-              name: 'SOTAL Live',
+              name: 'Jovibe Live',
               short_name: 'Live',
               description: 'Start a real-time voice study session',
               url: '/live',

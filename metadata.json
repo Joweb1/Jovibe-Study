@@ -1,5 +1,5 @@
 {
-  "name": "SOTAL Study",
+  "name": "Jovibe Study",
   "description": "An AI-powered personal academic workspace for organizing course materials, studying with a grounded AI Tutor, practising with flashcards, CBT, gap-fill, and oral exams, and learning through adaptive Automatic Study.",
   "requestFramePermissions": [
     "microphone"

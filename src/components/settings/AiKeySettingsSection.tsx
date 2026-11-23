@@ -949,7 +949,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                         {provider === 'openrouter' &&
                           'OpenRouter will remain inactive until a key is added.'}
                         {provider === 'gemini' &&
-                          'SOTAL Study will use the server GEMINI_API_KEY automatically when fallback is enabled.'}
+                          'Jovibe Study will use the server GEMINI_API_KEY automatically when fallback is enabled.'}
                       </div>
                     ) : (
                       <div className="divide-y divide-zinc-100 dark:divide-zinc-800 border-y border-zinc-100 dark:border-zinc-800">
@@ -1182,7 +1182,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
               <strong className="font-medium text-zinc-900 dark:text-zinc-200">
                 Personal API key mode active:
               </strong>{' '}
-              Once you add your own key, SOTAL never falls back to the app&apos;s default server
+              Once you add your own key, Jovibe never falls back to the app&apos;s default server
               key. Add another Google account Gemini key or any fallback provider key above if your
               current key reaches its limit.
             </div>
@@ -1198,7 +1198,7 @@ export const AiKeySettingsSection: React.FC<AiKeySettingsSectionProps> = ({ defa
                 Use app default <span className="font-mono text-xs">GEMINI_API_KEY</span> until I
                 add my own key
                 <span className="block text-xs text-zinc-500 dark:text-zinc-400">
-                  Allows using SOTAL while skipping setup. Automatically locks off permanently once
+                  Allows using Jovibe while skipping setup. Automatically locks off permanently once
                   you add your own API key.
                 </span>
               </span>

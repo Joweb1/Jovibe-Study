@@ -13,6 +13,7 @@ import { sanitizeErrorMessage } from './crypto.ts';
 import {
   classifyAiError,
   createGeminiClient,
+  executeGeminiWithModelFallback,
   resolveTtsVoice,
 } from './geminiService.ts';
 import {
@@ -107,7 +108,7 @@ function buildLiveSystemInstruction(lesson?: LiveLessonPayload): string {
   ].filter(Boolean);
 
   return [
-    'You are SOTAL Live, a warm, relaxed, intelligent study companion speaking aloud in real time with a student.',
+    'You are Jovibe Live, a warm, relaxed, intelligent study companion speaking aloud in real time with a student.',
     'Vibe & personality:',
     '- Speak naturally like a friendly, encouraging study partner hanging out over coffee — never like a stiff lecturer, chatbot, or formal voice assistant.',
     '- Keep explanations super clear and simple. Use relatable everyday analogies, occasional light humor, and genuine warmth.',
@@ -207,7 +208,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
             safeSend(clientWs, {
               type: 'error',
               code: 'UNAUTHENTICATED',
-              message: 'Please sign in to start a SOTAL Live voice session.',
+              message: 'Please sign in to start a Jovibe Live voice session.',
               shouldRotateKey: false,
               cooldownMs: 0,
             });
@@ -295,7 +296,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
               type: 'error',
               code: 'NO_API_KEY',
               message:
-                'No Gemini API key is currently available for SOTAL Live. Add your own Gemini API key in Settings.',
+                'No Gemini API key is currently available for Jovibe Live. Add your own Gemini API key in Settings.',
               shouldRotateKey: false,
               cooldownMs: 0,
             });
@@ -307,6 +308,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
           const allSecrets = candidates.map((c) => c.apiKey);
 
           let connectedSession: LiveSession | null = null;
+          let activeLiveModel: string = LIVE_VOICE_MODEL;
           let activeCandidate = candidates[0];
           let lastError: ReturnType<typeof classifyAiError> | null = null;
 
@@ -316,120 +318,126 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
             const startMs = Date.now();
             try {
               const ai = createGeminiClient(candidate.apiKey, 'v1beta');
-              const session = await ai.live.connect({
-                model: LIVE_VOICE_MODEL,
-                config: {
-                  responseModalities: [Modality.AUDIO],
-                  speechConfig: {
-                    voiceConfig: {
-                      prebuiltVoiceConfig: { voiceName },
+              const { result: session, model: connectedModel } = await executeGeminiWithModelFallback({
+                primaryModel: LIVE_VOICE_MODEL,
+                task: 'live',
+                run: (activeModel) =>
+                  ai.live.connect({
+                    model: activeModel,
+                    config: {
+                      responseModalities: [Modality.AUDIO],
+                      speechConfig: {
+                        voiceConfig: {
+                          prebuiltVoiceConfig: { voiceName },
+                        },
+                      },
+                      inputAudioTranscription: {},
+                      outputAudioTranscription: {},
+                      realtimeInputConfig: {
+                        automaticActivityDetection: {
+                          startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+                          endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+                          prefixPaddingMs: 180,
+                          silenceDurationMs: 650,
+                        },
+                      },
+                      systemInstruction,
                     },
-                  },
-                  inputAudioTranscription: {},
-                  outputAudioTranscription: {},
-                  realtimeInputConfig: {
-                    automaticActivityDetection: {
-                      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
-                      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-                      prefixPaddingMs: 180,
-                      silenceDurationMs: 650,
-                    },
-                  },
-                  systemInstruction,
-                },
-                callbacks: {
-                  onopen: () => {
-                    // Connected to Gemini Live upstream
-                  },
-                  onmessage: (message: LiveServerMessage) => {
-                    if (closedByClient || clientWs.readyState !== WebSocket.OPEN) return;
+                    callbacks: {
+                      onopen: () => {
+                        // Connected to Gemini Live upstream
+                      },
+                      onmessage: (message: LiveServerMessage) => {
+                        if (closedByClient || clientWs.readyState !== WebSocket.OPEN) return;
 
-                    const serverContent = message.serverContent;
-                    if (!serverContent) return;
+                        const serverContent = message.serverContent;
+                        if (!serverContent) return;
 
-                    if (serverContent.interrupted) {
-                      safeSend(clientWs, { type: 'interrupted' });
-                    }
+                        if (serverContent.interrupted) {
+                          safeSend(clientWs, { type: 'interrupted' });
+                        }
 
-                    if (serverContent.interimInputTranscription?.text) {
-                      safeSend(clientWs, {
-                        type: 'interimInputTranscript',
-                        text: serverContent.interimInputTranscription.text,
-                      });
-                    }
+                        if (serverContent.interimInputTranscription?.text) {
+                          safeSend(clientWs, {
+                            type: 'interimInputTranscript',
+                            text: serverContent.interimInputTranscription.text,
+                          });
+                        }
 
-                    if (serverContent.inputTranscription?.text) {
-                      safeSend(clientWs, {
-                        type: 'inputTranscript',
-                        text: serverContent.inputTranscription.text,
-                      });
-                    }
+                        if (serverContent.inputTranscription?.text) {
+                          safeSend(clientWs, {
+                            type: 'inputTranscript',
+                            text: serverContent.inputTranscription.text,
+                          });
+                        }
 
-                    if (serverContent.outputTranscription?.text) {
-                      safeSend(clientWs, {
-                        type: 'outputTranscript',
-                        text: serverContent.outputTranscription.text,
-                      });
-                    }
+                        if (serverContent.outputTranscription?.text) {
+                          safeSend(clientWs, {
+                            type: 'outputTranscript',
+                            text: serverContent.outputTranscription.text,
+                          });
+                        }
 
-                    const parts = serverContent.modelTurn?.parts ?? [];
-                    for (const part of parts) {
-                      if (part.inlineData?.data) {
+                        const parts = serverContent.modelTurn?.parts ?? [];
+                        for (const part of parts) {
+                          if (part.inlineData?.data) {
+                            safeSend(clientWs, {
+                              type: 'audio',
+                              data: part.inlineData.data,
+                              mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
+                            });
+                          }
+                        }
+
+                        if (serverContent.turnComplete) {
+                          safeSend(clientWs, { type: 'turnComplete' });
+                        }
+                      },
+                      onerror: (event: unknown) => {
+                        if (closedByClient) return;
+                        const errObj =
+                          event && typeof event === 'object' && 'error' in event
+                            ? (event as { error?: unknown }).error
+                            : event;
+                        const classified = classifyAiError(errObj, candidate.keySource);
                         safeSend(clientWs, {
-                          type: 'audio',
-                          data: part.inlineData.data,
-                          mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
+                          type: 'error',
+                          code: classified.code,
+                          message: sanitizeErrorMessage(classified.message, allSecrets),
+                          shouldRotateKey: classified.shouldRotateKey,
+                          cooldownMs: classified.cooldownMs,
                         });
-                      }
-                    }
+                      },
+                      onclose: (event: unknown) => {
+                        liveSession = null;
+                        if (closedByClient) return;
+                        const reason =
+                          event && typeof event === 'object' && 'reason' in event
+                            ? String((event as { reason?: unknown }).reason || '')
+                            : '';
+                        const code =
+                          event && typeof event === 'object' && 'code' in event
+                            ? Number((event as { code?: unknown }).code || 0)
+                            : 0;
 
-                    if (serverContent.turnComplete) {
-                      safeSend(clientWs, { type: 'turnComplete' });
-                    }
-                  },
-                  onerror: (event: unknown) => {
-                    if (closedByClient) return;
-                    const errObj =
-                      event && typeof event === 'object' && 'error' in event
-                        ? (event as { error?: unknown }).error
-                        : event;
-                    const classified = classifyAiError(errObj, candidate.keySource);
-                    safeSend(clientWs, {
-                      type: 'error',
-                      code: classified.code,
-                      message: sanitizeErrorMessage(classified.message, allSecrets),
-                      shouldRotateKey: classified.shouldRotateKey,
-                      cooldownMs: classified.cooldownMs,
-                    });
-                  },
-                  onclose: (event: unknown) => {
-                    liveSession = null;
-                    if (closedByClient) return;
-                    const reason =
-                      event && typeof event === 'object' && 'reason' in event
-                        ? String((event as { reason?: unknown }).reason || '')
-                        : '';
-                    const code =
-                      event && typeof event === 'object' && 'code' in event
-                        ? Number((event as { code?: unknown }).code || 0)
-                        : 0;
-
-                    if (reason && /quota|rate|api key|permission|invalid|403|429|1008/i.test(reason)) {
-                      const classified = classifyAiError(new Error(reason), candidate.keySource);
-                      safeSend(clientWs, {
-                        type: 'error',
-                        code: classified.code,
-                        message: sanitizeErrorMessage(classified.message, allSecrets),
-                        shouldRotateKey: classified.shouldRotateKey,
-                        cooldownMs: classified.cooldownMs,
-                      });
-                    }
-                    safeSend(clientWs, { type: 'closed', code, reason: sanitizeErrorMessage(reason, allSecrets) });
-                  },
-                },
+                        if (reason && /quota|rate|api key|permission|invalid|403|429|1008/i.test(reason)) {
+                          const classified = classifyAiError(new Error(reason), candidate.keySource);
+                          safeSend(clientWs, {
+                            type: 'error',
+                            code: classified.code,
+                            message: sanitizeErrorMessage(classified.message, allSecrets),
+                            shouldRotateKey: classified.shouldRotateKey,
+                            cooldownMs: classified.cooldownMs,
+                          });
+                        }
+                        safeSend(clientWs, { type: 'closed', code, reason: sanitizeErrorMessage(reason, allSecrets) });
+                      },
+                    },
+                  }),
               });
 
               connectedSession = session;
+              activeLiveModel = connectedModel;
               activeCandidate = candidate;
 
               if (candidate.adminKeyId) {
@@ -451,7 +459,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
                 keyOrigin: candidate.keyOrigin,
                 provider: 'gemini',
                 adminKeyId: candidate.adminKeyId,
-                model: LIVE_VOICE_MODEL,
+                model: activeLiveModel,
                 status: 'success',
                 isLogicalRoot: !reserved.isFailoverReuse && i === 0,
                 isFailover: reserved.isFailoverReuse || i > 0,
@@ -511,7 +519,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
             }
             const errOut = lastError ?? {
               code: 'SERVER_ERROR',
-              message: 'Could not connect to SOTAL Live right now.',
+              message: 'Could not connect to Jovibe Live right now.',
               shouldRotateKey: false,
               cooldownMs: 0,
             };
@@ -539,7 +547,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
 
           safeSend(clientWs, {
             type: 'ready',
-            model: LIVE_VOICE_MODEL,
+            model: activeLiveModel,
             voiceName,
             keySource: activeCandidate.keySource,
             quota: reserved.quotaSnapshot,
@@ -549,10 +557,10 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
             const title = (msg.lesson?.lessonTitle || 'this lesson').trim().slice(0, 140);
             try {
               connectedSession.sendRealtimeInput({
-                text: `The student just joined SOTAL Live to talk about "${title}". Greet them warmly in 1 to 2 relaxed spoken sentences and invite them to jump in whenever they're ready.`,
+                text: `The student just joined Jovibe Live to talk about "${title}". Greet them warmly in 1 to 2 relaxed spoken sentences and invite them to jump in whenever they're ready.`,
               });
             } catch (greetErr) {
-              console.warn('[SOTAL Live] Greeting send failed:', greetErr);
+              console.warn('[Jovibe Live] Greeting send failed:', greetErr);
             }
           }
         } catch (err) {
@@ -580,7 +588,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
             },
           });
         } catch (audioErr) {
-          console.warn('[SOTAL Live] Audio chunk forward failed:', audioErr);
+          console.warn('[Jovibe Live] Audio chunk forward failed:', audioErr);
         }
         return;
       }
@@ -591,7 +599,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
             text: msg.text.trim().slice(0, 2000),
           });
         } catch (textErr) {
-          console.warn('[SOTAL Live] Text message forward failed:', textErr);
+          console.warn('[Jovibe Live] Text message forward failed:', textErr);
         }
         return;
       }
@@ -600,7 +608,7 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
         try {
           liveSession.sendRealtimeInput({ audioStreamEnd: true });
         } catch (endErr) {
-          console.warn('[SOTAL Live] audioStreamEnd forward failed:', endErr);
+          console.warn('[Jovibe Live] audioStreamEnd forward failed:', endErr);
         }
       }
     });

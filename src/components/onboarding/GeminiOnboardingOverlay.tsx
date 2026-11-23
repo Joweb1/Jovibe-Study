@@ -349,11 +349,11 @@ export const GeminiOnboardingOverlay: React.FC = () => {
                     id="gemini-onboarding-welcome-title"
                     className="font-display text-xl sm:text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-100 [text-wrap:balance]"
                   >
-                    Connect Gemini to power your SOTAL AI study tools
+                    Connect Gemini to power your Jovibe AI study tools
                   </h2>
                   <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-                    SOTAL Study uses Google Gemini for AI Tutor explanations, practice quizzes,
-                    flashcards, OCR note extraction, and SOTAL Live voice sessions.
+                    Jovibe Study uses Google Gemini for AI Tutor explanations, practice quizzes,
+                    flashcards, OCR note extraction, and Jovibe Live voice sessions.
                   </p>
                 </div>
 
@@ -416,7 +416,7 @@ export const GeminiOnboardingOverlay: React.FC = () => {
             stepTotal={4}
             stepLabel="Open profile"
             title="First, open your profile menu."
-            description="Tap your profile icon in the top-right corner of SOTAL to open your account menu."
+            description="Tap your profile icon in the top-right corner of Jovibe to open your account menu."
             fallbackActionLabel="Go to Settings"
             onFallbackAction={openSettingsKeyGuide}
             onSkip={skipGuide}
@@ -434,7 +434,7 @@ export const GeminiOnboardingOverlay: React.FC = () => {
             stepTotal={4}
             stepLabel="Open Settings"
             title="Now select Settings."
-            description="Click Settings inside your profile menu to open SOTAL's Gemini API key section."
+            description="Click Settings inside your profile menu to open Jovibe's Gemini API key section."
             fallbackActionLabel="Open Settings"
             onFallbackAction={openSettingsKeyGuide}
             onSkip={skipGuide}
@@ -500,7 +500,7 @@ export const GeminiOnboardingOverlay: React.FC = () => {
 
                 <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
                   Don&apos;t have a Gemini API key yet? You can create one for free using Google AI
-                  Studio, then return here and add it to SOTAL.
+                  Studio, then return here and add it to Jovibe.
                 </p>
 
                 {/* Direct external link to official Google AI Studio API Key page */}
@@ -539,7 +539,7 @@ export const GeminiOnboardingOverlay: React.FC = () => {
                       'Sign in with your Google account.',
                       'Click Create API key to generate a new key.',
                       'Copy the generated API key.',
-                      'Return to SOTAL (your progress stays right here).',
+                      'Return to Jovibe (your progress stays right here).',
                       'Paste the key into the Gemini API key field.',
                       'Click Add to verify and save your key.',
                     ].map((stepText, idx) => (
@@ -555,7 +555,7 @@ export const GeminiOnboardingOverlay: React.FC = () => {
 
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
                   Tip: You can add multiple Gemini API keys from separate Google accounts later in
-                  Settings so SOTAL automatically rotates keys if one reaches a quota limit.
+                  Settings so Jovibe automatically rotates keys if one reaches a quota limit.
                 </p>
               </div>
 
@@ -625,7 +625,7 @@ export const GeminiOnboardingOverlay: React.FC = () => {
                     {verifiedKeyLabel}
                   </strong>{' '}
                   has been verified and saved securely on this device. AI Tutor, Practice quizzes,
-                  OCR extraction, Automatic Study, and SOTAL Live are all ready to use.
+                  OCR extraction, Automatic Study, and Jovibe Live are all ready to use.
                 </p>
                 <p className="mt-2.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
                   Want extra capacity? You can add additional Gemini keys from other Google
