@@ -11,13 +11,22 @@ import {
   Download,
   MoreVertical,
   PlusSquare,
+  RefreshCw,
   Share,
   Smartphone,
+  Sparkles,
   WifiOff,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { SotalLogo } from '../components/ui/SotalLogo';
+import {
+  clearPwaAppCacheAndReload,
+  detectRunningStandalone,
+  dismissReinstallNoticeStorage,
+  hasPendingReinstallNotice,
+  INSTALLED_STORAGE_KEY,
+} from '../utils/pwaMigration';
 
 export interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -26,8 +35,6 @@ export interface BeforeInstallPromptEvent extends Event {
 }
 
 export type InstallPlatform = 'ios' | 'android' | 'desktop_safari' | 'desktop_chromium' | 'other';
-
-const INSTALLED_STORAGE_KEY = 'sotal_pwa_installed_v1';
 
 // Module-level capture so beforeinstallprompt is NEVER missed before React mounts
 let capturedDeferredPrompt: BeforeInstallPromptEvent | null = null;
@@ -57,18 +64,6 @@ if (typeof window !== 'undefined') {
     promptListeners.forEach((cb) => cb(null));
     installedListeners.forEach((cb) => cb());
   });
-}
-
-function isRunningStandalone(): boolean {
-  if (typeof window === 'undefined') return false;
-  const nav = window.navigator as Navigator & { standalone?: boolean };
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.matchMedia('(display-mode: window-controls-overlay)').matches ||
-    window.matchMedia('(display-mode: minimal-ui)').matches ||
-    nav.standalone === true ||
-    document.referrer.startsWith('android-app://')
-  );
 }
 
 function readPersistedInstalled(): boolean {
@@ -104,7 +99,7 @@ function detectInstallPlatform(): InstallPlatform {
 export interface PWAInstallContextValue {
   /** True when the browser's native one-click install prompt is ready */
   isInstallable: boolean;
-  /** True when SOTAL Study is already installed / running as a standalone PWA */
+  /** True when Jovibe Study is already installed / running as a standalone PWA */
   isInstalled: boolean;
   /** True on iPhone / iPad Safari */
   isIOS: boolean;
@@ -118,6 +113,12 @@ export interface PWAInstallContextValue {
   guideModalOpen: boolean;
   openInstallGuide: () => void;
   closeInstallGuide: () => void;
+  /** True for users migrating from a previously installed "SOTAL Study" PWA */
+  needsReinstallNotice: boolean;
+  dismissReinstallNotice: () => void;
+  /** Clears cached PWA shell files & service workers and reloads fresh from network */
+  clearAppCacheAndReload: () => Promise<void>;
+  clearingAppCache: boolean;
 }
 
 const PWAInstallContext = createContext<PWAInstallContextValue | null>(null);
@@ -127,7 +128,7 @@ export const PWAInstallProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     () => capturedDeferredPrompt
   );
   const [isInstalled, setIsInstalled] = useState<boolean>(() => {
-    const standalone = isRunningStandalone();
+    const standalone = detectRunningStandalone();
     if (standalone) {
       try {
         window.localStorage.setItem(INSTALLED_STORAGE_KEY, 'true');
@@ -141,6 +142,10 @@ export const PWAInstallProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   });
   const [platform] = useState<InstallPlatform>(() => detectInstallPlatform());
   const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [needsReinstallNotice, setNeedsReinstallNotice] = useState<boolean>(() =>
+    hasPendingReinstallNotice()
+  );
+  const [clearingAppCache, setClearingAppCache] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -156,6 +161,8 @@ export const PWAInstallProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIsInstalled(true);
       setDeferredPrompt(null);
       setGuideModalOpen(false);
+      dismissReinstallNoticeStorage();
+      setNeedsReinstallNotice(false);
     };
 
     promptListeners.add(handlePromptUpdate);
@@ -217,6 +224,8 @@ export const PWAInstallProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setDeferredPrompt(null);
         setIsInstalled(true);
         setGuideModalOpen(false);
+        dismissReinstallNoticeStorage();
+        setNeedsReinstallNotice(false);
         try {
           window.localStorage.setItem(INSTALLED_STORAGE_KEY, 'true');
         } catch {
@@ -244,6 +253,20 @@ export const PWAInstallProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const openInstallGuide = useCallback(() => setGuideModalOpen(true), []);
   const closeInstallGuide = useCallback(() => setGuideModalOpen(false), []);
 
+  const dismissReinstallNotice = useCallback(() => {
+    dismissReinstallNoticeStorage();
+    setNeedsReinstallNotice(false);
+  }, []);
+
+  const handleClearAppCacheAndReload = useCallback(async () => {
+    setClearingAppCache(true);
+    try {
+      await clearPwaAppCacheAndReload();
+    } finally {
+      setClearingAppCache(false);
+    }
+  }, []);
+
   const value = useMemo<PWAInstallContextValue>(
     () => ({
       isInstallable: Boolean(deferredPrompt),
@@ -255,6 +278,10 @@ export const PWAInstallProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       guideModalOpen,
       openInstallGuide,
       closeInstallGuide,
+      needsReinstallNotice,
+      dismissReinstallNotice,
+      clearAppCacheAndReload: handleClearAppCacheAndReload,
+      clearingAppCache,
     }),
     [
       deferredPrompt,
@@ -265,6 +292,10 @@ export const PWAInstallProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       guideModalOpen,
       openInstallGuide,
       closeInstallGuide,
+      needsReinstallNotice,
+      dismissReinstallNotice,
+      handleClearAppCacheAndReload,
+      clearingAppCache,
     ]
   );
 
@@ -277,6 +308,15 @@ export const PWAInstallProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         hasNativePrompt={Boolean(deferredPrompt)}
         onTriggerNativeInstall={() => void installApp()}
         onClose={closeInstallGuide}
+      />
+      <PWARebrandUpdateModal
+        open={needsReinstallNotice}
+        platform={platform}
+        hasNativePrompt={Boolean(deferredPrompt)}
+        clearingAppCache={clearingAppCache}
+        onTriggerNativeInstall={() => void installApp()}
+        onClearAppCache={() => void handleClearAppCacheAndReload()}
+        onClose={dismissReinstallNotice}
       />
     </PWAInstallContext.Provider>
   );
@@ -405,6 +445,125 @@ const PWAInstallGuideModal: React.FC<PWAInstallGuideModalProps> = ({
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             Free · No app store needed
           </span>
+          <Button size="sm" variant="secondary" onClick={onClose}>
+            Got it
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+interface PWARebrandUpdateModalProps {
+  open: boolean;
+  platform: InstallPlatform;
+  hasNativePrompt: boolean;
+  clearingAppCache: boolean;
+  onTriggerNativeInstall: () => void;
+  onClearAppCache: () => void;
+  onClose: () => void;
+}
+
+const PWARebrandUpdateModal: React.FC<PWARebrandUpdateModalProps> = ({
+  open,
+  platform,
+  hasNativePrompt,
+  clearingAppCache,
+  onTriggerNativeInstall,
+  onClearAppCache,
+  onClose,
+}) => {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="SOTAL Study is now Jovibe Study"
+      description="Your app has been automatically updated and old cached app files were cleared. Your account, courses, notes, and chat history are completely safe."
+    >
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-950/60 p-3">
+          <SotalLogo size="md" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+              <span>Jovibe Study</span>
+              <Sparkles className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              To update your device&apos;s home screen or desktop app icon name, follow the quick step below.
+            </p>
+          </div>
+        </div>
+
+        {hasNativePrompt ? (
+          <div className="space-y-3">
+            <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+              You can install the updated <span className="font-medium text-zinc-950 dark:text-zinc-100">Jovibe Study</span> app right now, and remove the old SOTAL Study icon from your device.
+            </p>
+            <Button size="md" className="w-full" onClick={onTriggerNativeInstall}>
+              <Download className="h-4 w-4" />
+              Install Jovibe Study now
+            </Button>
+          </div>
+        ) : platform === 'ios' ? (
+          <ol className="space-y-2.5 text-sm text-zinc-700 dark:text-zinc-300 list-decimal pl-5">
+            <li>
+              Touch and hold the old <span className="font-medium text-zinc-950 dark:text-zinc-100">SOTAL Study</span> icon on your Home Screen and tap <span className="font-medium text-zinc-950 dark:text-zinc-100">Remove App</span>.
+            </li>
+            <li>
+              Open this site in <span className="font-medium text-zinc-950 dark:text-zinc-100">Safari</span> and tap{' '}
+              <Share className="inline h-3.5 w-3.5 mx-0.5 text-zinc-950 dark:text-zinc-100" />{' '}
+              <span className="font-medium text-zinc-950 dark:text-zinc-100">Share</span> →{' '}
+              <PlusSquare className="inline h-3.5 w-3.5 mx-0.5 text-zinc-950 dark:text-zinc-100" />{' '}
+              <span className="font-medium text-zinc-950 dark:text-zinc-100">Add to Home Screen</span>.
+            </li>
+            <li>
+              Tap <span className="font-medium text-zinc-950 dark:text-zinc-100">Add</span> to save the new <span className="font-medium text-zinc-950 dark:text-zinc-100">Jovibe Study</span> icon.
+            </li>
+          </ol>
+        ) : platform === 'android' ? (
+          <div className="space-y-2.5 text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+            <p>
+              Chrome on Android automatically updates your app name to <span className="font-medium text-zinc-950 dark:text-zinc-100">Jovibe Study</span> in the background.
+            </p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Want it updated immediately? Long-press the old <span className="font-medium text-zinc-700 dark:text-zinc-300">SOTAL Study</span> icon → <span className="font-medium text-zinc-700 dark:text-zinc-300">Uninstall</span>, then open this page in Chrome and tap{' '}
+              <MoreVertical className="inline h-3.5 w-3.5 mx-0.5 text-zinc-700 dark:text-zinc-300" /> → <span className="font-medium text-zinc-700 dark:text-zinc-300">Install app</span>.
+            </p>
+          </div>
+        ) : platform === 'desktop_safari' ? (
+          <ol className="space-y-2.5 text-sm text-zinc-700 dark:text-zinc-300 list-decimal pl-5">
+            <li>
+              Remove the old <span className="font-medium text-zinc-950 dark:text-zinc-100">SOTAL Study</span> web app from your Applications folder or Dock.
+            </li>
+            <li>
+              In Safari, click{' '}
+              <Share className="inline h-3.5 w-3.5 mx-0.5 text-zinc-950 dark:text-zinc-100" />{' '}
+              <span className="font-medium text-zinc-950 dark:text-zinc-100">Share</span> → <span className="font-medium text-zinc-950 dark:text-zinc-100">Add to Dock</span> to install <span className="font-medium text-zinc-950 dark:text-zinc-100">Jovibe Study</span>.
+            </li>
+          </ol>
+        ) : (
+          <div className="space-y-2.5 text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+            <p>
+              Chrome and Edge will automatically prompt to update your installed app name to <span className="font-medium text-zinc-950 dark:text-zinc-100">Jovibe Study</span>.
+            </p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              To reinstall right away: open the app menu (<span className="font-medium text-zinc-700 dark:text-zinc-300">⋮ → Uninstall SOTAL Study</span>), then click the{' '}
+              <Smartphone className="inline h-3.5 w-3.5 mx-0.5 text-zinc-700 dark:text-zinc-300" />{' '}
+              <span className="font-medium text-zinc-700 dark:text-zinc-300">Install</span> icon in your browser&apos;s address bar.
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200 dark:border-zinc-800 pt-4">
+          <Button
+            size="sm"
+            variant="ghost"
+            loading={clearingAppCache}
+            onClick={onClearAppCache}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh app cache
+          </Button>
           <Button size="sm" variant="secondary" onClick={onClose}>
             Got it
           </Button>

@@ -5,7 +5,7 @@ import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { Button } from '../ui/Button';
 import { SotalLogo } from '../ui/SotalLogo';
 
-const PROMPT_STORAGE_KEY = 'sotal_pwa_install_popup_v1';
+const PROMPT_STORAGE_KEY = 'jovibe_pwa_install_popup_v2';
 const SHORT_SNOOZE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days for "Maybe later" / close
 const LONG_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days for "Don't remind me for a while"
 const INITIAL_DWELL_MS = 14_000; // Wait 14s so user settles in first
@@ -56,12 +56,13 @@ function isCompetingOverlayVisible(): boolean {
  * SOTAL Study on their device for faster launch and offline study access.
  */
 export const PWAInstallPromptPopup: React.FC = () => {
-  const { isInstalled, isInstallable, guideModalOpen, triggerInstall } = usePWAInstall();
+  const { isInstalled, isInstallable, guideModalOpen, needsReinstallNotice, triggerInstall } =
+    usePWAInstall();
   const reducedMotion = useReducedMotion();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (isInstalled || guideModalOpen) {
+    if (isInstalled || guideModalOpen || needsReinstallNotice) {
       setVisible(false);
       return;
     }
@@ -73,7 +74,7 @@ export const PWAInstallPromptPopup: React.FC = () => {
 
     let retryTimer: number | null = null;
     const tryShow = () => {
-      if (isInstalled || guideModalOpen) return;
+      if (isInstalled || guideModalOpen || needsReinstallNotice) return;
       if (isCompetingOverlayVisible()) {
         // Check again calmly after 20s if an onboarding tour or modal was open
         retryTimer = window.setTimeout(tryShow, 20_000);
@@ -87,7 +88,7 @@ export const PWAInstallPromptPopup: React.FC = () => {
       window.clearTimeout(initialTimer);
       if (retryTimer) window.clearTimeout(retryTimer);
     };
-  }, [isInstalled, guideModalOpen]);
+  }, [isInstalled, guideModalOpen, needsReinstallNotice]);
 
   const handleSnooze = (longSnooze = false) => {
     const prev = readPromptState();

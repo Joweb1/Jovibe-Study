@@ -1299,10 +1299,26 @@ export class ErrorOverlay extends HTMLElement {}
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(__dirname, 'dist');
-    app.use(express.static(distDir));
+    const NO_CACHE_FILES = new Set([
+      '/index.html',
+      '/sw.js',
+      '/registerSW.js',
+      '/manifest.webmanifest',
+    ]);
+    app.use(
+      express.static(distDir, {
+        setHeaders: (res, filePath) => {
+          const rel = '/' + path.relative(distDir, filePath).replace(/\\/g, '/');
+          if (NO_CACHE_FILES.has(rel) || rel.endsWith('.webmanifest')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          }
+        },
+      })
+    );
     app.get('*', (_req, res) => {
       const indexFile = path.join(distDir, 'index.html');
       if (fs.existsSync(indexFile)) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(indexFile);
       } else {
         res.status(404).send('Build output not found. Run npm run build first.');

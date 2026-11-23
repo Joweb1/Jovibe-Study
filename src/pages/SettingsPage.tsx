@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { onSnapshotsInSync } from 'firebase/firestore';
-import { ArrowLeft, Check, Download, LogOut, Moon, Square, Sun, Trash2, Volume2 } from 'lucide-react';
+import { ArrowLeft, Check, Download, LogOut, Moon, RefreshCw, Square, Sun, Trash2, Volume2 } from 'lucide-react';
 import {
   DEFAULT_USER_PREFERENCES,
   type DifficultyLevel,
@@ -27,6 +27,7 @@ import { Button } from '../components/ui/Button';
 import { ErrorBanner } from '../components/ui/StateViews';
 import { AiKeySettingsSection } from '../components/settings/AiKeySettingsSection';
 import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
+import { usePWAInstall } from '../hooks/usePWAInstall';
 
 export const SettingsPage: React.FC = () => {
   const { user, profile, isOnline, savePreferences, signOut } = useAuth();
@@ -34,6 +35,7 @@ export const SettingsPage: React.FC = () => {
   const { status: platformStatus, usingPersonalKey } = usePlatformAccess();
   const { navigate } = useRouter();
   const { theme, toggleTheme } = useTheme();
+  const { clearAppCacheAndReload, clearingAppCache } = usePWAInstall();
 
   const [prefs, setPrefs] = useState<UserPreferences>(
     profile?.preferences ?? DEFAULT_USER_PREFERENCES
@@ -542,6 +544,21 @@ export const SettingsPage: React.FC = () => {
                 Save all for offline
               </Button>
               <PWAInstallButton variant="button" />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void clearAppCacheAndReload()}
+                loading={clearingAppCache}
+                disabled={!isOnline}
+                title={
+                  !isOnline
+                    ? 'Turn on internet to refresh the installed Jovibe Study app'
+                    : 'Clear cached app shell & service worker and reload the latest Jovibe Study app without deleting your study data'
+                }
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh installed app
+              </Button>
               <Button
                 variant="secondary"
                 size="sm"
