@@ -1,5 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
 import type { Course, CourseMember, JoinedCourse, Topic } from '../types/models';
+import { db } from '../services/firebase/config';
 import {
   createCourse as createCourseInFirestore,
   createTopic as createTopicInFirestore,
@@ -38,6 +40,7 @@ interface CourseContextValue {
   courses: Course[];
   ownedCourses: Course[];
   sharedCourses: Course[];
+  externalActiveCourse: Course | null;
   activeCourse: Course | null;
   activeContentOwnerId: string | undefined;
   activeCourseAccessRevoked: boolean;
@@ -47,6 +50,9 @@ interface CourseContextValue {
   topicsLoading: boolean;
   courseError: string | null;
   selectCourse: (courseId: string) => Promise<void>;
+  selectExternalCourse: (course: Course) => Promise<void>;
+  updateExternalCourseState: (updater: (prev: Course | null) => Course | null) => void;
+  clearExternalCourse: () => void;
   createCourse: (input: { code: string; name: string; description: string }) => Promise<Course>;
   updateCourse: (courseId: string, input: { code: string; name: string; description: string }) => Promise<void>;
   deleteCourse: (courseId: string) => Promise<void>;
@@ -79,11 +85,71 @@ function joinedCourseToCourse(j: JoinedCourse): Course {
   };
 }
 
+const EXTERNAL_COURSE_STORAGE_PREFIX = 'sotal:adminActiveCourse:';
+
+function readStoredExternalCourse(uid: string): Course | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(`${EXTERNAL_COURSE_STORAGE_PREFIX}${uid}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Course>;
+    if (!parsed || !parsed.id || !parsed.userId) return null;
+    return {
+      id: String(parsed.id),
+      userId: String(parsed.userId),
+      authorId: String(parsed.authorId || parsed.userId),
+      code: String(parsed.code ?? ''),
+      name: String(parsed.name ?? ''),
+      description: String(parsed.description ?? ''),
+      isPublic: Boolean(parsed.isPublic),
+      shareToken: String(parsed.shareToken ?? ''),
+      authorName: String(parsed.authorName ?? ''),
+      ownerEmail: String(parsed.ownerEmail ?? ''),
+      isOwner: false,
+      isShared: false,
+      isAdminAccess: true,
+      createdAt: null,
+      updatedAt: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredExternalCourse(uid: string, course: Course | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const key = `${EXTERNAL_COURSE_STORAGE_PREFIX}${uid}`;
+    if (!course) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        id: course.id,
+        userId: course.userId,
+        authorId: course.authorId || course.userId,
+        code: course.code,
+        name: course.name,
+        description: course.description,
+        isPublic: Boolean(course.isPublic),
+        shareToken: course.shareToken || '',
+        authorName: course.authorName || '',
+        ownerEmail: course.ownerEmail || '',
+      })
+    );
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, profile, authReady, persistActiveCourseId } = useAuth();
   const [ownedCourses, setOwnedCourses] = useState<Course[]>([]);
   const [joinedRaw, setJoinedRaw] = useState<JoinedCourse[]>([]);
   const [cachedFallbackCourses, setCachedFallbackCourses] = useState<Course[]>([]);
+  const [externalActiveCourse, setExternalActiveCourse] = useState<Course | null>(null);
   const [ownedLoaded, setOwnedLoaded] = useState(false);
   const [joinedLoaded, setJoinedLoaded] = useState(false);
 
@@ -113,6 +179,7 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setOwnedCourses([]);
       setJoinedRaw([]);
       setCachedFallbackCourses([]);
+      setExternalActiveCourse(null);
       setTopics([]);
       setActiveCourseId('');
       setOwnedLoaded(true);
@@ -126,6 +193,12 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setJoinedLoaded(false);
     setCourseError(null);
 
+    const storedExternal = readStoredExternalCourse(user.uid);
+    setExternalActiveCourse(storedExternal);
+    if (storedExternal) {
+      setActiveCourseId(storedExternal.id);
+    }
+
     void (async () => {
       const [cached, cachedActiveId] = await Promise.all([
         getCachedCourses(user.uid),
@@ -133,7 +206,7 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ]);
       if (!cancelled && cached.length > 0) {
         setCachedFallbackCourses(cached);
-        if (cachedActiveId && cached.some((c) => c.id === cachedActiveId)) {
+        if (!storedExternal && cachedActiveId && cached.some((c) => c.id === cachedActiveId)) {
           setActiveCourseId(cachedActiveId);
         }
       }
@@ -213,7 +286,16 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (!user || coursesLoading) return;
 
+    // Preserve an active admin-accessed Application Course across refreshes
+    if (externalActiveCourse && activeCourseId === externalActiveCourse.id) {
+      return;
+    }
+
     if (courses.length === 0) {
+      if (externalActiveCourse) {
+        setActiveCourseId(externalActiveCourse.id);
+        return;
+      }
       if (activeCourseId !== '') {
         setActiveCourseId('');
       }
@@ -234,12 +316,55 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const fallbackId = courses[0].id;
     setActiveCourseId(fallbackId);
     void setLocalMeta(`activeCourseId:${user.uid}`, fallbackId);
-  }, [user, profile?.activeCourseId, courses, coursesLoading, activeCourseId]);
+  }, [user, profile?.activeCourseId, courses, coursesLoading, activeCourseId, externalActiveCourse]);
+
+  // Keep live Firestore metadata synced when an admin is viewing an external Application Course
+  useEffect(() => {
+    if (!user || !externalActiveCourse) return;
+    const ownerUid = externalActiveCourse.authorId || externalActiveCourse.userId;
+    if (!ownerUid || ownerUid === user.uid) return;
+
+    const ref = doc(db, 'users', ownerUid, 'courses', externalActiveCourse.id);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setExternalActiveCourse(null);
+          writeStoredExternalCourse(user.uid, null);
+          return;
+        }
+        const data = snap.data();
+        setExternalActiveCourse((prev) => {
+          if (!prev || prev.id !== snap.id) return prev;
+          const next: Course = {
+            ...prev,
+            code: String(data.code ?? prev.code),
+            name: String(data.name ?? prev.name),
+            description: String(data.description ?? prev.description),
+            isPublic: Boolean(data.isPublic),
+            shareToken: String(data.shareToken ?? ''),
+            authorName: String(data.authorName ?? prev.authorName ?? ''),
+            updatedAt: data.updatedAt ?? prev.updatedAt,
+          };
+          writeStoredExternalCourse(user.uid, next);
+          return next;
+        });
+      },
+      () => {
+        // Ignore transient offline or permission errors; leave cached metadata intact
+      }
+    );
+
+    return () => unsub();
+  }, [user, externalActiveCourse?.id, externalActiveCourse?.authorId, externalActiveCourse?.userId]);
 
   const activeCourse = useMemo(() => {
-    if (courses.length === 0) return null;
+    if (externalActiveCourse && activeCourseId === externalActiveCourse.id) {
+      return externalActiveCourse;
+    }
+    if (courses.length === 0) return externalActiveCourse ?? null;
     return courses.find((c) => c.id === activeCourseId) ?? courses[0] ?? null;
-  }, [courses, activeCourseId]);
+  }, [courses, activeCourseId, externalActiveCourse]);
 
   const activeContentOwnerId = useMemo(
     () => getCourseContentOwnerId(activeCourse, user?.uid),
@@ -360,6 +485,8 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const selectCourse = useCallback(
     async (courseId: string) => {
       if (!user) return;
+      setExternalActiveCourse(null);
+      writeStoredExternalCourse(user.uid, null);
       setActiveCourseId(courseId);
       await setLocalMeta(`activeCourseId:${user.uid}`, courseId);
       try {
@@ -371,11 +498,56 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [user, persistActiveCourseId]
   );
 
+  const selectExternalCourse = useCallback(
+    async (course: Course) => {
+      if (!user) return;
+      const ownerUid = course.authorId || course.userId;
+      if (ownerUid === user.uid) {
+        await selectCourse(course.id);
+        return;
+      }
+      const normalized: Course = {
+        ...course,
+        userId: ownerUid,
+        authorId: ownerUid,
+        isOwner: false,
+        isShared: false,
+        isAdminAccess: true,
+      };
+      setExternalActiveCourse(normalized);
+      writeStoredExternalCourse(user.uid, normalized);
+      setActiveCourseId(normalized.id);
+    },
+    [user, selectCourse]
+  );
+
+  const updateExternalCourseState = useCallback(
+    (updater: (prev: Course | null) => Course | null) => {
+      setExternalActiveCourse((prev) => {
+        const next = updater(prev);
+        if (user) {
+          writeStoredExternalCourse(user.uid, next);
+        }
+        return next;
+      });
+    },
+    [user]
+  );
+
+  const clearExternalCourse = useCallback(() => {
+    setExternalActiveCourse(null);
+    if (user) {
+      writeStoredExternalCourse(user.uid, null);
+    }
+  }, [user]);
+
   const createCourse = useCallback(
     async (input: { code: string; name: string; description: string }) => {
       if (!user) throw new Error('You must be signed in to create a course.');
       const authorName = profile?.displayName || user.displayName || 'Course Author';
       const created = await createCourseInFirestore(user.uid, { ...input, authorName });
+      setExternalActiveCourse(null);
+      writeStoredExternalCourse(user.uid, null);
       setActiveCourseId(created.id);
       await setLocalMeta(`activeCourseId:${user.uid}`, created.id);
       void persistActiveCourseId(created.id).catch(() => {});
@@ -481,8 +653,8 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!user || !activeCourse) {
         throw new Error('Select a course before creating a topic.');
       }
-      if (activeCourse.isShared) {
-        throw new Error('Only the course author can add topics to a shared course.');
+      if (activeCourse.isShared || activeCourse.isAdminAccess) {
+        throw new Error('Only the course author can add topics here.');
       }
       return createTopicInFirestore(user.uid, activeCourse.id, {
         ...input,
@@ -497,8 +669,8 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!user || !activeCourse) {
         throw new Error('Select a course before editing a topic.');
       }
-      if (activeCourse.isShared) {
-        throw new Error('Only the course author can edit topics in a shared course.');
+      if (activeCourse.isShared || activeCourse.isAdminAccess) {
+        throw new Error('Only the course author can edit topics here.');
       }
       await updateTopicInFirestore(user.uid, activeCourse.id, topicId, input);
     },
@@ -510,8 +682,8 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!user || !activeCourse) {
         throw new Error('Select a course before deleting a topic.');
       }
-      if (activeCourse.isShared) {
-        throw new Error('Only the course author can delete topics in a shared course.');
+      if (activeCourse.isShared || activeCourse.isAdminAccess) {
+        throw new Error('Only the course author can delete topics here.');
       }
       await deleteTopicInFirestore(user.uid, activeCourse.id, topicId);
     },
@@ -528,6 +700,7 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         courses,
         ownedCourses,
         sharedCourses,
+        externalActiveCourse,
         activeCourse,
         activeContentOwnerId,
         activeCourseAccessRevoked,
@@ -537,6 +710,9 @@ export const CourseProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         topicsLoading,
         courseError,
         selectCourse,
+        selectExternalCourse,
+        updateExternalCourseState,
+        clearExternalCourse,
         createCourse,
         updateCourse,
         deleteCourse,

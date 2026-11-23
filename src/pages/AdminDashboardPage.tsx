@@ -17,6 +17,7 @@ import {
 import { usePlatformAccess } from '../context/PlatformAccessContext';
 import { useRouter } from '../router/RouterContext';
 import { apiFetchJson } from '../services/api/authHeaders';
+import { syncAllUsersFromClientFirestore } from '../services/firebase/adminFirestoreSync';
 import { AdminOverviewTab } from '../components/admin/AdminOverviewTab';
 import { AdminUsersTab } from '../components/admin/AdminUsersTab';
 import { AdminAiUsageTab } from '../components/admin/AdminAiUsageTab';
@@ -60,16 +61,35 @@ export const AdminDashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [syncingFirebase, setSyncingFirebase] = useState(false);
   const [syncNotice, setSyncNotice] = useState<FirebaseSyncStatus | null>(null);
+  const [syncVersion, setSyncVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const loadOverview = async () => {
+  const loadOverview = async (runClientFallback = false) => {
     setLoading(true);
     setError(null);
     try {
       const data = await apiFetchJson<AdminOverviewResponse>('/api/admin/overview');
       setOverview(data);
-      if (data.firebaseSync) {
-        setSyncNotice(data.firebaseSync);
+      let latestSync = data.firebaseSync ?? null;
+
+      // If server didn't use a Service Account (or failed REST auth), also sync directly via Firebase Web SDK
+      if (
+        runClientFallback &&
+        (!latestSync || !latestSync.ok || latestSync.source !== 'service_account')
+      ) {
+        const clientSync = await syncAllUsersFromClientFirestore();
+        if (clientSync.ok) {
+          latestSync = clientSync;
+          const refreshed = await apiFetchJson<AdminOverviewResponse>('/api/admin/overview');
+          setOverview(refreshed);
+          setSyncVersion((v) => v + 1);
+        } else if (!latestSync || !latestSync.ok) {
+          latestSync = clientSync;
+        }
+      }
+
+      if (latestSync) {
+        setSyncNotice(latestSync);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load Admin Dashboard.');
@@ -82,11 +102,24 @@ export const AdminDashboardPage: React.FC = () => {
     setSyncingFirebase(true);
     setError(null);
     try {
-      const result = await apiFetchJson<FirebaseSyncStatus>('/api/admin/sync-firebase', {
+      const serverResult = await apiFetchJson<FirebaseSyncStatus>('/api/admin/sync-firebase', {
         method: 'POST',
       });
-      setSyncNotice(result);
-      await loadOverview();
+      let finalResult = serverResult;
+
+      // Also pull directly from Firestore via the admin's Firebase Web SDK so live /users docs always import
+      if (!serverResult.ok || serverResult.source !== 'service_account') {
+        const clientResult = await syncAllUsersFromClientFirestore();
+        if (clientResult.ok && (!serverResult.ok || clientResult.usersSynced >= serverResult.usersSynced)) {
+          finalResult = clientResult;
+        } else if (!serverResult.ok) {
+          finalResult = clientResult;
+        }
+      }
+
+      setSyncNotice(finalResult);
+      setSyncVersion((v) => v + 1);
+      await loadOverview(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Firebase sync failed.');
     } finally {
@@ -96,7 +129,7 @@ export const AdminDashboardPage: React.FC = () => {
 
   useEffect(() => {
     if (!accessLoading && isAdmin) {
-      void loadOverview();
+      void loadOverview(true);
     } else if (!accessLoading && !isAdmin) {
       setLoading(false);
     }
@@ -167,7 +200,7 @@ export const AdminDashboardPage: React.FC = () => {
             variant="secondary"
             size="sm"
             onClick={() => {
-              void loadOverview();
+              void loadOverview(true);
               void refreshAccessStatus();
             }}
             loading={loading}
@@ -180,12 +213,18 @@ export const AdminDashboardPage: React.FC = () => {
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-      {syncNotice && syncNotice.permissionDenied && (
+      {syncNotice && !syncNotice.ok && (
         <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/90 dark:bg-amber-950/35 px-4 py-3 text-xs text-amber-950 dark:text-amber-100 space-y-1">
-          <div className="font-semibold">Firebase Full User Sync Needs One-Time Permission</div>
-          <p className="leading-relaxed text-amber-900/90 dark:text-amber-200/90">
-            {syncNotice.error}
-          </p>
+          <div className="font-semibold">
+            {syncNotice.permissionDenied
+              ? 'Firebase Full User Sync Needs Permission'
+              : 'Firebase Sync Issue'}
+          </div>
+          {syncNotice.error && (
+            <p className="leading-relaxed text-amber-900/90 dark:text-amber-200/90">
+              {syncNotice.error}
+            </p>
+          )}
           {syncNotice.setupHint && (
             <p className="leading-relaxed text-amber-800 dark:text-amber-300">
               {syncNotice.setupHint}
@@ -194,13 +233,31 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {syncNotice && syncNotice.ok && syncNotice.source !== 'none' && syncNotice.usersSynced > 0 && (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200/80 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/30 px-4 py-2 text-xs text-emerald-900 dark:text-emerald-200">
-          <span>
-            Synced {syncNotice.usersSynced} user{syncNotice.usersSynced === 1 ? '' : 's'},{' '}
-            {syncNotice.coursesSynced} courses, {syncNotice.materialsSynced} materials, and{' '}
-            {syncNotice.groupsSynced} groups from Firebase ({syncNotice.source === 'service_account' ? 'Auth + Firestore' : 'Firestore'}).
-          </span>
+      {syncNotice && syncNotice.ok && syncNotice.source !== 'none' && (
+        <div className="rounded-lg border border-emerald-200/80 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/30 px-4 py-2.5 text-xs text-emerald-900 dark:text-emerald-200 space-y-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Synced {syncNotice.usersSynced} user{syncNotice.usersSynced === 1 ? '' : 's'},{' '}
+              {syncNotice.coursesSynced} courses, {syncNotice.materialsSynced} materials, and{' '}
+              {syncNotice.groupsSynced} groups from Firebase (
+              {syncNotice.source === 'service_account'
+                ? 'Auth + Firestore'
+                : syncNotice.source === 'client_sdk'
+                ? 'Firestore SDK'
+                : 'Firestore REST'}
+              ).
+            </span>
+            {syncNotice.projectId && (
+              <span className="font-mono text-[11px] opacity-80">
+                {syncNotice.projectId} / {syncNotice.firestoreDatabaseId || '(default)'}
+              </span>
+            )}
+          </div>
+          {syncNotice.source !== 'service_account' && syncNotice.usersSynced <= 1 && (
+            <p className="text-[11px] text-emerald-800/90 dark:text-emerald-300/90">
+              Firestore currently contains {syncNotice.usersSynced} user profile document in this database. Users who signed up in Firebase Authentication before opening the app (or exist only in Auth without a Firestore profile) require setting <code className="font-mono">FIREBASE_SERVICE_ACCOUNT_JSON</code> on the server to sync from Firebase Auth.
+            </p>
+          )}
         </div>
       )}
 
@@ -242,14 +299,22 @@ export const AdminDashboardPage: React.FC = () => {
           (overview ? (
             <AdminOverviewTab
               overview={overview}
-              onRefresh={loadOverview}
+              onRefresh={() => loadOverview(true)}
               onNavigateTab={(t) => setActiveTab(t)}
             />
           ) : (
             <LoadingSkeleton lines={5} />
           ))}
 
-        {activeTab === 'users' && <AdminUsersTab />}
+        {activeTab === 'users' && (
+          <AdminUsersTab
+            syncVersion={syncVersion}
+            onSynced={(res) => {
+              setSyncNotice(res);
+              void loadOverview(false);
+            }}
+          />
+        )}
 
         {activeTab === 'ai-usage' && overview && (
           <AdminAiUsageTab

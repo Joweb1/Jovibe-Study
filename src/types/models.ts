@@ -95,10 +95,12 @@ export interface Course {
   isPublic?: boolean;
   shareToken?: string;
   authorName?: string;
-  /** Derived client-side metadata distinguishing owned vs joined shared courses */
+  /** Derived client-side metadata distinguishing owned vs joined shared vs admin-accessed courses */
   isShared?: boolean;
   isOwner?: boolean;
+  isAdminAccess?: boolean;
   authorId?: string;
+  ownerEmail?: string;
   joinedAt?: FirestoreTimestamp | null;
   createdAt: FirestoreTimestamp | null;
   updatedAt: FirestoreTimestamp | null;

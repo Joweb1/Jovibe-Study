@@ -17,39 +17,51 @@ interface ServiceAccountJson {
 
 export interface FirebaseSyncResult {
   ok: boolean;
-  source: 'service_account' | 'admin_token' | 'none';
+  source: 'service_account' | 'admin_token' | 'client_sdk' | 'none';
   usersSynced: number;
   coursesSynced: number;
   materialsSynced: number;
   groupsSynced: number;
   syncedAtMs: number;
+  projectId?: string;
+  firestoreDatabaseId?: string;
   permissionDenied?: boolean;
   error?: string;
   setupHint?: string;
 }
 
-let cachedConfig: FirebaseAppletConfig | null = null;
+let cachedConfig: { value: FirebaseAppletConfig; mtimeMs: number } | null = null;
 let cachedOAuthToken: { token: string; expiresAtMs: number } | null = null;
 let lastAutoSyncMs = 0;
 let lastSyncResult: FirebaseSyncResult | null = null;
 
-function getFirebaseConfig(): FirebaseAppletConfig {
-  if (cachedConfig) return cachedConfig;
+export function getFirebaseConfig(): FirebaseAppletConfig {
   try {
     const cfgPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+    const stat = fs.statSync(cfgPath);
+    if (cachedConfig && cachedConfig.mtimeMs === stat.mtimeMs) {
+      return {
+        projectId: process.env.FIREBASE_PROJECT_ID?.trim() || cachedConfig.value.projectId,
+        firestoreDatabaseId:
+          process.env.FIREBASE_DATABASE_ID?.trim() || cachedConfig.value.firestoreDatabaseId,
+      };
+    }
     const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as Partial<FirebaseAppletConfig>;
-    cachedConfig = {
-      projectId: process.env.FIREBASE_PROJECT_ID?.trim() || raw.projectId || 'sotal-study',
-      firestoreDatabaseId:
-        process.env.FIREBASE_DATABASE_ID?.trim() || raw.firestoreDatabaseId || '(default)',
+    const parsed: FirebaseAppletConfig = {
+      projectId: raw.projectId || 'sotal-study',
+      firestoreDatabaseId: raw.firestoreDatabaseId || '(default)',
     };
-    return cachedConfig;
+    cachedConfig = { value: parsed, mtimeMs: stat.mtimeMs };
+    return {
+      projectId: process.env.FIREBASE_PROJECT_ID?.trim() || parsed.projectId,
+      firestoreDatabaseId:
+        process.env.FIREBASE_DATABASE_ID?.trim() || parsed.firestoreDatabaseId,
+    };
   } catch {
-    cachedConfig = {
+    return {
       projectId: process.env.FIREBASE_PROJECT_ID?.trim() || 'sotal-study',
       firestoreDatabaseId: process.env.FIREBASE_DATABASE_ID?.trim() || '(default)',
     };
-    return cachedConfig;
   }
 }
 
@@ -236,7 +248,7 @@ function decodeDoc(doc: FirestoreDocument): { id: string; data: Record<string, u
 async function listFirestoreCollection(
   collectionPath: string,
   bearerToken: string
-): Promise<{ docs: FirestoreDocument[]; permissionDenied: boolean }> {
+): Promise<{ docs: FirestoreDocument[]; permissionDenied: boolean; errorDetail?: string }> {
   const cfg = getFirebaseConfig();
   const baseUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
     cfg.projectId
@@ -255,7 +267,8 @@ async function listFirestoreCollection(
     });
 
     if (res.status === 403) {
-      return { docs: [], permissionDenied: true };
+      const text = await res.text().catch(() => '');
+      return { docs: [], permissionDenied: true, errorDetail: text.slice(0, 220) };
     }
     if (res.status === 404) {
       return { docs: [], permissionDenied: false };
@@ -363,6 +376,7 @@ async function syncFirestoreCollections(
   bearerToken: string
 ): Promise<{
   permissionDenied: boolean;
+  errorDetail?: string;
   usersSynced: number;
   coursesSynced: number;
   materialsSynced: number;
@@ -372,6 +386,7 @@ async function syncFirestoreCollections(
   if (usersRes.permissionDenied) {
     return {
       permissionDenied: true,
+      errorDetail: usersRes.errorDetail,
       usersSynced: 0,
       coursesSynced: 0,
       materialsSynced: 0,
@@ -548,21 +563,34 @@ async function syncFirestoreCollections(
           }
 
           for (const m of decodedMembers) {
-            const mUid = String(m.data.memberUid || m.id || '');
+            const mUid = String(m.data.memberUid || m.id || '').trim();
             const mGroupId = String(m.data.groupId || '');
-            if (!mUid || (mGroupId && mGroupId !== g.id)) continue;
+            if (!mUid) continue;
+            const mDisplayName = String(m.data.displayName || 'Student').slice(0, 120);
+            const mPhoto = String(m.data.photoURL || '').slice(0, 500);
+            const mJoinedAt = typeof m.data.joinedAt === 'number' ? Math.floor(m.data.joinedAt) : m.createMs;
+
+            // Ensure any discovered course member also exists in the admin users directory
+            const existingMemberUser = db.prepare('SELECT uid FROM users WHERE uid = ?').get(mUid) as
+              | { uid?: string }
+              | undefined;
+            if (!existingMemberUser?.uid) {
+              db.prepare(
+                `INSERT OR IGNORE INTO users (
+                  uid, email, display_name, photo_url, status, registered_at_ms, last_active_at_ms,
+                  shared_ai_access_override, first_login_notice_seen, has_personal_key,
+                  courses_count, materials_count, notes, updated_at_ms
+                ) VALUES (?, '', ?, ?, 'active', ?, ?, 'default', 0, 0, 0, 0, '', ?)`
+              ).run(mUid, mDisplayName, mPhoto, mJoinedAt, mJoinedAt, now);
+              usersSynced += 1;
+            }
+
+            if (mGroupId && mGroupId !== g.id) continue;
             db.prepare(
               `INSERT OR IGNORE INTO group_members (
                 group_id, member_uid, display_name, email, photo_url, role, status, joined_at_ms, updated_at_ms
               ) VALUES (?, ?, ?, '', ?, 'member', 'active', ?, ?)`
-            ).run(
-              g.id,
-              mUid,
-              String(m.data.displayName || 'Student').slice(0, 120),
-              String(m.data.photoURL || '').slice(0, 500),
-              typeof m.data.joinedAt === 'number' ? Math.floor(m.data.joinedAt) : m.createMs,
-              now
-            );
+            ).run(g.id, mUid, mDisplayName, mPhoto, mJoinedAt, now);
           }
 
           const cntRow = db
@@ -614,7 +642,16 @@ export async function syncAllFromFirebase(params: {
   force?: boolean;
 }): Promise<FirebaseSyncResult> {
   const now = Date.now();
-  if (!params.force && lastSyncResult && now - lastAutoSyncMs < 45_000) {
+  const cfg = getFirebaseConfig();
+
+  // Only reuse cached sync result within cooldown when the previous sync succeeded
+  if (
+    !params.force &&
+    lastSyncResult &&
+    lastSyncResult.ok &&
+    !lastSyncResult.permissionDenied &&
+    now - lastAutoSyncMs < 30_000
+  ) {
     return lastSyncResult;
   }
 
@@ -628,6 +665,8 @@ export async function syncAllFromFirebase(params: {
       materialsSynced: 0,
       groupsSynced: 0,
       syncedAtMs: now,
+      projectId: cfg.projectId,
+      firestoreDatabaseId: cfg.firestoreDatabaseId,
     };
     lastSyncResult = empty;
     lastAutoSyncMs = now;
@@ -651,6 +690,8 @@ export async function syncAllFromFirebase(params: {
         materialsSynced: fsResult.materialsSynced,
         groupsSynced: fsResult.groupsSynced,
         syncedAtMs: Date.now(),
+        projectId: cfg.projectId,
+        firestoreDatabaseId: cfg.firestoreDatabaseId,
       };
       lastSyncResult = result;
       if (params.force) {
@@ -678,11 +719,14 @@ export async function syncAllFromFirebase(params: {
           materialsSynced: 0,
           groupsSynced: 0,
           syncedAtMs: Date.now(),
+          projectId: cfg.projectId,
+          firestoreDatabaseId: cfg.firestoreDatabaseId,
           permissionDenied: true,
           error:
-            'Firestore rules currently block listing all /users documents (only users who sign in after this update appear automatically).',
+            `Firestore REST API denied listing /users on ${cfg.projectId} (${cfg.firestoreDatabaseId}).` +
+            (fsResult.errorDetail ? ` Details: ${fsResult.errorDetail}` : ''),
           setupHint:
-            'To import all existing Firebase users immediately, either: (1) Publish the updated firestore.rules in Firebase Console (grants read-only admin access to ADMIN_EMAIL), OR (2) Download a Firebase Service Account JSON from Firebase Console → Project Settings → Service Accounts and save it as serviceAccountKey.json in the project root (or set FIREBASE_SERVICE_ACCOUNT_JSON in .env), then click Sync from Firebase.',
+            'Verify firestore.rules are deployed to this database and that your signed-in admin email matches firestore.rules, or configure FIREBASE_SERVICE_ACCOUNT_JSON in environment variables to sync both Firebase Auth and Firestore.',
         };
         lastSyncResult = denied;
         return denied;
@@ -696,6 +740,8 @@ export async function syncAllFromFirebase(params: {
         materialsSynced: fsResult.materialsSynced,
         groupsSynced: fsResult.groupsSynced,
         syncedAtMs: Date.now(),
+        projectId: cfg.projectId,
+        firestoreDatabaseId: cfg.firestoreDatabaseId,
       };
       lastSyncResult = result;
       if (params.force) {
@@ -719,6 +765,8 @@ export async function syncAllFromFirebase(params: {
       materialsSynced: 0,
       groupsSynced: 0,
       syncedAtMs: Date.now(),
+      projectId: cfg.projectId,
+      firestoreDatabaseId: cfg.firestoreDatabaseId,
       error: 'No Firebase admin credentials or ID token available for sync.',
     };
     lastSyncResult = noCreds;
@@ -732,9 +780,341 @@ export async function syncAllFromFirebase(params: {
       materialsSynced: 0,
       groupsSynced: 0,
       syncedAtMs: Date.now(),
+      projectId: cfg.projectId,
+      firestoreDatabaseId: cfg.firestoreDatabaseId,
       error: err instanceof Error ? err.message : 'Firebase sync failed.',
     };
     lastSyncResult = failed;
     return failed;
   }
+}
+
+export interface ClientFirestoreSnapshotPayload {
+  users?: Array<{
+    uid?: string;
+    email?: string;
+    displayName?: string;
+    photoURL?: string;
+    createdAtMs?: number;
+    updatedAtMs?: number;
+  }>;
+  courses?: Array<{
+    uid?: string;
+    courseId?: string;
+    code?: string;
+    name?: string;
+    description?: string;
+    isPublic?: boolean;
+    shareToken?: string;
+    authorName?: string;
+    createdAtMs?: number;
+    updatedAtMs?: number;
+  }>;
+  materials?: Array<{
+    uid?: string;
+    courseId?: string;
+    sourceId?: string;
+    title?: string;
+    materialType?: string;
+    pageCount?: number;
+    originalFileName?: string;
+    contentPreview?: string;
+    createdAtMs?: number;
+    updatedAtMs?: number;
+  }>;
+  groups?: Array<{
+    id?: string;
+    authorUid?: string;
+    authorEmail?: string;
+    authorName?: string;
+    courseId?: string;
+    courseCode?: string;
+    courseName?: string;
+    name?: string;
+    description?: string;
+    shareToken?: string;
+    createdAtMs?: number;
+    updatedAtMs?: number;
+    members?: Array<{
+      uid?: string;
+      displayName?: string;
+      photoURL?: string;
+      joinedAtMs?: number;
+    }>;
+  }>;
+}
+
+/**
+ * Imports a live snapshot read by the authenticated admin's Firebase Web SDK
+ * into the server's Admin SQLite DB so all Firestore users/courses/materials/groups
+ * appear immediately in the Admin Dashboard.
+ */
+export function importClientFirestoreSnapshot(params: {
+  adminUid: string;
+  adminEmail: string;
+  payload: ClientFirestoreSnapshotPayload;
+}): FirebaseSyncResult {
+  const db = getDb();
+  const cfg = getFirebaseConfig();
+  const now = Date.now();
+  const touchedUids = new Set<string>();
+
+  let usersSynced = 0;
+  let coursesSynced = 0;
+  let materialsSynced = 0;
+  let groupsSynced = 0;
+
+  const incomingUsers = Array.isArray(params.payload?.users) ? params.payload.users : [];
+  for (const u of incomingUsers.slice(0, 5000)) {
+    const uid = typeof u?.uid === 'string' ? u.uid.trim().slice(0, 128) : '';
+    if (!uid) continue;
+    touchedUids.add(uid);
+
+    const email = typeof u.email === 'string' ? u.email.trim().toLowerCase().slice(0, 254) : '';
+    const displayName = (
+      typeof u.displayName === 'string' && u.displayName.trim()
+        ? u.displayName.trim()
+        : email.split('@')[0] || 'Student'
+    ).slice(0, 120);
+    const photoUrl = typeof u.photoURL === 'string' ? u.photoURL.slice(0, 500) : '';
+    const createdAtMs =
+      typeof u.createdAtMs === 'number' && Number.isFinite(u.createdAtMs) && u.createdAtMs > 0
+        ? Math.floor(u.createdAtMs)
+        : now;
+    const updatedAtMs =
+      typeof u.updatedAtMs === 'number' && Number.isFinite(u.updatedAtMs) && u.updatedAtMs > 0
+        ? Math.floor(u.updatedAtMs)
+        : createdAtMs;
+
+    const existingUser = db
+      .prepare('SELECT uid, registered_at_ms FROM users WHERE uid = ?')
+      .get(uid) as { uid?: string; registered_at_ms?: number } | undefined;
+
+    if (!existingUser?.uid) {
+      db.prepare(
+        `INSERT INTO users (
+          uid, email, display_name, photo_url, status, registered_at_ms, last_active_at_ms,
+          shared_ai_access_override, first_login_notice_seen, has_personal_key,
+          courses_count, materials_count, notes, updated_at_ms
+        ) VALUES (?, ?, ?, ?, 'active', ?, ?, 'default', 0, 0, 0, 0, '', ?)`
+      ).run(uid, email, displayName, photoUrl, createdAtMs, updatedAtMs, now);
+    } else {
+      const earliestReg = Math.min(Number(existingUser.registered_at_ms || createdAtMs), createdAtMs);
+      db.prepare(
+        `UPDATE users
+         SET email = CASE WHEN ? != '' THEN ? ELSE email END,
+             display_name = CASE WHEN ? != '' THEN ? ELSE display_name END,
+             photo_url = CASE WHEN ? != '' THEN ? ELSE photo_url END,
+             registered_at_ms = ?,
+             last_active_at_ms = MAX(last_active_at_ms, ?),
+             updated_at_ms = ?
+         WHERE uid = ?`
+      ).run(email, email, displayName, displayName, photoUrl, photoUrl, earliestReg, updatedAtMs, now, uid);
+    }
+    usersSynced += 1;
+  }
+
+  const incomingCourses = Array.isArray(params.payload?.courses) ? params.payload.courses : [];
+  for (const c of incomingCourses.slice(0, 10000)) {
+    const uid = typeof c?.uid === 'string' ? c.uid.trim().slice(0, 128) : '';
+    const courseId = typeof c?.courseId === 'string' ? c.courseId.trim().slice(0, 128) : '';
+    if (!uid || !courseId) continue;
+    touchedUids.add(uid);
+
+    const cCreated =
+      typeof c.createdAtMs === 'number' && Number.isFinite(c.createdAtMs) && c.createdAtMs > 0
+        ? Math.floor(c.createdAtMs)
+        : now;
+    const cUpdated =
+      typeof c.updatedAtMs === 'number' && Number.isFinite(c.updatedAtMs) && c.updatedAtMs > 0
+        ? Math.floor(c.updatedAtMs)
+        : cCreated;
+
+    db.prepare(
+      `INSERT INTO user_courses_mirror (
+        uid, course_id, code, name, description, is_public, share_token, author_name,
+        materials_count, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      ON CONFLICT(uid, course_id) DO UPDATE SET
+        code = excluded.code, name = excluded.name, description = excluded.description,
+        is_public = excluded.is_public, share_token = excluded.share_token,
+        author_name = excluded.author_name, updated_at_ms = excluded.updated_at_ms`
+    ).run(
+      uid,
+      courseId,
+      String(c.code || '').slice(0, 32),
+      String(c.name || '').slice(0, 120),
+      String(c.description || '').slice(0, 1000),
+      c.isPublic ? 1 : 0,
+      String(c.shareToken || '').slice(0, 128),
+      String(c.authorName || 'Student').slice(0, 120),
+      cCreated,
+      cUpdated
+    );
+    coursesSynced += 1;
+  }
+
+  const incomingMaterials = Array.isArray(params.payload?.materials) ? params.payload.materials : [];
+  for (const m of incomingMaterials.slice(0, 20000)) {
+    const uid = typeof m?.uid === 'string' ? m.uid.trim().slice(0, 128) : '';
+    const courseId = typeof m?.courseId === 'string' ? m.courseId.trim().slice(0, 128) : '';
+    const sourceId = typeof m?.sourceId === 'string' ? m.sourceId.trim().slice(0, 128) : '';
+    if (!uid || !courseId || !sourceId) continue;
+    touchedUids.add(uid);
+
+    const sCreated =
+      typeof m.createdAtMs === 'number' && Number.isFinite(m.createdAtMs) && m.createdAtMs > 0
+        ? Math.floor(m.createdAtMs)
+        : now;
+    const sUpdated =
+      typeof m.updatedAtMs === 'number' && Number.isFinite(m.updatedAtMs) && m.updatedAtMs > 0
+        ? Math.floor(m.updatedAtMs)
+        : sCreated;
+
+    db.prepare(
+      `INSERT INTO user_materials_mirror (
+        uid, course_id, source_id, title, material_type, page_count,
+        original_file_name, content_preview, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(uid, course_id, source_id) DO UPDATE SET
+        title = excluded.title, material_type = excluded.material_type,
+        page_count = excluded.page_count, original_file_name = excluded.original_file_name,
+        content_preview = excluded.content_preview, updated_at_ms = excluded.updated_at_ms`
+    ).run(
+      uid,
+      courseId,
+      sourceId,
+      String(m.title || 'Untitled').slice(0, 200),
+      String(m.materialType || 'other').slice(0, 40),
+      Math.max(0, Math.floor(Number(m.pageCount) || 0)),
+      String(m.originalFileName || '').slice(0, 260),
+      String(m.contentPreview || '').slice(0, 400),
+      sCreated,
+      sUpdated
+    );
+    materialsSynced += 1;
+  }
+
+  const incomingGroups = Array.isArray(params.payload?.groups) ? params.payload.groups : [];
+  for (const g of incomingGroups.slice(0, 2000)) {
+    const groupId = typeof g?.id === 'string' ? g.id.trim().slice(0, 128) : '';
+    const authorUid = typeof g?.authorUid === 'string' ? g.authorUid.trim().slice(0, 128) : '';
+    const courseId = typeof g?.courseId === 'string' ? g.courseId.trim().slice(0, 128) : '';
+    if (!groupId || !authorUid || !courseId) continue;
+
+    const gCreated =
+      typeof g.createdAtMs === 'number' && Number.isFinite(g.createdAtMs) && g.createdAtMs > 0
+        ? Math.floor(g.createdAtMs)
+        : now;
+    const gUpdated =
+      typeof g.updatedAtMs === 'number' && Number.isFinite(g.updatedAtMs) && g.updatedAtMs > 0
+        ? Math.floor(g.updatedAtMs)
+        : gCreated;
+
+    const existingGroup = db
+      .prepare('SELECT id FROM study_groups WHERE id = ?')
+      .get(groupId) as { id?: string } | undefined;
+
+    if (!existingGroup?.id) {
+      db.prepare(
+        `INSERT INTO study_groups (
+          id, author_uid, author_email, author_name, course_id, course_code, course_name,
+          name, description, status, share_token, member_count, last_activity_at_ms, created_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?, ?, ?)`
+      ).run(
+        groupId,
+        authorUid,
+        String(g.authorEmail || '').slice(0, 254),
+        String(g.authorName || 'Student').slice(0, 120),
+        courseId,
+        String(g.courseCode || '').slice(0, 32),
+        String(g.courseName || '').slice(0, 120),
+        String(g.name || 'Study Group').slice(0, 100),
+        String(g.description || '').slice(0, 400),
+        String(g.shareToken || '').slice(0, 128),
+        gUpdated,
+        gCreated,
+        gUpdated
+      );
+      db.prepare(
+        `INSERT OR IGNORE INTO group_members (
+          group_id, member_uid, display_name, email, photo_url, role, status, joined_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, ?, '', 'owner', 'active', ?, ?)`
+      ).run(
+        groupId,
+        authorUid,
+        String(g.authorName || 'Student').slice(0, 120),
+        String(g.authorEmail || '').slice(0, 254),
+        gCreated,
+        now
+      );
+    }
+
+    for (const m of Array.isArray(g.members) ? g.members.slice(0, 500) : []) {
+      const mUid = typeof m?.uid === 'string' ? m.uid.trim().slice(0, 128) : '';
+      if (!mUid) continue;
+      const mJoined =
+        typeof m.joinedAtMs === 'number' && Number.isFinite(m.joinedAtMs) && m.joinedAtMs > 0
+          ? Math.floor(m.joinedAtMs)
+          : gCreated;
+      db.prepare(
+        `INSERT OR IGNORE INTO group_members (
+          group_id, member_uid, display_name, email, photo_url, role, status, joined_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, '', ?, 'member', 'active', ?, ?)`
+      ).run(
+        groupId,
+        mUid,
+        String(m.displayName || 'Student').slice(0, 120),
+        String(m.photoURL || '').slice(0, 500),
+        mJoined,
+        now
+      );
+    }
+
+    const cntRow = db
+      .prepare("SELECT COUNT(*) AS cnt FROM group_members WHERE group_id = ? AND status = 'active'")
+      .get(groupId) as { cnt?: number };
+    db.prepare('UPDATE study_groups SET member_count = ? WHERE id = ?').run(
+      Math.max(1, Number(cntRow?.cnt ?? 1)),
+      groupId
+    );
+    groupsSynced += 1;
+  }
+
+  for (const uid of touchedUids) {
+    const cCount = db
+      .prepare('SELECT COUNT(*) AS cnt FROM user_courses_mirror WHERE uid = ?')
+      .get(uid) as { cnt?: number };
+    const mCount = db
+      .prepare("SELECT COUNT(*) AS cnt FROM user_materials_mirror WHERE uid = ? AND status != 'deleted'")
+      .get(uid) as { cnt?: number };
+    db.prepare(
+      'UPDATE users SET courses_count = ?, materials_count = ?, updated_at_ms = ? WHERE uid = ?'
+    ).run(Number(cCount?.cnt ?? 0), Number(mCount?.cnt ?? 0), now, uid);
+  }
+
+  const result: FirebaseSyncResult = {
+    ok: true,
+    source: 'client_sdk',
+    usersSynced,
+    coursesSynced,
+    materialsSynced,
+    groupsSynced,
+    syncedAtMs: Date.now(),
+    projectId: cfg.projectId,
+    firestoreDatabaseId: cfg.firestoreDatabaseId,
+  };
+  lastSyncResult = result;
+  lastAutoSyncMs = Date.now();
+
+  writeAdminAuditLog({
+    adminUid: params.adminUid,
+    adminEmail: params.adminEmail,
+    action: 'firebase_client_snapshot_imported',
+    targetType: 'system',
+    targetId: 'firebase',
+    details: result as unknown as Record<string, unknown>,
+  });
+
+  return result;
 }

@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { apiFetchJson } from '../../services/api/authHeaders';
+import { syncAllUsersFromClientFirestore } from '../../services/firebase/adminFirestoreSync';
 import { Button } from '../ui/Button';
 import { FEATURE_LABELS, type AdminUserListItem, type FirebaseSyncStatus } from './adminTypes';
 
@@ -63,7 +64,12 @@ interface UserDetailPayload {
   featureBreakdown: Array<{ feature: string; count: number }>;
 }
 
-export const AdminUsersTab: React.FC = () => {
+interface AdminUsersTabProps {
+  syncVersion?: number;
+  onSynced?: (status: FirebaseSyncStatus) => void;
+}
+
+export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({ syncVersion = 0, onSynced }) => {
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -111,10 +117,22 @@ export const AdminUsersTab: React.FC = () => {
     setSyncingFirebase(true);
     setError(null);
     try {
-      const result = await apiFetchJson<FirebaseSyncStatus>('/api/admin/sync-firebase', {
+      const serverResult = await apiFetchJson<FirebaseSyncStatus>('/api/admin/sync-firebase', {
         method: 'POST',
       });
-      setSyncStatus(result);
+      let finalResult = serverResult;
+
+      if (!serverResult.ok || serverResult.source !== 'service_account') {
+        const clientResult = await syncAllUsersFromClientFirestore();
+        if (clientResult.ok && (!serverResult.ok || clientResult.usersSynced >= serverResult.usersSynced)) {
+          finalResult = clientResult;
+        } else if (!serverResult.ok) {
+          finalResult = clientResult;
+        }
+      }
+
+      setSyncStatus(finalResult);
+      onSynced?.(finalResult);
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Firebase sync failed.');
@@ -128,7 +146,7 @@ export const AdminUsersTab: React.FC = () => {
       void loadUsers();
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, syncVersion]);
 
   const openUserDetail = async (uid: string) => {
     setSelectedUid(uid);
@@ -278,10 +296,19 @@ export const AdminUsersTab: React.FC = () => {
         </div>
       </div>
 
-      {syncStatus?.permissionDenied && (
+      {syncStatus && !syncStatus.ok && (
         <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50/90 dark:bg-amber-950/35 px-4 py-3 text-xs text-amber-950 dark:text-amber-100 space-y-1">
-          <div className="font-semibold">Only users who signed in after this update are listed so far</div>
-          <p className="text-amber-900/90 dark:text-amber-200/90">{syncStatus.setupHint}</p>
+          <div className="font-semibold">
+            {syncStatus.permissionDenied
+              ? 'Firestore listing permission denied'
+              : 'Firebase user sync could not complete'}
+          </div>
+          {syncStatus.error && (
+            <p className="text-amber-900/90 dark:text-amber-200/90">{syncStatus.error}</p>
+          )}
+          {syncStatus.setupHint && (
+            <p className="text-amber-800 dark:text-amber-300">{syncStatus.setupHint}</p>
+          )}
         </div>
       )}
 

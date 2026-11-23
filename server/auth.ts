@@ -25,27 +25,28 @@ declare global {
   }
 }
 
-let cachedProjectId: string | null = null;
+let cachedProjectId: { value: string; mtimeMs: number } | null = null;
 
 export function getFirebaseProjectId(): string {
-  if (cachedProjectId) return cachedProjectId;
   const fromEnv = (process.env.FIREBASE_PROJECT_ID || '').trim();
   if (fromEnv) {
-    cachedProjectId = fromEnv;
-    return cachedProjectId;
+    return fromEnv;
   }
   try {
     const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+    const stat = fs.statSync(configPath);
+    if (cachedProjectId && cachedProjectId.mtimeMs === stat.mtimeMs) {
+      return cachedProjectId.value;
+    }
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { projectId?: string };
     if (raw.projectId) {
-      cachedProjectId = raw.projectId;
-      return cachedProjectId;
+      cachedProjectId = { value: raw.projectId, mtimeMs: stat.mtimeMs };
+      return raw.projectId;
     }
   } catch {
     // Fallback below
   }
-  cachedProjectId = 'sotal-study';
-  return cachedProjectId;
+  return 'sotal-study';
 }
 
 export function getConfiguredAdminEmail(): string {

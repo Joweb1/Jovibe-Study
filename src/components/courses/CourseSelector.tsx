@@ -62,9 +62,35 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({ onNewCourse }) =
             transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
             className="absolute right-0 z-40 mt-2 w-72 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg"
           >
+            {activeCourse?.isAdminAccess && (
+              <div className="border-b border-zinc-200 dark:border-zinc-800 px-3 py-2 bg-zinc-50 dark:bg-zinc-800/60">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                  Application course
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      <span className="font-mono">{activeCourse.code}</span>
+                      <span aria-hidden="true">·</span>
+                      <span>{activeCourse.isPublic ? 'Public' : 'Private'}</span>
+                    </div>
+                    <div className="truncate text-sm font-medium text-zinc-950 dark:text-zinc-100">
+                      {activeCourse.name}
+                    </div>
+                    {activeCourse.ownerEmail && (
+                      <div className="truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {activeCourse.ownerEmail}
+                      </div>
+                    )}
+                  </div>
+                  <Check className="h-4 w-4 shrink-0 text-zinc-950 dark:text-zinc-200" />
+                </div>
+              </div>
+            )}
+
             {courses.length === 0 ? (
               <div className="px-3 py-3 text-xs text-zinc-500 dark:text-zinc-400">
-                No courses yet. Create your first course to organize materials and study sessions.
+                No personal courses yet. Create a course or remix an application course.
               </div>
             ) : (
               <div className="max-h-64 overflow-y-auto scrollbar-hide py-1">

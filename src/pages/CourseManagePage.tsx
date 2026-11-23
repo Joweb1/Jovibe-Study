@@ -4,9 +4,11 @@ import {
   BookOpen,
   Check,
   Copy,
+  CopyPlus,
   FolderPlus,
   Globe,
   Lock,
+  Mail,
   Pencil,
   RefreshCw,
   Search,
@@ -15,11 +17,19 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import type { CourseGroup, CourseMember } from '../types/models';
+import type { Course, CourseGroup, CourseMember } from '../types/models';
 import { useAuth } from '../context/AuthContext';
 import { useCourses } from '../context/CourseContext';
 import { usePlatformAccess } from '../context/PlatformAccessContext';
 import { useRouter } from '../router/RouterContext';
+import {
+  adminDeleteApplicationCourse,
+  adminRegenerateApplicationCourseShareToken,
+  adminSetApplicationCourseVisibility,
+  adminUpdateApplicationCourse,
+  fetchApplicationCourseById,
+  remixCourseToOwnAccount,
+} from '../services/firebase/adminCourseService';
 import { formatReadableError } from '../services/firebase/errors';
 import {
   assignMemberToGroup,
@@ -32,24 +42,31 @@ import {
   updateCourseGroup,
 } from '../services/firebase/sharedCourseService';
 import { formatShortDate, SCHEMA_LIMITS } from '../utils/validation';
+import { CourseModal } from '../components/courses/CourseModal';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { EmptyState, ErrorBanner, LoadingSkeleton } from '../components/ui/StateViews';
 
 export const CourseManagePage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const {
     ownedCourses,
     activeCourse,
+    externalActiveCourse,
     coursesLoading,
     selectCourse,
+    selectExternalCourse,
+    updateExternalCourseState,
+    clearExternalCourse,
+    updateCourse,
+    deleteCourse,
     setCourseVisibility,
     rotateCourseShareLink,
   } = useCourses();
   const { routeParams, navigate } = useRouter();
-  const { syncGroupsMetadata } = usePlatformAccess();
+  const { isAdmin, syncGroupsMetadata } = usePlatformAccess();
 
-  const targetCourse = useMemo(() => {
+  const ownedTargetCourse = useMemo(() => {
     if (routeParams.courseId) {
       return ownedCourses.find((c) => c.id === routeParams.courseId) ?? null;
     }
@@ -58,6 +75,56 @@ export const CourseManagePage: React.FC = () => {
     }
     return ownedCourses[0] ?? null;
   }, [routeParams.courseId, ownedCourses, activeCourse]);
+
+  const [adminTargetCourse, setAdminTargetCourse] = useState<Course | null>(null);
+  const [adminCourseLoading, setAdminCourseLoading] = useState(false);
+
+  // If admin navigated to /manage-course/:courseId for another user's course, load it
+  useEffect(() => {
+    if (!user || !isAdmin || ownedTargetCourse) {
+      setAdminTargetCourse(null);
+      setAdminCourseLoading(false);
+      return;
+    }
+
+    const requestedId = routeParams.courseId || (externalActiveCourse?.id ?? '');
+    if (!requestedId) {
+      setAdminTargetCourse(null);
+      setAdminCourseLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    if (externalActiveCourse && externalActiveCourse.id === requestedId) {
+      setAdminTargetCourse(externalActiveCourse);
+    }
+    setAdminCourseLoading(true);
+
+    const ownerHint =
+      externalActiveCourse?.id === requestedId
+        ? externalActiveCourse.authorId || externalActiveCourse.userId
+        : undefined;
+
+    void fetchApplicationCourseById(requestedId, user.uid, ownerHint)
+      .then((found) => {
+        if (cancelled) return;
+        setAdminTargetCourse(found);
+        setAdminCourseLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(formatReadableError(err));
+        setAdminCourseLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isAdmin, ownedTargetCourse, routeParams.courseId, externalActiveCourse]);
+
+  const targetCourse = ownedTargetCourse ?? (isAdmin ? adminTargetCourse : null);
+  const targetOwnerUid = targetCourse ? targetCourse.authorId || targetCourse.userId : user?.uid ?? '';
+  const isManagingOtherUserCourse = Boolean(targetCourse && user && targetOwnerUid !== user.uid);
 
   const [members, setMembers] = useState<CourseMember[]>([]);
   const [groups, setGroups] = useState<CourseGroup[]>([]);
@@ -68,6 +135,12 @@ export const CourseManagePage: React.FC = () => {
   const [rotatingLink, setRotatingLink] = useState(false);
   const [rotateConfirmOpen, setRotateConfirmOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [deleteCourseModalOpen, setDeleteCourseModalOpen] = useState(false);
+  const [deletingCourse, setDeletingCourse] = useState(false);
+  const [remixingCourse, setRemixingCourse] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('all');
@@ -88,7 +161,7 @@ export const CourseManagePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user || !targetCourse) {
+    if (!user || !targetCourse || !targetOwnerUid) {
       setMembers([]);
       setGroups([]);
       setMembersLoading(false);
@@ -101,7 +174,7 @@ export const CourseManagePage: React.FC = () => {
     setGroupsLoading(true);
 
     const unsubMembers = subscribeCourseMembers(
-      user.uid,
+      targetOwnerUid,
       targetCourse.id,
       (liveMembers) => {
         if (cancelled) return;
@@ -116,7 +189,7 @@ export const CourseManagePage: React.FC = () => {
     );
 
     const unsubGroups = subscribeCourseGroups(
-      user.uid,
+      targetOwnerUid,
       targetCourse.id,
       (liveGroups) => {
         if (cancelled) return;
@@ -135,11 +208,11 @@ export const CourseManagePage: React.FC = () => {
       unsubMembers();
       unsubGroups();
     };
-  }, [user, targetCourse?.id]);
+  }, [user, targetCourse?.id, targetOwnerUid]);
 
   // Mirror course study groups & members to server DB for Admin Group Study Management
   useEffect(() => {
-    if (!user || !targetCourse || groupsLoading || membersLoading) return;
+    if (!user || !targetCourse || !targetOwnerUid || groupsLoading || membersLoading) return;
     if (groups.length === 0) return;
     void syncGroupsMetadata(
       groups.map((g) => ({
@@ -150,7 +223,7 @@ export const CourseManagePage: React.FC = () => {
         name: g.name,
         description: g.description,
         shareToken: targetCourse.shareToken || '',
-        authorUid: user.uid,
+        authorUid: targetOwnerUid,
         authorName: targetCourse.authorName || user.displayName || 'Course Author',
         members: members
           .filter((m) => !m.groupId || m.groupId === g.id)
@@ -161,7 +234,7 @@ export const CourseManagePage: React.FC = () => {
           })),
       }))
     );
-  }, [user, targetCourse, groups, members, groupsLoading, membersLoading, syncGroupsMetadata]);
+  }, [user, targetCourse, targetOwnerUid, groups, members, groupsLoading, membersLoading, syncGroupsMetadata]);
 
   const groupMemberCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -199,7 +272,19 @@ export const CourseManagePage: React.FC = () => {
     setTogglingPublic(true);
     setError(null);
     try {
-      await setCourseVisibility(targetCourse.id, !targetCourse.isPublic);
+      if (isManagingOtherUserCourse) {
+        const result = await adminSetApplicationCourseVisibility(targetCourse, !targetCourse.isPublic);
+        setAdminTargetCourse((prev) =>
+          prev ? { ...prev, isPublic: result.isPublic, shareToken: result.shareToken } : prev
+        );
+        updateExternalCourseState((prev) =>
+          prev && prev.id === targetCourse.id
+            ? { ...prev, isPublic: result.isPublic, shareToken: result.shareToken }
+            : prev
+        );
+      } else {
+        await setCourseVisibility(targetCourse.id, !targetCourse.isPublic);
+      }
     } catch (err) {
       setError(formatReadableError(err));
     } finally {
@@ -223,12 +308,84 @@ export const CourseManagePage: React.FC = () => {
     setRotatingLink(true);
     setError(null);
     try {
-      await rotateCourseShareLink(targetCourse.id);
+      if (isManagingOtherUserCourse) {
+        const nextToken = await adminRegenerateApplicationCourseShareToken(targetCourse);
+        setAdminTargetCourse((prev) =>
+          prev ? { ...prev, isPublic: true, shareToken: nextToken } : prev
+        );
+        updateExternalCourseState((prev) =>
+          prev && prev.id === targetCourse.id
+            ? { ...prev, isPublic: true, shareToken: nextToken }
+            : prev
+        );
+      } else {
+        await rotateCourseShareLink(targetCourse.id);
+      }
       setRotateConfirmOpen(false);
     } catch (err) {
       setError(formatReadableError(err));
     } finally {
       setRotatingLink(false);
+    }
+  };
+
+  const handleEditCourseDetails = async (input: { code: string; name: string; description: string }) => {
+    if (!targetCourse) return;
+    if (isManagingOtherUserCourse) {
+      await adminUpdateApplicationCourse(targetCourse, input);
+      setAdminTargetCourse((prev) => (prev ? { ...prev, ...input } : prev));
+      updateExternalCourseState((prev) =>
+        prev && prev.id === targetCourse.id ? { ...prev, ...input } : prev
+      );
+    } else {
+      await updateCourse(targetCourse.id, input);
+    }
+    setNotice('Course details updated.');
+  };
+
+  const handleRemixCourse = async () => {
+    if (!user || !targetCourse) return;
+    setRemixingCourse(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await remixCourseToOwnAccount({
+        adminUid: user.uid,
+        adminDisplayName: profile?.displayName || user.displayName || 'Admin',
+        sourceCourse: targetCourse,
+      });
+      await selectCourse(result.course.id);
+      setNotice(
+        `Remixed "${result.course.code}" into your account (${result.topicsCopied} ${
+          result.topicsCopied === 1 ? 'topic' : 'topics'
+        }, ${result.sourcesCopied} ${result.sourcesCopied === 1 ? 'material' : 'materials'} copied).`
+      );
+    } catch (err) {
+      setError(formatReadableError(err));
+    } finally {
+      setRemixingCourse(false);
+    }
+  };
+
+  const handleConfirmDeleteCourse = async () => {
+    if (!targetCourse) return;
+    setDeletingCourse(true);
+    setError(null);
+    try {
+      if (isManagingOtherUserCourse) {
+        await adminDeleteApplicationCourse(targetCourse);
+        if (externalActiveCourse?.id === targetCourse.id) {
+          clearExternalCourse();
+        }
+      } else {
+        await deleteCourse(targetCourse.id);
+      }
+      setDeleteCourseModalOpen(false);
+      navigate('/courses');
+    } catch (err) {
+      setError(formatReadableError(err));
+    } finally {
+      setDeletingCourse(false);
     }
   };
 
@@ -248,7 +405,7 @@ export const CourseManagePage: React.FC = () => {
 
   const handleSaveGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !targetCourse) return;
+    if (!user || !targetCourse || !targetOwnerUid) return;
     if (!groupName.trim()) {
       setError('Group name is required.');
       return;
@@ -259,7 +416,7 @@ export const CourseManagePage: React.FC = () => {
     try {
       if (editingGroup) {
         await updateCourseGroup({
-          authorId: user.uid,
+          authorId: targetOwnerUid,
           courseId: targetCourse.id,
           groupId: editingGroup.id,
           name: groupName,
@@ -267,7 +424,7 @@ export const CourseManagePage: React.FC = () => {
         });
       } else {
         await createCourseGroup({
-          authorId: user.uid,
+          authorId: targetOwnerUid,
           courseId: targetCourse.id,
           name: groupName,
           description: groupDescription,
@@ -283,12 +440,12 @@ export const CourseManagePage: React.FC = () => {
   };
 
   const handleConfirmDeleteGroup = async () => {
-    if (!user || !targetCourse || !groupToDelete) return;
+    if (!user || !targetCourse || !targetOwnerUid || !groupToDelete) return;
     setDeletingGroup(true);
     setError(null);
     try {
       await deleteCourseGroup({
-        authorId: user.uid,
+        authorId: targetOwnerUid,
         courseId: targetCourse.id,
         groupId: groupToDelete.id,
       });
@@ -304,12 +461,12 @@ export const CourseManagePage: React.FC = () => {
   };
 
   const handleAssignGroup = async (memberUid: string, nextGroupId: string) => {
-    if (!user || !targetCourse) return;
+    if (!user || !targetCourse || !targetOwnerUid) return;
     setUpdatingMemberUid(memberUid);
     setError(null);
     try {
       await assignMemberToGroup({
-        authorId: user.uid,
+        authorId: targetOwnerUid,
         courseId: targetCourse.id,
         memberUid,
         groupId: nextGroupId,
@@ -322,11 +479,11 @@ export const CourseManagePage: React.FC = () => {
   };
 
   const handleConfirmRemoveMember = async () => {
-    if (!user || !targetCourse || !memberToRemove) return;
+    if (!user || !targetCourse || !targetOwnerUid || !memberToRemove) return;
     setRemovingMember(true);
     setError(null);
     try {
-      await removeCourseMember(user.uid, targetCourse.id, memberToRemove.memberUid);
+      await removeCourseMember(targetOwnerUid, targetCourse.id, memberToRemove.memberUid);
       setMemberToRemove(null);
     } catch (err) {
       setError(formatReadableError(err));
@@ -335,7 +492,7 @@ export const CourseManagePage: React.FC = () => {
     }
   };
 
-  if (coursesLoading) {
+  if (coursesLoading || adminCourseLoading) {
     return <LoadingSkeleton lines={5} />;
   }
 
@@ -351,8 +508,8 @@ export const CourseManagePage: React.FC = () => {
           Back to Courses
         </button>
         <EmptyState
-          title="No owned course selected"
-          description="Only the author of a course can manage sharing settings, members, and study groups."
+          title="No manageable course found"
+          description="Only the course author or an administrator can manage sharing settings, members, and study groups."
           actionLabel="Go to Courses"
           onAction={() => navigate('/courses')}
         />
@@ -374,17 +531,51 @@ export const CourseManagePage: React.FC = () => {
             Back to Courses
           </button>
 
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              void selectCourse(targetCourse.id);
-              navigate('/library');
-            }}
-          >
-            <BookOpen className="h-3.5 w-3.5" />
-            Open Library
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setEditModalOpen(true)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit details
+            </Button>
+            {isAdmin && (
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={remixingCourse}
+                onClick={() => void handleRemixCourse()}
+              >
+                <CopyPlus className="h-3.5 w-3.5" />
+                Remix to my courses
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                if (isManagingOtherUserCourse) {
+                  void selectExternalCourse(targetCourse);
+                } else {
+                  void selectCourse(targetCourse.id);
+                }
+                navigate('/library');
+              }}
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              Open Library
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDeleteCourseModalOpen(true)}
+              className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-300"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </Button>
+          </div>
         </div>
 
         <div className="space-y-1.5">
@@ -408,10 +599,32 @@ export const CourseManagePage: React.FC = () => {
           <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
             {targetCourse.name}
           </h1>
+          {isManagingOtherUserCourse && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 pt-0.5">
+              <Mail className="h-3.5 w-3.5 shrink-0" />
+              <span>Owner:</span>
+              <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                {targetCourse.ownerEmail || targetCourse.authorName || targetOwnerUid}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
+      {notice && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-4 py-2.5 text-xs text-zinc-800 dark:text-zinc-200">
+          <span>{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-100 cursor-pointer"
+            aria-label="Dismiss notice"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Section 1: Visibility & Invite Link Controls */}
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6 space-y-5">
@@ -834,7 +1047,7 @@ export const CourseManagePage: React.FC = () => {
         title="Remove member?"
         description={
           memberToRemove
-            ? `Remove ${memberToRemove.displayName} from "${targetCourse.code} — ${targetCourse.name}"? Their read access to your course materials will be revoked immediately.`
+            ? `Remove ${memberToRemove.displayName} from "${targetCourse.code} — ${targetCourse.name}"? Their read access to course materials will be revoked immediately.`
             : undefined
         }
         onClose={() => {
@@ -855,6 +1068,41 @@ export const CourseManagePage: React.FC = () => {
             loading={removingMember}
           >
             Remove member
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Edit Course Details Modal */}
+      <CourseModal
+        open={editModalOpen}
+        initialCourse={targetCourse}
+        onClose={() => setEditModalOpen(false)}
+        onSubmit={handleEditCourseDetails}
+      />
+
+      {/* Delete Course Confirmation Modal */}
+      <Modal
+        open={deleteCourseModalOpen}
+        title="Delete course?"
+        description={`This will permanently delete "${targetCourse.code} — ${targetCourse.name}" along with all its topics, study materials, and share links.`}
+        onClose={() => {
+          if (!deletingCourse) setDeleteCourseModalOpen(false);
+        }}
+      >
+        <div className="flex items-center justify-end gap-2.5 pt-2">
+          <Button
+            variant="secondary"
+            onClick={() => setDeleteCourseModalOpen(false)}
+            disabled={deletingCourse}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => void handleConfirmDeleteCourse()}
+            loading={deletingCourse}
+          >
+            Delete permanently
           </Button>
         </div>
       </Modal>

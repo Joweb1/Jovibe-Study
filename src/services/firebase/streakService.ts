@@ -34,7 +34,11 @@ import {
   reconcileMissedDays,
 } from '../streak/streakEngine';
 import { auth, db } from './config';
-import { handleFirestoreError, OperationType } from './errors';
+import {
+  handleFirestoreError,
+  isTransientNetworkFirestoreError,
+  OperationType,
+} from './errors';
 
 function streakProfileRef(userId: string) {
   return doc(db, 'users', userId, 'streakProfile', 'current');
@@ -274,6 +278,9 @@ async function ensureAndReconcileStreakInternal(
 
     return resultProfile ?? createInitialStreakProfile(userId, todayKey, tzOffset);
   } catch (error) {
+    if (isTransientNetworkFirestoreError(error)) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -590,6 +597,10 @@ export async function flushAppTimeSeconds(
   } catch (error) {
     // If the user signed out while the background timer flush was in-flight, abort quietly
     if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    // Transient network drops / tab unloads are retried automatically from localStorage by StreakContext
+    if (isTransientNetworkFirestoreError(error)) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -660,6 +671,10 @@ export async function addActiveLearningSeconds(
       }
     });
   } catch (error) {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isTransientNetworkFirestoreError(error)) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }

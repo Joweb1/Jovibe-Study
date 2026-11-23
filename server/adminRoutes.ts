@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { extractBearerToken, requireAdmin } from './auth.ts';
 import { createId, getDb, writeAdminAuditLog } from './db.ts';
-import { getLastFirebaseSyncStatus, syncAllFromFirebase } from './firebaseSync.ts';
+import {
+  getLastFirebaseSyncStatus,
+  importClientFirestoreSnapshot,
+  syncAllFromFirebase,
+  type ClientFirestoreSnapshotPayload,
+} from './firebaseSync.ts';
 import {
   ADMIN_MANAGED_PROVIDERS,
   addAdminApiKey,
@@ -58,6 +63,15 @@ export function createAdminRouter(): Router {
       adminEmail: req.authUser!.email,
       adminIdToken: extractBearerToken(req),
       force: true,
+    });
+    res.json(result);
+  });
+
+  router.post('/import-firestore-snapshot', (req, res) => {
+    const result = importClientFirestoreSnapshot({
+      adminUid: req.authUser!.uid,
+      adminEmail: req.authUser!.email,
+      payload: (req.body ?? {}) as ClientFirestoreSnapshotPayload,
     });
     res.json(result);
   });

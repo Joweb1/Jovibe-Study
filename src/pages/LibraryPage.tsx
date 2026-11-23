@@ -275,7 +275,7 @@ export const LibraryPage: React.FC = () => {
     return <LoadingSkeleton lines={4} />;
   }
 
-  if (courses.length === 0 || !activeCourse || !user) {
+  if (!activeCourse || !user) {
     return (
       <div>
         <div className="border-b border-zinc-200 dark:border-zinc-800 pb-6">
@@ -402,9 +402,18 @@ export const LibraryPage: React.FC = () => {
               </h1>
               {!isOwner && (
                 <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Shared by {activeCourse.authorName || 'Course Author'}
-                  {activeMemberGroupName ? ` · ${activeMemberGroupName}` : ''}
-                  {' · Materials managed by author'}
+                  {activeCourse.isAdminAccess ? (
+                    <>
+                      Application course · Owner: {activeCourse.ownerEmail || activeCourse.authorName || 'User'} ·{' '}
+                      {activeCourse.isPublic ? 'Public' : 'Private'}
+                    </>
+                  ) : (
+                    <>
+                      Shared by {activeCourse.authorName || 'Course Author'}
+                      {activeMemberGroupName ? ` · ${activeMemberGroupName}` : ''}
+                      {' · Materials managed by author'}
+                    </>
+                  )}
                 </p>
               )}
               {activeCourse.description && (
@@ -452,12 +461,12 @@ export const LibraryPage: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
-                {isOwner && (
+                {(isOwner || activeCourse.isAdminAccess) && (
                   <button
                     type="button"
                     onClick={() => navigate(`/manage-course/${activeCourse.id}`)}
                     aria-label="Share and manage course"
-                    title="Share & manage course"
+                    title="Manage course"
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 transition-colors cursor-pointer"
                   >
                     <Users className="h-3.5 w-3.5" />

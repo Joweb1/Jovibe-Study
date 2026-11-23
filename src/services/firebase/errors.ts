@@ -26,6 +26,31 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export function isTransientNetworkFirestoreError(error: unknown): boolean {
+  if (!error) return false;
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '').toLowerCase()
+      : '';
+  if (
+    code === 'unavailable' ||
+    code === 'deadline-exceeded' ||
+    code === 'cancelled' ||
+    code === 'aborted'
+  ) {
+    return true;
+  }
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    msg.includes('connection failed') ||
+    msg.includes('client is offline') ||
+    msg.includes('could not reach cloud firestore') ||
+    msg.includes('network error') ||
+    msg.includes('transport errored') ||
+    msg.includes('failed to fetch')
+  );
+}
+
 export function handleFirestoreError(
   error: unknown,
   operationType: OperationType,

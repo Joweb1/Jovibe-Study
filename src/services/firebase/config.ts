@@ -18,6 +18,7 @@ function createPersistentFirestore(): Firestore {
     return initializeFirestore(
       app,
       {
+        experimentalAutoDetectLongPolling: true,
         localCache: persistentLocalCache({
           tabManager: persistentMultipleTabManager(),
         }),

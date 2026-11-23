@@ -333,7 +333,16 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ) {
       writePendingLocalSeconds(userId, null);
       void flushAppTimeSeconds(userId, recovered.seconds, recovered.dateKey).catch(() => {
-        // Ignore transient offline recovery error
+        // Restore recovered seconds so they retry cleanly on the next flush or reconnect
+        const currentPending = readPendingLocalSeconds(userId);
+        if (currentPending && currentPending.dateKey === recovered.dateKey) {
+          writePendingLocalSeconds(userId, {
+            dateKey: recovered.dateKey,
+            seconds: currentPending.seconds + recovered.seconds,
+          });
+        } else if (!currentPending) {
+          writePendingLocalSeconds(userId, recovered);
+        }
       });
     }
 
@@ -422,13 +431,14 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     const handlePageHide = () => {
+      // Only persist synchronously to localStorage on unload/pagehide;
+      // firing a multi-roundtrip Firestore transaction here gets aborted by the browser ("Connection failed.")
       if (unsavedSecondsRef.current > 0) {
         writePendingLocalSeconds(userId, {
-          dateKey: unsavedDateKeyRef.current,
-          seconds: unsavedSecondsRef.current,
+          dateKey: unsavedDateKeyRef.current || getLocalDateKey(),
+          seconds: Math.floor(unsavedSecondsRef.current),
         });
       }
-      void flushAccumulatedAppTime();
     };
 
     const secondInterval = window.setInterval(tick, 1000);
@@ -450,9 +460,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pagehide', handlePageHide);
-      if (auth.currentUser?.uid === userId) {
-        void flushAccumulatedAppTime();
-      } else if (unsavedSecondsRef.current > 0) {
+      if (unsavedSecondsRef.current > 0) {
         writePendingLocalSeconds(userId, {
           dateKey: unsavedDateKeyRef.current || getLocalDateKey(),
           seconds: Math.floor(unsavedSecondsRef.current),

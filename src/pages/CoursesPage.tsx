@@ -26,6 +26,7 @@ import {
   buildCourseInviteUrl,
   extractShareToken,
 } from '../services/firebase/sharedCourseService';
+import { ApplicationCoursesSection } from '../components/courses/ApplicationCoursesSection';
 import { CourseModal } from '../components/courses/CourseModal';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -201,7 +202,7 @@ export const CoursesPage: React.FC = () => {
     deleteCourse,
     leaveCourse,
   } = useCourses();
-  const { status: platformStatus, usingPersonalKey } = usePlatformAccess();
+  const { isAdmin, status: platformStatus, usingPersonalKey } = usePlatformAccess();
   const { navigate } = useRouter();
 
   const [courseFilter, setCourseFilter] = useState<CourseFilter>('all');
@@ -688,6 +689,9 @@ export const CoursesPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Admin-only Application Courses Directory */}
+      {isAdmin && <ApplicationCoursesSection />}
 
       {/* Create / Edit Course Modal */}
       <CourseModal

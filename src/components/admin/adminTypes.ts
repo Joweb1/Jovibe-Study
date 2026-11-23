@@ -30,12 +30,14 @@ export interface AdminAlertRow {
 
 export interface FirebaseSyncStatus {
   ok: boolean;
-  source: 'service_account' | 'admin_token' | 'none';
+  source: 'service_account' | 'admin_token' | 'client_sdk' | 'none';
   usersSynced: number;
   coursesSynced: number;
   materialsSynced: number;
   groupsSynced: number;
   syncedAtMs: number;
+  projectId?: string;
+  firestoreDatabaseId?: string;
   permissionDenied?: boolean;
   error?: string;
   setupHint?: string;

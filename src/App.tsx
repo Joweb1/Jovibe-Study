@@ -34,17 +34,19 @@ import { TutorPage } from './pages/TutorPage';
 
 const WorkspaceRouter: React.FC = () => {
   const { route, navigate } = useRouter();
-  const { courses, coursesLoading } = useCourses();
+  const { courses, activeCourse, coursesLoading } = useCourses();
   const { signOut } = useAuth();
   const { status: platformStatus } = usePlatformAccess();
 
   // When a signed-in user has no courses yet (e.g., fresh signup), keep Courses as the default landing page,
-  // unless they are visiting Settings, Admin Dashboard, or joining a shared course via an invite link.
+  // unless they are visiting Settings, Admin Dashboard, Manage Course, studying an Application Course, or joining via invite link.
   useEffect(() => {
     if (
       !coursesLoading &&
       courses.length === 0 &&
+      !activeCourse &&
       route !== '/courses' &&
+      route !== '/manage-course' &&
       route !== '/settings' &&
       route !== '/join' &&
       route !== '/live' &&
@@ -54,7 +56,7 @@ const WorkspaceRouter: React.FC = () => {
     ) {
       navigate('/courses');
     }
-  }, [coursesLoading, courses.length, route, navigate]);
+  }, [coursesLoading, courses.length, activeCourse, route, navigate]);
 
   if (
     platformStatus &&

@@ -77,7 +77,7 @@ service cloud.firestore {
     }
 
     function hasCourseWorkspace(userId, courseId) {
-      return courseExists(userId, courseId) || joinedCourseExists(userId, courseId);
+      return courseExists(userId, courseId) || joinedCourseExists(userId, courseId) || isAdmin();
     }
 
     function isCourseMember(authorId, courseId) {
@@ -134,7 +134,7 @@ service cloud.firestore {
     function isValidCourse(data, userId) {
       return data.keys().hasAll(['userId', 'code', 'name', 'description', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['userId', 'code', 'name', 'description', 'isPublic', 'shareToken', 'authorName', 'createdAt', 'updatedAt'])
-        && data.userId == request.auth.uid
+        && (data.userId == request.auth.uid || isAdmin())
         && data.userId == userId
         && isNonEmptyString(data.code, 32)
         && isNonEmptyString(data.name, 120)
@@ -179,7 +179,7 @@ service cloud.firestore {
     function isValidCourseGroup(data, authorId, courseId) {
       return data.keys().hasAll(['authorId', 'courseId', 'name', 'description', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['authorId', 'courseId', 'name', 'description', 'createdAt', 'updatedAt'])
-        && data.authorId == request.auth.uid
+        && (data.authorId == request.auth.uid || isAdmin())
         && data.authorId == authorId
         && data.courseId == courseId
         && isNonEmptyString(data.name, 80)
@@ -219,7 +219,7 @@ service cloud.firestore {
     function isValidTopic(data, userId, courseId) {
       return data.keys().hasAll(['userId', 'courseId', 'name', 'description', 'order', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['userId', 'courseId', 'name', 'description', 'order', 'createdAt', 'updatedAt'])
-        && data.userId == request.auth.uid
+        && (data.userId == request.auth.uid || isAdmin())
         && data.userId == userId
         && data.courseId == courseId
         && isNonEmptyString(data.name, 120)
@@ -242,7 +242,7 @@ service cloud.firestore {
           'processingStatus', 'studentNotes', 'originalFileName',
           'createdAt', 'updatedAt'
         ])
-        && data.userId == request.auth.uid
+        && (data.userId == request.auth.uid || isAdmin())
         && data.userId == userId
         && data.courseId == courseId
         && isOptionalId(data.topicId)
@@ -541,15 +541,15 @@ service cloud.firestore {
 
     match /courseShares/{shareToken} {
       allow get: if isSignedIn() && isValidId(shareToken);
-      allow list: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      allow list: if (isSignedIn() && resource.data.authorId == request.auth.uid) || isAdmin();
       allow create: if isVerified() && isValidId(shareToken)
         && isValidCourseShare(incoming(), shareToken)
-        && incoming().authorId == request.auth.uid
+        && (incoming().authorId == request.auth.uid || isAdmin())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && courseExists(request.auth.uid, incoming().courseId);
+        && courseExists(incoming().authorId, incoming().courseId);
       allow update: if isVerified() && isValidId(shareToken)
-        && existing().authorId == request.auth.uid
+        && (existing().authorId == request.auth.uid || isAdmin())
         && isValidCourseShare(incoming(), shareToken)
         && incoming().authorId == existing().authorId
         && incoming().courseId == existing().courseId
@@ -561,7 +561,7 @@ service cloud.firestore {
           incoming().diff(existing()).affectedKeys().hasOnly(['courseCode', 'courseName', 'courseDescription', 'authorName', 'updatedAt']) ||
           incoming().diff(existing()).affectedKeys().hasOnly(['courseCode', 'courseName', 'courseDescription', 'authorName', 'active', 'updatedAt'])
         );
-      allow delete: if isVerified() && isValidId(shareToken) && existing().authorId == request.auth.uid;
+      allow delete: if isVerified() && isValidId(shareToken) && (existing().authorId == request.auth.uid || isAdmin());
     }
 
     // =========================================================================
@@ -590,8 +590,8 @@ service cloud.firestore {
 
       // Global Study Streak Profile (internal hidden freezeBalance protected by strict invariants)
       match /streakProfile/{docId} {
-        allow get: if isOwner(userId) && isValidId(userId) && docId == 'current';
-        allow list: if false;
+        allow get: if ((isOwner(userId) && docId == 'current') || isAdmin()) && isValidId(userId) && isValidId(docId);
+        allow list: if isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && docId == 'current'
           && isValidStreakProfile(incoming(), userId)
           && incoming().freezeBalance == 10
@@ -621,8 +621,8 @@ service cloud.firestore {
 
       // Daily Streak Calendar Records (keyed by local YYYY-MM-DD)
       match /streakDays/{dateKey} {
-        allow get: if isOwner(userId) && isValidId(userId) && isValidDateKey(dateKey);
-        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidDateKey(dateKey);
+        allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidDateKey(dateKey)
           && isValidDailyStreakRecord(incoming(), userId, dateKey)
           && incoming().createdAt == request.time
@@ -659,8 +659,8 @@ service cloud.firestore {
 
       // Append-Only Deterministic Freeze Ledger (prevents duplicate earn/consume per day)
       match /freezeLedger/{entryId} {
-        allow get: if isOwner(userId) && isValidId(userId) && isValidId(entryId);
-        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(entryId);
+        allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(entryId)
           && isValidFreezeLedgerEntry(incoming(), userId, entryId)
           && incoming().createdAt == request.time;
@@ -670,8 +670,8 @@ service cloud.firestore {
 
       // Global Completed Study Activity Events (Dashboard & Shared Library analytics)
       match /studyActivities/{activityId} {
-        allow get: if isOwner(userId) && isValidId(userId) && isValidId(activityId);
-        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(activityId);
+        allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(activityId)
           && isValidStudyActivityEvent(incoming(), userId)
           && incoming().createdAt == request.time;
@@ -681,8 +681,8 @@ service cloud.firestore {
 
       // Lifetime Time in App & Active Learning Time Summary
       match /appUsage/{docId} {
-        allow get: if isOwner(userId) && isValidId(userId) && docId == 'summary';
-        allow list: if false;
+        allow get: if ((isOwner(userId) && docId == 'summary') || isAdmin()) && isValidId(userId) && isValidId(docId);
+        allow list: if isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && docId == 'summary'
           && isValidAppUsageSummary(incoming(), userId)
           && incoming().createdAt == request.time
@@ -702,8 +702,8 @@ service cloud.firestore {
 
       // Daily Time in App & Active Learning Time Records
       match /appUsageDays/{dateKey} {
-        allow get: if isOwner(userId) && isValidId(userId) && isValidDateKey(dateKey);
-        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidDateKey(dateKey);
+        allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidDateKey(dateKey)
           && isValidAppUsageDailyRecord(incoming(), userId, dateKey)
           && incoming().createdAt == request.time
@@ -725,8 +725,8 @@ service cloud.firestore {
 
       // Joined Shared Courses (Member's personal bookmark list)
       match /joinedCourses/{courseId} {
-        allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId);
-        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId);
+        allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId)
           && isValidJoinedCourse(incoming(), userId, courseId)
           && incoming().joinedAt == request.time
@@ -745,13 +745,13 @@ service cloud.firestore {
 
       // Courses (Owned by userId; shared read-only with active members; read-only for sole admin)
       match /courses/{courseId} {
-        allow get: if (isOwner(userId) || isCourseMember(userId, courseId) || isAdmin()) && isValidId(userId) && isValidId(courseId);
+        allow get: if (isAdmin() || isOwner(userId) || isCourseMember(userId, courseId)) && isValidId(userId) && isValidId(courseId);
         allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId)
           && isValidCourse(incoming(), userId)
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
-        allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId)
+        allow update: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId)
           && isValidCourse(incoming(), userId)
           && incoming().userId == existing().userId
           && incoming().createdAt == existing().createdAt
@@ -766,11 +766,11 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly(['shareToken', 'updatedAt']) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['authorName', 'updatedAt'])
           );
-        allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId);
+        allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId);
 
         // Shared Course Members (Source of truth for access & instant revocation)
         match /members/{memberUid} {
-          allow get: if (isOwner(userId) || isOwner(memberUid) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(memberUid);
+          allow get: if (isAdmin() || isOwner(userId) || isOwner(memberUid)) && isValidId(userId) && isValidId(courseId) && isValidId(memberUid);
           allow list: if (isOwner(userId) && resource.data.authorId == request.auth.uid) || isAdmin();
           allow create: if isVerified() && isOwner(memberUid) && request.auth.uid != userId
             && isValidId(userId) && isValidId(courseId) && isValidId(memberUid)
@@ -789,25 +789,25 @@ service cloud.firestore {
             && incoming().joinedAt == existing().joinedAt
             && incoming().updatedAt == request.time
             && (
-              (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['groupId', 'updatedAt'])) ||
+              ((isOwner(userId) || isAdmin()) && incoming().diff(existing()).affectedKeys().hasOnly(['groupId', 'updatedAt'])) ||
               (isOwner(memberUid) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']))
             );
-          allow delete: if isVerified() && (isOwner(userId) || isOwner(memberUid))
+          allow delete: if isVerified() && (isOwner(userId) || isOwner(memberUid) || isAdmin())
             && isValidId(userId) && isValidId(courseId) && isValidId(memberUid);
         }
 
-        // Named Study Groups (Managed exclusively by the course author)
+        // Named Study Groups (Managed by the course author or verified admin)
         match /groups/{groupId} {
-          allow get: if (isOwner(userId) || isCourseMember(userId, courseId) || isAdmin())
+          allow get: if (isAdmin() || isOwner(userId) || isCourseMember(userId, courseId))
             && isValidId(userId) && isValidId(courseId) && isValidId(groupId);
           allow list: if (isOwner(userId) && resource.data.authorId == request.auth.uid) || isAdmin();
-          allow create: if isVerified() && isOwner(userId)
+          allow create: if isVerified() && (isOwner(userId) || isAdmin())
             && isValidId(userId) && isValidId(courseId) && isValidId(groupId)
             && isValidCourseGroup(incoming(), userId, courseId)
             && incoming().createdAt == request.time
             && incoming().updatedAt == request.time
             && courseExists(userId, courseId);
-          allow update: if isVerified() && isOwner(userId)
+          allow update: if isVerified() && (isOwner(userId) || isAdmin())
             && isValidId(userId) && isValidId(courseId) && isValidId(groupId)
             && isValidCourseGroup(incoming(), userId, courseId)
             && incoming().authorId == existing().authorId
@@ -816,23 +816,22 @@ service cloud.firestore {
             && incoming().updatedAt == request.time
             && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'updatedAt'])
             && courseExists(userId, courseId);
-          allow delete: if isVerified() && isOwner(userId)
+          allow delete: if isVerified() && (isOwner(userId) || isAdmin())
             && isValidId(userId) && isValidId(courseId) && isValidId(groupId);
         }
 
         // Topics (Author-managed; read-only for active shared course members)
         match /topics/{topicId} {
-          allow get: if (isOwner(userId) || isCourseMember(userId, courseId))
-            && isValidId(userId) && isValidId(courseId) && isValidId(topicId)
-            && courseExists(userId, courseId);
-          allow list: if (isOwner(userId) || isCourseMember(userId, courseId))
-            && resource.data.userId == userId;
-          allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(topicId)
+          allow get: if (isAdmin() || ((isOwner(userId) || isCourseMember(userId, courseId)) && courseExists(userId, courseId)))
+            && isValidId(userId) && isValidId(courseId) && isValidId(topicId);
+          allow list: if ((isOwner(userId) || isCourseMember(userId, courseId))
+            && resource.data.userId == userId) || isAdmin();
+          allow create: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(topicId)
             && isValidTopic(incoming(), userId, courseId)
             && incoming().createdAt == request.time
             && incoming().updatedAt == request.time
             && courseExists(userId, courseId);
-          allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(topicId)
+          allow update: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(topicId)
             && isValidTopic(incoming(), userId, courseId)
             && incoming().userId == existing().userId
             && incoming().courseId == existing().courseId
@@ -844,22 +843,21 @@ service cloud.firestore {
               incoming().diff(existing()).affectedKeys().hasOnly(['order', 'updatedAt'])
             )
             && courseExists(userId, courseId);
-          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(topicId);
+          allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(topicId);
         }
 
-        // Study Sources (Author-managed; read-only for active shared course members)
+        // Study Sources (Author-managed or admin-managed; read-only for active shared course members)
         match /sources/{sourceId} {
-          allow get: if (isOwner(userId) || isCourseMember(userId, courseId) || isAdmin())
-            && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
-            && courseExists(userId, courseId);
+          allow get: if (isAdmin() || ((isOwner(userId) || isCourseMember(userId, courseId)) && courseExists(userId, courseId)))
+            && isValidId(userId) && isValidId(courseId) && isValidId(sourceId);
           allow list: if ((isOwner(userId) || isCourseMember(userId, courseId))
             && resource.data.userId == userId) || isAdmin();
-          allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
+          allow create: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
             && isValidStudySource(incoming(), userId, courseId)
             && incoming().createdAt == request.time
             && incoming().updatedAt == request.time
             && courseExists(userId, courseId);
-          allow update: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
+          allow update: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
             && isValidStudySource(incoming(), userId, courseId)
             && incoming().userId == existing().userId
             && incoming().courseId == existing().courseId
@@ -872,14 +870,14 @@ service cloud.firestore {
               incoming().diff(existing()).affectedKeys().hasOnly(['title', 'topicId', 'materialType', 'extractedContent', 'sections', 'processingStatus', 'studentNotes', 'updatedAt'])
             )
             && courseExists(userId, courseId);
-          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId);
+          allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId);
         }
 
         // Private Personal Annotations on Shared Course Sources
         match /sourceNotes/{sourceId} {
-          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
-            && hasCourseWorkspace(userId, courseId);
-          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow get: if (isAdmin() || (isOwner(userId) && hasCourseWorkspace(userId, courseId)))
+            && isValidId(userId) && isValidId(courseId) && isValidId(sourceId);
+          allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
           allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
             && isValidPersonalSourceNote(incoming(), userId, courseId, sourceId)
             && incoming().createdAt == request.time
@@ -894,14 +892,14 @@ service cloud.firestore {
             && incoming().updatedAt == request.time
             && incoming().diff(existing()).affectedKeys().hasOnly(['notes', 'updatedAt'])
             && hasCourseWorkspace(userId, courseId);
-          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId);
+          allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId);
         }
 
         // Tutor Conversations (Private per learner; works for both owned & joined courses)
         match /conversations/{conversationId} {
-          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId)
-            && hasCourseWorkspace(userId, courseId);
-          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow get: if (isAdmin() || (isOwner(userId) && hasCourseWorkspace(userId, courseId)))
+            && isValidId(userId) && isValidId(courseId) && isValidId(conversationId);
+          allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
           allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId)
             && isValidTutorConversation(incoming(), userId, courseId)
             && incoming().createdAt == request.time
@@ -920,13 +918,13 @@ service cloud.firestore {
               incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastMessagePreview', 'messageCount', 'updatedAt'])
             )
             && hasCourseWorkspace(userId, courseId);
-          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId);
+          allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId);
 
           // Messages inside a Tutor Conversation
           match /messages/{messageId} {
-            allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId)
-              && conversationExists(userId, courseId, conversationId);
-            allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+            allow get: if (isAdmin() || (isOwner(userId) && conversationExists(userId, courseId, conversationId)))
+              && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId);
+            allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
             allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId)
               && isValidTutorMessage(incoming(), userId, courseId, conversationId)
               && incoming().createdAt == request.time
@@ -943,15 +941,15 @@ service cloud.firestore {
                 incoming().diff(existing()).affectedKeys().hasOnly(['saved'])
               )
               && conversationExists(userId, courseId, conversationId);
-            allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId);
+            allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(conversationId) && isValidId(messageId);
           }
         }
 
         // Saved Study Materials (Private per learner; works for both owned & joined courses)
         match /studyMaterials/{materialId} {
-          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(materialId)
-            && hasCourseWorkspace(userId, courseId);
-          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow get: if (isAdmin() || (isOwner(userId) && hasCourseWorkspace(userId, courseId)))
+            && isValidId(userId) && isValidId(courseId) && isValidId(materialId);
+          allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
           allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(materialId)
             && isValidSavedStudyMaterial(incoming(), userId, courseId)
             && incoming().createdAt == request.time
@@ -969,14 +967,14 @@ service cloud.firestore {
               incoming().diff(existing()).affectedKeys().hasOnly(['title', 'topicId', 'content', 'updatedAt'])
             )
             && hasCourseWorkspace(userId, courseId);
-          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(materialId);
+          allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(materialId);
         }
 
         // Automatic Study Sessions (Private per learner; works for both owned & joined courses)
         match /studySessions/{sessionId} {
-          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId)
-            && hasCourseWorkspace(userId, courseId);
-          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow get: if (isAdmin() || (isOwner(userId) && hasCourseWorkspace(userId, courseId)))
+            && isValidId(userId) && isValidId(courseId) && isValidId(sessionId);
+          allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
           allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId)
             && isValidAutomaticStudySession(incoming(), userId, courseId)
             && incoming().createdAt == request.time
@@ -1000,13 +998,13 @@ service cloud.firestore {
               ])
             )
             && hasCourseWorkspace(userId, courseId);
-          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId);
+          allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId);
 
           // Session Segments
           match /segments/{segmentId} {
-            allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId)
-              && studySessionExists(userId, courseId, sessionId);
-            allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+            allow get: if (isAdmin() || (isOwner(userId) && studySessionExists(userId, courseId, sessionId)))
+              && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId);
+            allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
             allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId)
               && isValidStudySessionSegment(incoming(), userId, courseId, sessionId)
               && incoming().createdAt == request.time
@@ -1024,28 +1022,28 @@ service cloud.firestore {
                 incoming().diff(existing()).affectedKeys().hasOnly(['entries', 'tokenEstimate', 'updatedAt'])
               )
               && studySessionExists(userId, courseId, sessionId);
-            allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId);
+            allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(segmentId);
           }
 
           // Session Checkpoints
           match /checkpoints/{checkpointId} {
-            allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(checkpointId)
-              && studySessionExists(userId, courseId, sessionId);
-            allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+            allow get: if (isAdmin() || (isOwner(userId) && studySessionExists(userId, courseId, sessionId)))
+              && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(checkpointId);
+            allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
             allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(checkpointId)
               && isValidStudySessionCheckpoint(incoming(), userId, courseId, sessionId)
               && incoming().createdAt == request.time
               && studySessionExists(userId, courseId, sessionId);
             allow update: if false;
-            allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(checkpointId);
+            allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(sessionId) && isValidId(checkpointId);
           }
         }
 
         // Study History Records (Private per learner; works for both owned & joined courses)
         match /studyHistory/{historyId} {
-          allow get: if isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(historyId)
-            && hasCourseWorkspace(userId, courseId);
-          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow get: if (isAdmin() || (isOwner(userId) && hasCourseWorkspace(userId, courseId)))
+            && isValidId(userId) && isValidId(courseId) && isValidId(historyId);
+          allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
           allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(historyId)
             && isValidStudyHistoryRecord(incoming(), userId, courseId)
             && incoming().createdAt == request.time
@@ -1067,7 +1065,7 @@ service cloud.firestore {
               ])
             )
             && hasCourseWorkspace(userId, courseId);
-          allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(historyId);
+          allow delete: if isVerified() && (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(historyId);
         }
       }
     }
