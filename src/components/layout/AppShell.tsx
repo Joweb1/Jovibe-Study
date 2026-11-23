@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Moon,
   Settings,
+  Shield,
   Sun,
   Wifi,
   WifiOff,
@@ -24,6 +25,7 @@ import type { AppRoute } from '../../types/models';
 import { useAuth } from '../../context/AuthContext';
 import { useCourses } from '../../context/CourseContext';
 import { useGeminiOnboarding } from '../../context/GeminiOnboardingContext';
+import { usePlatformAccess } from '../../context/PlatformAccessContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useWorkspaceUi } from '../../context/WorkspaceUiContext';
 import { useRouter } from '../../router/RouterContext';
@@ -71,6 +73,7 @@ const CHROME_HIDDEN_ROUTES: ReadonlySet<AppRoute> = new Set<AppRoute>([
   '/join',
   '/streak',
   '/dashboard',
+  '/admin',
 ]);
 
 const AI_FEATURE_ROUTES: ReadonlySet<AppRoute> = new Set<AppRoute>([
@@ -90,6 +93,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     dismissReminderForSession,
     notifyProfileMenuChange,
   } = useGeminiOnboarding();
+  const { isAdmin, status: platformStatus, usingPersonalKey } = usePlatformAccess();
   const { theme, toggleTheme } = useTheme();
   const {
     hideHeader,
@@ -205,6 +209,21 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   </button>
                 );
               })}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/admin')}
+                  aria-current={route === '/admin' ? 'page' : undefined}
+                  className={`relative inline-flex items-center gap-1.5 py-4 text-sm whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                    route === '/admin'
+                      ? 'font-medium text-zinc-950 dark:text-zinc-200'
+                      : 'text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-zinc-100'
+                  }`}
+                >
+                  <Shield className="h-3.5 w-3.5" />
+                  Admin Dashboard
+                </button>
+              )}
             </nav>
 
           {/* Zone 3: Streak Indicator, Course Selector & Account Menu */}
@@ -262,6 +281,19 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                       <BarChart3 className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
                       Study Dashboard
                     </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          navigate('/admin');
+                        }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm font-medium text-zinc-950 dark:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer"
+                      >
+                        <Shield className="h-4 w-4 text-zinc-700 dark:text-zinc-300" />
+                        Admin Dashboard
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -377,6 +409,46 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           </div>
         </div>
       )}
+
+      {/* Global AI disabled notice */}
+      {platformStatus && !platformStatus.featureFlags.aiGlobalEnabled && !isLiveRoute && route !== '/admin' && (
+        <div
+          role="status"
+          className="shrink-0 border-b border-red-200/80 dark:border-red-900/50 bg-red-50/90 dark:bg-red-950/35 px-4 py-2 text-xs text-red-900 dark:text-red-100"
+        >
+          <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-2">
+            <span>
+              AI features are currently paused by the platform administrator. Your courses, uploaded notes, and history remain accessible.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Expired 7-day free AI access notification */}
+      {platformStatus &&
+        platformStatus.freeAccess.expired &&
+        !usingPersonalKey &&
+        !isLiveRoute &&
+        route !== '/admin' &&
+        route !== '/settings' && (
+          <div className="shrink-0 border-b border-red-200/80 dark:border-red-900/50 bg-red-50/90 dark:bg-red-950/35 px-4 py-2 text-xs text-red-950 dark:text-red-100">
+            <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <KeyRound className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400" />
+                <span className="truncate">
+                  Your 7-day free AI access has expired. Add your own free API key in Settings to continue using AI features.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={openSettingsKeyGuide}
+                className="shrink-0 rounded-md bg-zinc-950 dark:bg-zinc-100 px-2.5 py-1 text-[11px] font-medium text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white cursor-pointer"
+              >
+                Add API key
+              </button>
+            </div>
+          </div>
+        )}
 
       {/* Calm, non-blocking Gemini API key setup reminder shown only on AI routes when skipped/incomplete */}
       {needsSetupReminder && !reminderDismissedThisSession && AI_FEATURE_ROUTES.has(route) && (

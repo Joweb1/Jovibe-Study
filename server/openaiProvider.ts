@@ -612,7 +612,7 @@ export async function generateProviderText(params: {
   messages?: unknown;
   systemInstruction?: unknown;
   model?: unknown;
-}): Promise<{ text: string; model: string; finishReason: string }> {
+}): Promise<{ text: string; model: string; finishReason: string; usage?: Record<string, unknown> }> {
   const messages = buildOpenAiMessages({
     prompt: params.prompt,
     messages: params.messages,
@@ -642,6 +642,7 @@ export async function generateProviderText(params: {
     text: completion.content.trim(),
     model: completion.model,
     finishReason: completion.finishReason,
+    usage: completion.usage,
   };
 }
 
@@ -652,7 +653,7 @@ export async function generateProviderJson(params: {
   systemInstruction?: string;
   responseSchema?: Record<string, unknown>;
   model?: string;
-}): Promise<{ data: unknown; rawText: string; model: string }> {
+}): Promise<{ data: unknown; rawText: string; model: string; usage?: Record<string, unknown> }> {
   const schema =
     params.responseSchema && typeof params.responseSchema === 'object'
       ? toJsonSchema(params.responseSchema)
@@ -688,7 +689,7 @@ export async function generateProviderJson(params: {
     });
   }
 
-  return { data, rawText: raw, model: completion.model };
+  return { data, rawText: raw, model: completion.model, usage: completion.usage };
 }
 
 export async function extractProviderVision(params: {
@@ -704,6 +705,7 @@ export async function extractProviderVision(params: {
   uncertainCount: number;
   notes: string;
   model: string;
+  usage?: Record<string, unknown>;
 }> {
   const prompt = buildVisionPrompt(params.mode, params.pageNumber);
   const dataUrl = `data:${params.mimeType};base64,${params.imageBase64}`;
@@ -771,6 +773,7 @@ export async function extractProviderVision(params: {
       typeof parsed.uncertainCount === 'number' ? parsed.uncertainCount : 0,
     notes: typeof parsed.notes === 'string' ? parsed.notes.trim() : '',
     model: completion.model,
+    usage: completion.usage,
   };
 }
 

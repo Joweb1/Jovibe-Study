@@ -24,6 +24,10 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isVerified() && request.auth.token.email == 'nahjonah00@gmail.com';
+    }
+
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -565,8 +569,8 @@ service cloud.firestore {
     // =========================================================================
 
     match /users/{userId} {
-      allow get: if isOwner(userId) && isValidId(userId);
-      allow list: if false;
+      allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow list: if isAdmin();
       allow create: if isVerified() && isOwner(userId) && isValidId(userId)
         && isValidUserProfile(incoming(), userId)
         && incoming().createdAt == request.time
@@ -739,10 +743,10 @@ service cloud.firestore {
         allow delete: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId);
       }
 
-      // Courses (Owned by userId; shared read-only with active members)
+      // Courses (Owned by userId; shared read-only with active members; read-only for sole admin)
       match /courses/{courseId} {
-        allow get: if (isOwner(userId) || isCourseMember(userId, courseId)) && isValidId(userId) && isValidId(courseId);
-        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow get: if (isOwner(userId) || isCourseMember(userId, courseId) || isAdmin()) && isValidId(userId) && isValidId(courseId);
+        allow list: if (isOwner(userId) && resource.data.userId == request.auth.uid) || isAdmin();
         allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId)
           && isValidCourse(incoming(), userId)
           && incoming().createdAt == request.time
@@ -766,8 +770,8 @@ service cloud.firestore {
 
         // Shared Course Members (Source of truth for access & instant revocation)
         match /members/{memberUid} {
-          allow get: if (isOwner(userId) || isOwner(memberUid)) && isValidId(userId) && isValidId(courseId) && isValidId(memberUid);
-          allow list: if isOwner(userId) && resource.data.authorId == request.auth.uid;
+          allow get: if (isOwner(userId) || isOwner(memberUid) || isAdmin()) && isValidId(userId) && isValidId(courseId) && isValidId(memberUid);
+          allow list: if (isOwner(userId) && resource.data.authorId == request.auth.uid) || isAdmin();
           allow create: if isVerified() && isOwner(memberUid) && request.auth.uid != userId
             && isValidId(userId) && isValidId(courseId) && isValidId(memberUid)
             && isValidCourseMember(incoming(), userId, courseId, memberUid)
@@ -794,9 +798,9 @@ service cloud.firestore {
 
         // Named Study Groups (Managed exclusively by the course author)
         match /groups/{groupId} {
-          allow get: if (isOwner(userId) || isCourseMember(userId, courseId))
+          allow get: if (isOwner(userId) || isCourseMember(userId, courseId) || isAdmin())
             && isValidId(userId) && isValidId(courseId) && isValidId(groupId);
-          allow list: if isOwner(userId) && resource.data.authorId == request.auth.uid;
+          allow list: if (isOwner(userId) && resource.data.authorId == request.auth.uid) || isAdmin();
           allow create: if isVerified() && isOwner(userId)
             && isValidId(userId) && isValidId(courseId) && isValidId(groupId)
             && isValidCourseGroup(incoming(), userId, courseId)
@@ -845,11 +849,11 @@ service cloud.firestore {
 
         // Study Sources (Author-managed; read-only for active shared course members)
         match /sources/{sourceId} {
-          allow get: if (isOwner(userId) || isCourseMember(userId, courseId))
+          allow get: if (isOwner(userId) || isCourseMember(userId, courseId) || isAdmin())
             && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
             && courseExists(userId, courseId);
-          allow list: if (isOwner(userId) || isCourseMember(userId, courseId))
-            && resource.data.userId == userId;
+          allow list: if ((isOwner(userId) || isCourseMember(userId, courseId))
+            && resource.data.userId == userId) || isAdmin();
           allow create: if isVerified() && isOwner(userId) && isValidId(userId) && isValidId(courseId) && isValidId(sourceId)
             && isValidStudySource(incoming(), userId, courseId)
             && incoming().createdAt == request.time

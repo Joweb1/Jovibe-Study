@@ -4,6 +4,16 @@ import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getSharedProvidersAvailability } from './server/adminKeyPool.ts';
+import { createAdminRouter } from './server/adminRoutes.ts';
+import {
+  executeProtectedAiRoute,
+  extractGeminiTokenUsage,
+  extractOpenAiTokenUsage,
+} from './server/aiExecution.ts';
+import { requireAuth } from './server/auth.ts';
+import { sanitizeErrorMessage } from './server/crypto.ts';
+import { initDb } from './server/db.ts';
 import { attachLiveWebSocketServer } from './server/liveBridge.ts';
 import {
   checkSafetyBlock,
@@ -24,7 +34,6 @@ import {
   generateProviderImage,
   generateProviderJson,
   generateProviderText,
-  getServerFallbackProvidersStatus,
   isOpenAiProviderId,
   ProviderRequestError,
   resolveProviderKey,
@@ -34,6 +43,8 @@ import {
   type OpenAiProviderId,
 } from './server/openaiProvider.ts';
 import { buildVisionPrompt } from './server/prompts.ts';
+import { getFeatureFlags } from './server/quotaService.ts';
+import { createUserSyncRouter } from './server/userSyncRoutes.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,11 +86,12 @@ function resolveProviderParam(value: string): OpenAiProviderId {
 function sendProviderError(
   res: import('express').Response,
   provider: string,
-  err: unknown
+  err: unknown,
+  knownSecrets: string[] = []
 ): void {
   if (err instanceof ProviderRequestError) {
     res.status(err.status).json({
-      error: err.message,
+      error: sanitizeErrorMessage(err.message, knownSecrets),
       code: err.code,
       retryable: err.retryable,
       shouldRotateKey:
@@ -93,7 +105,10 @@ function sendProviderError(
   }
 
   res.status(500).json({
-    error: err instanceof Error ? err.message : `${provider} request failed.`,
+    error: sanitizeErrorMessage(
+      err instanceof Error ? err.message : `${provider} request failed.`,
+      knownSecrets
+    ),
     code: 'SERVER_ERROR',
     retryable: true,
     shouldRotateKey: false,
@@ -102,13 +117,14 @@ function sendProviderError(
   });
 }
 
-async function startServer() {
+export function createApiApp(): express.Express {
+  initDb();
   const app = express();
 
   app.use(express.json({ limit: '15mb' }));
 
   app.get('/api/health', (_req, res) => {
-    const serverFallbackProviders = getServerFallbackProvidersStatus();
+    const serverFallbackProviders = getSharedProvidersAvailability();
     const anyFallback = Object.values(serverFallbackProviders).some(Boolean);
     res.json({
       ok: true,
@@ -120,623 +136,617 @@ async function startServer() {
         serverFallbackProviders.openrouter,
       serverProviderKeysEnabled: areServerProviderKeysAllowed(),
       supportedProviders: ['gemini', 'openrouter', 'cerebras', 'groq', 'cloudflare', 'nvidia_nim'],
+      featureFlags: getFeatureFlags(),
     });
   });
 
-  // Test a BYOK key (passed in x-sotal-gemini-key header) or server fallback key
-  app.post('/api/ai/test-key', async (req, res) => {
+  // Admin Dashboard & Management API (strictly protected by sole ADMIN_EMAIL verification)
+  app.use('/api/admin', createAdminRouter());
+
+  // User Access Status, Sync, Activity, and Group Study Notes/Reports API
+  app.use('/api', createUserSyncRouter());
+
+  // Test a personal BYOK Gemini key (does not consume shared user quota)
+  app.post('/api/ai/test-key', requireAuth, async (req, res) => {
     const startMs = Date.now();
-    let keySource: 'byok' | 'server_fallback' = 'server_fallback';
+    const rawHeader = Array.isArray(req.headers['x-sotal-gemini-key'])
+      ? req.headers['x-sotal-gemini-key'][0]
+      : req.headers['x-sotal-gemini-key'];
+    const trimmedByok = typeof rawHeader === 'string' ? rawHeader.trim() : '';
+
+    if (trimmedByok) {
+      try {
+        const model = resolveModelName(req.body?.model);
+        const ai = createGeminiClient(trimmedByok);
+        const response = await ai.models.generateContent({
+          model,
+          contents: 'Reply with the single word OK.',
+        });
+        checkSafetyBlock(response);
+        const text = (response.text ?? '').trim();
+        res.json({
+          ok: true,
+          keySource: 'byok',
+          model,
+          latencyMs: Date.now() - startMs,
+          sampleReply: text.slice(0, 40),
+        });
+      } catch (err) {
+        const classified = classifyAiError(err, 'byok');
+        res.status(classified.status).json({
+          ok: false,
+          error: sanitizeErrorMessage(classified.message, [trimmedByok]),
+          code: classified.code,
+          retryable: classified.retryable,
+          shouldRotateKey: classified.shouldRotateKey,
+          cooldownMs: classified.cooldownMs,
+          keySource: 'byok',
+        });
+      }
+      return;
+    }
+
+    // If testing without a personal key, still enforce shared-key eligibility & admin key pool
     try {
-      const resolved = resolveApiKey(
-        req.headers['x-sotal-gemini-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      keySource = resolved.keySource;
+      const resolved = resolveApiKey(undefined, req.headers['x-sotal-byok-only']);
       const model = resolveModelName(req.body?.model);
       const ai = createGeminiClient(resolved.apiKey);
-
       const response = await ai.models.generateContent({
         model,
         contents: 'Reply with the single word OK.',
       });
-
       checkSafetyBlock(response);
-      const text = (response.text ?? '').trim();
-
       res.json({
         ok: true,
-        keySource,
+        keySource: 'server_fallback',
         model,
         latencyMs: Date.now() - startMs,
-        sampleReply: text.slice(0, 40),
+        sampleReply: (response.text ?? '').trim().slice(0, 40),
       });
     } catch (err) {
-      const classified = classifyAiError(err, keySource);
+      const classified = classifyAiError(err, 'server_fallback');
       res.status(classified.status).json({
         ok: false,
-        error: classified.message,
+        error: sanitizeErrorMessage(classified.message),
         code: classified.code,
         retryable: classified.retryable,
         shouldRotateKey: classified.shouldRotateKey,
         cooldownMs: classified.cooldownMs,
-        keySource,
+        keySource: 'server_fallback',
       });
     }
   });
 
   // Modular text / conversation generation route
-  app.post('/api/ai/generate', async (req, res) => {
-    let keySource: 'byok' | 'server_fallback' = 'server_fallback';
-    try {
-      const resolved = resolveApiKey(
-        req.headers['x-sotal-gemini-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      keySource = resolved.keySource;
-      const { prompt, messages, systemInstruction, model: requestedModel } = req.body ?? {};
-      const model = resolveModelName(requestedModel);
+  app.post('/api/ai/generate', requireAuth, async (req, res) => {
+    const { prompt, messages, systemInstruction, model: requestedModel } = req.body ?? {};
+    const model = resolveModelName(requestedModel);
 
-      let contents: unknown;
-      if (Array.isArray(messages) && messages.length > 0) {
-        contents = messages
-          .filter(
-            (m): m is { role: string; text: string } =>
-              Boolean(m) && typeof m.text === 'string' && m.text.trim().length > 0
-          )
-          .map((m) => ({
-            role: m.role === 'assistant' || m.role === 'model' ? 'model' : 'user',
-            parts: [{ text: m.text }],
-          }));
-      } else if (typeof prompt === 'string' && prompt.trim().length > 0) {
-        contents = prompt;
-      } else {
-        res.status(400).json({
-          error: 'Either prompt or non-empty messages array is required.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-        });
-        return;
-      }
-
-      const ai = createGeminiClient(resolved.apiKey);
-      const response = await ai.models.generateContent({
-        model,
-        contents: contents as string,
-        config:
-          typeof systemInstruction === 'string' && systemInstruction.trim()
-            ? { systemInstruction: systemInstruction.trim() }
-            : undefined,
+    let contents: unknown;
+    if (Array.isArray(messages) && messages.length > 0) {
+      contents = messages
+        .filter(
+          (m): m is { role: string; text: string } =>
+            Boolean(m) && typeof m.text === 'string' && m.text.trim().length > 0
+        )
+        .map((m) => ({
+          role: m.role === 'assistant' || m.role === 'model' ? 'model' : 'user',
+          parts: [{ text: m.text }],
+        }));
+    } else if (typeof prompt === 'string' && prompt.trim().length > 0) {
+      contents = prompt;
+    } else {
+      res.status(400).json({
+        error: 'Either prompt or non-empty messages array is required.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
       });
-
-      checkSafetyBlock(response);
-      const text = (response.text ?? '').trim();
-
-      res.json({
-        text,
-        model,
-        keySource,
-        finishReason: extractFinishReason(response),
-      });
-    } catch (err) {
-      const classified = classifyAiError(err, keySource);
-      res.status(classified.status).json({
-        error: classified.message,
-        code: classified.code,
-        retryable: classified.retryable,
-        shouldRotateKey: classified.shouldRotateKey,
-        cooldownMs: classified.cooldownMs,
-        keySource,
-      });
+      return;
     }
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider: 'gemini',
+      task: 'chat',
+      keyHeaderName: 'x-sotal-gemini-key',
+      run: async (ctx) => {
+        const ai = createGeminiClient(ctx.apiKey);
+        const response = await ai.models.generateContent({
+          model,
+          contents: contents as string,
+          config:
+            typeof systemInstruction === 'string' && systemInstruction.trim()
+              ? { systemInstruction: systemInstruction.trim() }
+              : undefined,
+        });
+        checkSafetyBlock(response);
+        const text = (response.text ?? '').trim();
+        return {
+          payload: { text, finishReason: extractFinishReason(response) },
+          model,
+          tokens: extractGeminiTokenUsage(response),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      text: executed.result.payload.text,
+      model: executed.result.model,
+      keySource: executed.keySource,
+      finishReason: executed.result.payload.finishReason,
+      quota: executed.quota,
+    });
   });
 
   // Modular structured JSON output route with schema enforcement
-  app.post('/api/ai/generate-json', async (req, res) => {
-    let keySource: 'byok' | 'server_fallback' = 'server_fallback';
-    try {
-      const resolved = resolveApiKey(
-        req.headers['x-sotal-gemini-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      keySource = resolved.keySource;
-      const { prompt, systemInstruction, responseSchema, model: requestedModel } = req.body ?? {};
-      const model = resolveModelName(requestedModel);
+  app.post('/api/ai/generate-json', requireAuth, async (req, res) => {
+    const { prompt, systemInstruction, responseSchema, model: requestedModel } = req.body ?? {};
+    const model = resolveModelName(requestedModel);
 
-      if (typeof prompt !== 'string' || !prompt.trim()) {
-        res.status(400).json({
-          error: 'A non-empty prompt is required for structured generation.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-        });
-        return;
-      }
-
-      const ai = createGeminiClient(resolved.apiKey);
-      const config: Record<string, unknown> = {
-        responseMimeType: 'application/json',
-      };
-      if (typeof systemInstruction === 'string' && systemInstruction.trim()) {
-        config.systemInstruction = systemInstruction.trim();
-      }
-      if (responseSchema && typeof responseSchema === 'object') {
-        config.responseSchema = responseSchema;
-      }
-
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config,
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      res.status(400).json({
+        error: 'A non-empty prompt is required for structured generation.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
       });
-
-      checkSafetyBlock(response);
-      const rawText = (response.text ?? '').trim();
-      if (!rawText) {
-        res.status(502).json({
-          error: 'Gemini returned an empty structured response.',
-          code: 'SERVER_ERROR',
-          retryable: true,
-          shouldRotateKey: false,
-          cooldownMs: 5000,
-          keySource,
-        });
-        return;
-      }
-
-      let data: unknown;
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        res.status(502).json({
-          error: 'Gemini returned malformed JSON that failed parsing.',
-          code: 'SERVER_ERROR',
-          retryable: true,
-          shouldRotateKey: false,
-          cooldownMs: 2000,
-          keySource,
-        });
-        return;
-      }
-
-      res.json({
-        data,
-        rawText,
-        model,
-        keySource,
-        finishReason: extractFinishReason(response),
-      });
-    } catch (err) {
-      const classified = classifyAiError(err, keySource);
-      res.status(classified.status).json({
-        error: classified.message,
-        code: classified.code,
-        retryable: classified.retryable,
-        shouldRotateKey: classified.shouldRotateKey,
-        cooldownMs: classified.cooldownMs,
-        keySource,
-      });
+      return;
     }
-  });
 
-  // Multimodal Vision OCR & Handwriting Extraction (BYOK-first, server fallback)
-  app.post('/api/extract/vision', async (req, res) => {
-    let keySource: 'byok' | 'server_fallback' = 'server_fallback';
-    try {
-      const resolved = resolveApiKey(
-        req.headers['x-sotal-gemini-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      keySource = resolved.keySource;
-      const { imageBase64, mimeType, mode = 'textbook_photo', pageNumber, model: requestedModel } =
-        req.body ?? {};
-
-      if (typeof imageBase64 !== 'string' || imageBase64.length < 20) {
-        res.status(400).json({
-          error: 'Missing or invalid image payload.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-        });
-        return;
-      }
-
-      if (imageBase64.length > 14_000_000) {
-        res.status(413).json({
-          error: 'Image is too large. Please resize or crop before uploading.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-        });
-        return;
-      }
-
-      const normalizedMime =
-        typeof mimeType === 'string' && ALLOWED_IMAGE_MIMES.has(mimeType.toLowerCase())
-          ? mimeType.toLowerCase() === 'image/jpg'
-            ? 'image/jpeg'
-            : mimeType.toLowerCase()
-          : 'image/jpeg';
-
-      const model = resolveModelName(requestedModel);
-      const ai = createGeminiClient(resolved.apiKey);
-      const prompt = buildVisionPrompt(
-        String(mode),
-        typeof pageNumber === 'number' ? pageNumber : undefined
-      );
-
-      const response = await ai.models.generateContent({
-        model,
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                mimeType: normalizedMime,
-                data: imageBase64,
-              },
-            },
-            {
-              text: prompt,
-            },
-          ],
-        },
-        config: {
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider: 'gemini',
+      task: 'structured_json',
+      keyHeaderName: 'x-sotal-gemini-key',
+      run: async (ctx) => {
+        const ai = createGeminiClient(ctx.apiKey);
+        const config: Record<string, unknown> = {
           responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              sections: {
-                type: Type.ARRAY,
-                description: 'Ordered structured sections extracted from the image.',
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    heading: {
-                      type: Type.STRING,
-                      description: 'Section heading or concise topic label.',
-                    },
-                    level: {
-                      type: Type.INTEGER,
-                      description: 'Heading level (1 for main heading, 2 for subheading, 3 for minor heading).',
-                    },
-                    content: {
-                      type: Type.STRING,
-                      description:
-                        'Formatted text content preserving paragraphs, lists, definitions, examples, and markdown tables.',
-                    },
-                  },
-                  required: ['heading', 'level', 'content'],
-                },
-              },
-              uncertainCount: {
-                type: Type.INTEGER,
-                description: 'Count of [unclear: ...] or [illegible] markers in the extracted text.',
-              },
-              notes: {
-                type: Type.STRING,
-                description: 'Brief quality note if applicable, otherwise empty string.',
-              },
-            },
-            required: ['sections', 'uncertainCount', 'notes'],
-          },
-        },
-      });
+        };
+        if (typeof systemInstruction === 'string' && systemInstruction.trim()) {
+          config.systemInstruction = systemInstruction.trim();
+        }
+        if (responseSchema && typeof responseSchema === 'object') {
+          config.responseSchema = responseSchema;
+        }
 
-      checkSafetyBlock(response);
-      const rawJson = (response.text ?? '').trim();
-      if (!rawJson) {
-        res.status(502).json({
-          error: 'Vision model returned an empty response.',
-          code: 'SERVER_ERROR',
-          retryable: true,
-          shouldRotateKey: false,
-          cooldownMs: 5000,
-          keySource,
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config,
         });
-        return;
-      }
 
-      const parsed = JSON.parse(rawJson) as {
-        sections?: Array<{ heading?: string; level?: number; content?: string }>;
-        uncertainCount?: number;
-        notes?: string;
-      };
+        checkSafetyBlock(response);
+        const rawText = (response.text ?? '').trim();
+        if (!rawText) {
+          throw new ProviderRequestError({
+            status: 502,
+            code: 'SERVER_ERROR',
+            message: 'Gemini returned an empty structured response.',
+            retryable: true,
+            cooldownMs: 5000,
+          });
+        }
 
-      const sections = Array.isArray(parsed.sections)
-        ? parsed.sections
-            .filter((s) => s && typeof s.content === 'string' && s.content.trim().length > 0)
-            .map((s, idx) => ({
-              heading:
-                typeof s.heading === 'string' && s.heading.trim()
-                  ? s.heading.trim()
-                  : pageNumber
-                  ? `Page ${pageNumber}`
-                  : `Section ${idx + 1}`,
-              level: typeof s.level === 'number' && s.level >= 1 && s.level <= 3 ? s.level : 2,
-              content: (s.content ?? '').trim(),
-              ...(typeof pageNumber === 'number' ? { pageOrSlide: pageNumber } : {}),
-            }))
-        : [];
+        let data: unknown;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          throw new ProviderRequestError({
+            status: 502,
+            code: 'SERVER_ERROR',
+            message: 'Gemini returned malformed JSON that failed parsing.',
+            retryable: true,
+            cooldownMs: 2000,
+          });
+        }
 
-      res.json({
-        sections,
-        uncertainCount: typeof parsed.uncertainCount === 'number' ? parsed.uncertainCount : 0,
-        notes: typeof parsed.notes === 'string' ? parsed.notes.trim() : '',
-        keySource,
-        model,
-      });
-    } catch (err) {
-      const classified = classifyAiError(err, keySource);
-      res.status(classified.status).json({
-        error: classified.message,
-        code: classified.code,
-        retryable: classified.retryable,
-        shouldRotateKey: classified.shouldRotateKey,
-        cooldownMs: classified.cooldownMs,
-        keySource,
-      });
-    }
+        return {
+          payload: { data, rawText, finishReason: extractFinishReason(response) },
+          model,
+          tokens: extractGeminiTokenUsage(response),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      data: executed.result.payload.data,
+      rawText: executed.result.payload.rawText,
+      model: executed.result.model,
+      keySource: executed.keySource,
+      finishReason: executed.result.payload.finishReason,
+      quota: executed.quota,
+    });
   });
 
-  // Gemini 3.8 Flash Lite Text-to-Speech (BYOK-first, server GEMINI_API_KEY fallback)
-  app.post('/api/ai/tts', async (req, res) => {
-    let keySource: 'byok' | 'server_fallback' = 'server_fallback';
-    try {
-      const resolved = resolveApiKey(
-        req.headers['x-sotal-gemini-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      keySource = resolved.keySource;
-      const { text, voiceName: requestedVoice, style } = req.body ?? {};
+  // Multimodal Vision OCR & Handwriting Extraction
+  app.post('/api/extract/vision', requireAuth, async (req, res) => {
+    const { imageBase64, mimeType, mode = 'textbook_photo', pageNumber, model: requestedModel } =
+      req.body ?? {};
 
-      if (typeof text !== 'string' || !text.trim()) {
-        res.status(400).json({
-          error: 'Non-empty text is required for speech generation.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-        });
-        return;
-      }
+    if (typeof imageBase64 !== 'string' || imageBase64.length < 20) {
+      res.status(400).json({
+        error: 'Missing or invalid image payload.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+      });
+      return;
+    }
 
-      const cleanText = text.trim().slice(0, 3500);
-      const voiceName = resolveTtsVoice(requestedVoice);
-      const speechStyle =
-        typeof style === 'string' && style.trim()
-          ? style.trim().slice(0, 160)
-          : 'Clear, calm, articulate academic tutor';
+    if (imageBase64.length > 14_000_000) {
+      res.status(413).json({
+        error: 'Image is too large. Please resize or crop before uploading.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+      });
+      return;
+    }
 
-      const ai = createGeminiClient(resolved.apiKey, 'v1beta');
-      const response = await ai.models.generateContent({
-        model: TTS_MODEL,
-        contents: [
-          {
-            role: 'user',
+    const normalizedMime =
+      typeof mimeType === 'string' && ALLOWED_IMAGE_MIMES.has(mimeType.toLowerCase())
+        ? mimeType.toLowerCase() === 'image/jpg'
+          ? 'image/jpeg'
+          : mimeType.toLowerCase()
+        : 'image/jpeg';
+
+    const model = resolveModelName(requestedModel);
+    const prompt = buildVisionPrompt(
+      String(mode),
+      typeof pageNumber === 'number' ? pageNumber : undefined
+    );
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider: 'gemini',
+      task: 'vision',
+      keyHeaderName: 'x-sotal-gemini-key',
+      run: async (ctx) => {
+        const ai = createGeminiClient(ctx.apiKey);
+        const response = await ai.models.generateContent({
+          model,
+          contents: {
             parts: [
               {
-                text: cleanText,
-                speechMetadata: {
-                  style: speechStyle,
+                inlineData: {
+                  mimeType: normalizedMime,
+                  data: imageBase64,
                 },
-              } as Record<string, unknown>,
+              },
+              { text: prompt },
             ],
           },
-        ],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                sections: {
+                  type: Type.ARRAY,
+                  description: 'Ordered structured sections extracted from the image.',
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      heading: { type: Type.STRING },
+                      level: { type: Type.INTEGER },
+                      content: { type: Type.STRING },
+                    },
+                    required: ['heading', 'level', 'content'],
+                  },
+                },
+                uncertainCount: { type: Type.INTEGER },
+                notes: { type: Type.STRING },
+              },
+              required: ['sections', 'uncertainCount', 'notes'],
             },
           },
-        },
-      });
-
-      checkSafetyBlock(response);
-      const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-      const audioBase64 = inlineData?.data;
-      const mimeType = inlineData?.mimeType || 'audio/wav';
-
-      if (!audioBase64) {
-        res.status(502).json({
-          error: 'Gemini 3.8 TTS returned no audio payload.',
-          code: 'SERVER_ERROR',
-          retryable: true,
-          shouldRotateKey: false,
-          cooldownMs: 5000,
-          keySource,
         });
-        return;
-      }
 
-      res.json({
-        audioBase64,
-        mimeType,
-        voiceName,
-        model: TTS_MODEL,
-        keySource,
-      });
-    } catch (err) {
-      const classified = classifyAiError(err, keySource);
-      res.status(classified.status).json({
-        error: classified.message,
-        code: classified.code,
-        retryable: classified.retryable,
-        shouldRotateKey: classified.shouldRotateKey,
-        cooldownMs: classified.cooldownMs,
-        keySource,
-      });
-    }
+        checkSafetyBlock(response);
+        const rawJson = (response.text ?? '').trim();
+        if (!rawJson) {
+          throw new ProviderRequestError({
+            status: 502,
+            code: 'SERVER_ERROR',
+            message: 'Vision model returned an empty response.',
+            retryable: true,
+            cooldownMs: 5000,
+          });
+        }
+
+        const parsed = JSON.parse(rawJson) as {
+          sections?: Array<{ heading?: string; level?: number; content?: string }>;
+          uncertainCount?: number;
+          notes?: string;
+        };
+
+        const sections = Array.isArray(parsed.sections)
+          ? parsed.sections
+              .filter((s) => s && typeof s.content === 'string' && s.content.trim().length > 0)
+              .map((s, idx) => ({
+                heading:
+                  typeof s.heading === 'string' && s.heading.trim()
+                    ? s.heading.trim()
+                    : pageNumber
+                    ? `Page ${pageNumber}`
+                    : `Section ${idx + 1}`,
+                level: typeof s.level === 'number' && s.level >= 1 && s.level <= 3 ? s.level : 2,
+                content: (s.content ?? '').trim(),
+                ...(typeof pageNumber === 'number' ? { pageOrSlide: pageNumber } : {}),
+              }))
+          : [];
+
+        return {
+          payload: {
+            sections,
+            uncertainCount: typeof parsed.uncertainCount === 'number' ? parsed.uncertainCount : 0,
+            notes: typeof parsed.notes === 'string' ? parsed.notes.trim() : '',
+          },
+          model,
+          tokens: extractGeminiTokenUsage(response),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      ...executed.result.payload,
+      keySource: executed.keySource,
+      model: executed.result.model,
+      quota: executed.quota,
+    });
   });
 
-  // Gemini Concept Infographic / Illustrative Image Generation (Automatic Study & explicit Chat requests)
-  app.post('/api/ai/generate-image', async (req, res) => {
-    let keySource: 'byok' | 'server_fallback' = 'server_fallback';
-    try {
-      const resolved = resolveApiKey(
-        req.headers['x-sotal-gemini-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      keySource = resolved.keySource;
-      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+  // Gemini Text-to-Speech
+  app.post('/api/ai/tts', requireAuth, async (req, res) => {
+    const { text, voiceName: requestedVoice, style } = req.body ?? {};
 
-      if (!prompt) {
-        res.status(400).json({
-          error: 'A non-empty visual prompt is required for image generation.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-        });
-        return;
-      }
-
-      const ai = createGeminiClient(resolved.apiKey, 'v1beta');
-      const response = await ai.models.generateContent({
-        model: IMAGE_MODEL,
-        contents: prompt.slice(0, 1600),
-        config: {
-          responseModalities: ['IMAGE'],
-        },
+    if (typeof text !== 'string' || !text.trim()) {
+      res.status(400).json({
+        error: 'Non-empty text is required for speech generation.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
       });
-
-      checkSafetyBlock(response);
-      const parts = response.candidates?.[0]?.content?.parts ?? [];
-      const imgPart = parts.find(
-        (p) => p && typeof p === 'object' && p.inlineData && typeof p.inlineData.data === 'string'
-      );
-      const imageBase64 = imgPart?.inlineData?.data;
-      const mimeType = imgPart?.inlineData?.mimeType || 'image/png';
-
-      if (!imageBase64) {
-        res.status(502).json({
-          error: 'Gemini returned no image data for this prompt.',
-          code: 'SERVER_ERROR',
-          retryable: true,
-          shouldRotateKey: false,
-          cooldownMs: 5000,
-          keySource,
-        });
-        return;
-      }
-
-      res.json({
-        imageBase64,
-        mimeType,
-        model: IMAGE_MODEL,
-        keySource,
-      });
-    } catch (err) {
-      const classified = classifyAiError(err, keySource);
-      res.status(classified.status).json({
-        error: classified.message,
-        code: classified.code,
-        retryable: classified.retryable,
-        shouldRotateKey: classified.shouldRotateKey,
-        cooldownMs: classified.cooldownMs,
-        keySource,
-      });
+      return;
     }
-  });
 
-  // Gemini 3.5 Transcribe Voice Note Transcription (BYOK-first, server GEMINI_API_KEY fallback)
-  app.post('/api/ai/transcribe', async (req, res) => {
-    let keySource: 'byok' | 'server_fallback' = 'server_fallback';
-    try {
-      const resolved = resolveApiKey(
-        req.headers['x-sotal-gemini-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      keySource = resolved.keySource;
-      const { audioBase64, mimeType, courseContextHint } = req.body ?? {};
+    const cleanText = text.trim().slice(0, 3500);
+    const voiceName = resolveTtsVoice(requestedVoice);
+    const speechStyle =
+      typeof style === 'string' && style.trim()
+        ? style.trim().slice(0, 160)
+        : 'Clear, calm, articulate academic tutor';
 
-      if (typeof audioBase64 !== 'string' || audioBase64.length < 40) {
-        res.status(400).json({
-          error: 'Missing or invalid audio recording payload.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-        });
-        return;
-      }
-
-      if (audioBase64.length > 14_000_000) {
-        res.status(413).json({
-          error: 'Audio note is too large. Please keep voice notes under 2 minutes.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-        });
-        return;
-      }
-
-      const rawMime = typeof mimeType === 'string' ? mimeType.split(';')[0].toLowerCase().trim() : 'audio/webm';
-      const normalizedMime = ALLOWED_AUDIO_MIMES.has(rawMime) ? rawMime : 'audio/webm';
-      const hint =
-        typeof courseContextHint === 'string' && courseContextHint.trim()
-          ? ` Academic course context for accurate terminology spelling: ${courseContextHint.trim().slice(0, 200)}.`
-          : '';
-
-      const ai = createGeminiClient(resolved.apiKey, 'v1beta');
-      const response = await ai.models.generateContent({
-        model: TRANSCRIBE_MODEL,
-        contents: {
-          parts: [
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider: 'gemini',
+      task: 'tts',
+      keyHeaderName: 'x-sotal-gemini-key',
+      run: async (ctx) => {
+        const ai = createGeminiClient(ctx.apiKey, 'v1beta');
+        const response = await ai.models.generateContent({
+          model: TTS_MODEL,
+          contents: [
             {
-              inlineData: {
-                mimeType: normalizedMime,
-                data: audioBase64,
-              },
-            },
-            {
-              text: `Transcribe this student voice note accurately into clean text with proper punctuation. Return only the transcription text without commentary.${hint}`,
+              role: 'user',
+              parts: [
+                {
+                  text: cleanText,
+                  speechMetadata: { style: speechStyle },
+                } as Record<string, unknown>,
+              ],
             },
           ],
-        },
-      });
+          config: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName },
+              },
+            },
+          },
+        });
 
-      checkSafetyBlock(response);
-      const text = (response.text ?? '').trim();
+        checkSafetyBlock(response);
+        const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+        const audioBase64 = inlineData?.data;
+        const mimeType = inlineData?.mimeType || 'audio/wav';
 
-      res.json({
-        text,
-        model: TRANSCRIBE_MODEL,
-        keySource,
+        if (!audioBase64) {
+          throw new ProviderRequestError({
+            status: 502,
+            code: 'SERVER_ERROR',
+            message: 'Gemini TTS returned no audio payload.',
+            retryable: true,
+            cooldownMs: 5000,
+          });
+        }
+
+        return {
+          payload: { audioBase64, mimeType, voiceName },
+          model: TTS_MODEL,
+          tokens: extractGeminiTokenUsage(response),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      ...executed.result.payload,
+      model: executed.result.model,
+      keySource: executed.keySource,
+      quota: executed.quota,
+    });
+  });
+
+  // Gemini Concept Infographic / Illustrative Image Generation
+  app.post('/api/ai/generate-image', requireAuth, async (req, res) => {
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+
+    if (!prompt) {
+      res.status(400).json({
+        error: 'A non-empty visual prompt is required for image generation.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
       });
-    } catch (err) {
-      const classified = classifyAiError(err, keySource);
-      res.status(classified.status).json({
-        error: classified.message,
-        code: classified.code,
-        retryable: classified.retryable,
-        shouldRotateKey: classified.shouldRotateKey,
-        cooldownMs: classified.cooldownMs,
-        keySource,
-      });
+      return;
     }
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider: 'gemini',
+      task: 'image_generation',
+      keyHeaderName: 'x-sotal-gemini-key',
+      run: async (ctx) => {
+        const ai = createGeminiClient(ctx.apiKey, 'v1beta');
+        const response = await ai.models.generateContent({
+          model: IMAGE_MODEL,
+          contents: prompt.slice(0, 1600),
+          config: { responseModalities: ['IMAGE'] },
+        });
+
+        checkSafetyBlock(response);
+        const parts = response.candidates?.[0]?.content?.parts ?? [];
+        const imgPart = parts.find(
+          (p) => p && typeof p === 'object' && p.inlineData && typeof p.inlineData.data === 'string'
+        );
+        const imageBase64 = imgPart?.inlineData?.data;
+        const mimeType = imgPart?.inlineData?.mimeType || 'image/png';
+
+        if (!imageBase64) {
+          throw new ProviderRequestError({
+            status: 502,
+            code: 'SERVER_ERROR',
+            message: 'Gemini returned no image data for this prompt.',
+            retryable: true,
+            cooldownMs: 5000,
+          });
+        }
+
+        return {
+          payload: { imageBase64, mimeType },
+          model: IMAGE_MODEL,
+          tokens: extractGeminiTokenUsage(response),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      ...executed.result.payload,
+      model: executed.result.model,
+      keySource: executed.keySource,
+      quota: executed.quota,
+    });
+  });
+
+  // Gemini Voice Note Transcription
+  app.post('/api/ai/transcribe', requireAuth, async (req, res) => {
+    const { audioBase64, mimeType, courseContextHint } = req.body ?? {};
+
+    if (typeof audioBase64 !== 'string' || audioBase64.length < 40) {
+      res.status(400).json({
+        error: 'Missing or invalid audio recording payload.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+      });
+      return;
+    }
+
+    if (audioBase64.length > 14_000_000) {
+      res.status(413).json({
+        error: 'Audio note is too large. Please keep voice notes under 2 minutes.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+      });
+      return;
+    }
+
+    const rawMime =
+      typeof mimeType === 'string' ? mimeType.split(';')[0].toLowerCase().trim() : 'audio/webm';
+    const normalizedMime = ALLOWED_AUDIO_MIMES.has(rawMime) ? rawMime : 'audio/webm';
+    const hint =
+      typeof courseContextHint === 'string' && courseContextHint.trim()
+        ? ` Academic course context for accurate terminology spelling: ${courseContextHint.trim().slice(0, 200)}.`
+        : '';
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider: 'gemini',
+      task: 'transcription',
+      keyHeaderName: 'x-sotal-gemini-key',
+      run: async (ctx) => {
+        const ai = createGeminiClient(ctx.apiKey, 'v1beta');
+        const response = await ai.models.generateContent({
+          model: TRANSCRIBE_MODEL,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: normalizedMime,
+                  data: audioBase64,
+                },
+              },
+              {
+                text: `Transcribe this student voice note accurately into clean text with proper punctuation. Return only the transcription text without commentary.${hint}`,
+              },
+            ],
+          },
+        });
+        checkSafetyBlock(response);
+        return {
+          payload: { text: (response.text ?? '').trim() },
+          model: TRANSCRIBE_MODEL,
+          tokens: extractGeminiTokenUsage(response),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      text: executed.result.payload.text,
+      model: executed.result.model,
+      keySource: executed.keySource,
+      quota: executed.quota,
+    });
   });
 
   // ---------------------------------------------------------------------------
-  // OpenAI-compatible provider proxy (NVIDIA NIM / OpenRouter / Cerebras)
-  //
-  // The device-local BYOK key arrives via x-sotal-provider-key and is used only
-  // for this request. Nothing is written to disk, Firestore, or logs.
+  // OpenAI-compatible provider proxy (OpenRouter / Cerebras / Groq / Cloudflare / NIM)
   // ---------------------------------------------------------------------------
-  app.post('/api/providers/:provider/test-key', async (req, res) => {
+  app.post('/api/providers/:provider/test-key', requireAuth, async (req, res) => {
     let provider: OpenAiProviderId | null = null;
+    const rawKey = Array.isArray(req.headers['x-sotal-provider-key'])
+      ? req.headers['x-sotal-provider-key'][0]
+      : req.headers['x-sotal-provider-key'];
+    const trimmedKey = typeof rawKey === 'string' ? rawKey.trim() : '';
     try {
       provider = resolveProviderParam(req.params.provider);
       const resolved = resolveProviderKey(
         provider,
-        req.headers['x-sotal-provider-key'],
+        trimmedKey || undefined,
         req.headers['x-sotal-byok-only']
       );
       const result = await testProviderConnection({ provider, apiKey: resolved.apiKey });
@@ -748,315 +758,393 @@ async function startServer() {
         latencyMs: result.latencyMs,
       });
     } catch (err) {
-      sendProviderError(res, provider ?? req.params.provider, err);
+      sendProviderError(res, provider ?? req.params.provider, err, trimmedKey ? [trimmedKey] : []);
     }
   });
 
-  app.post('/api/providers/:provider/generate', async (req, res) => {
-    let provider: OpenAiProviderId | null = null;
+  app.post('/api/providers/:provider/generate', requireAuth, async (req, res) => {
+    let provider: OpenAiProviderId;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(
-        provider,
-        req.headers['x-sotal-provider-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      const { prompt, messages, systemInstruction, model } = req.body ?? {};
-
-      if (
-        (typeof prompt !== 'string' || !prompt.trim()) &&
-        (!Array.isArray(messages) || messages.length === 0)
-      ) {
-        res.status(400).json({
-          error: 'Either prompt or non-empty messages array is required.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-          provider,
-        });
-        return;
-      }
-
-      const result = await generateProviderText({
-        provider,
-        apiKey: resolved.apiKey,
-        prompt,
-        messages,
-        systemInstruction,
-        model,
-      });
-
-      res.json({
-        text: result.text,
-        model: result.model,
-        provider,
-        keySource: resolved.keySource,
-        finishReason: result.finishReason,
-      });
     } catch (err) {
-      sendProviderError(res, provider ?? req.params.provider, err);
+      sendProviderError(res, req.params.provider, err);
+      return;
     }
+
+    const { prompt, messages, systemInstruction, model } = req.body ?? {};
+    if (
+      (typeof prompt !== 'string' || !prompt.trim()) &&
+      (!Array.isArray(messages) || messages.length === 0)
+    ) {
+      res.status(400).json({
+        error: 'Either prompt or non-empty messages array is required.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+        provider,
+      });
+      return;
+    }
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider,
+      task: 'chat',
+      keyHeaderName: 'x-sotal-provider-key',
+      run: async (ctx) => {
+        const result = await generateProviderText({
+          provider,
+          apiKey: ctx.apiKey,
+          prompt,
+          messages,
+          systemInstruction,
+          model,
+        });
+        return {
+          payload: { text: result.text, finishReason: result.finishReason },
+          model: result.model,
+          tokens: extractOpenAiTokenUsage(result.usage),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      text: executed.result.payload.text,
+      model: executed.result.model,
+      provider,
+      keySource: executed.keySource,
+      finishReason: executed.result.payload.finishReason,
+      quota: executed.quota,
+    });
   });
 
-  app.post('/api/providers/:provider/generate-json', async (req, res) => {
-    let provider: OpenAiProviderId | null = null;
+  app.post('/api/providers/:provider/generate-json', requireAuth, async (req, res) => {
+    let provider: OpenAiProviderId;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(
-        provider,
-        req.headers['x-sotal-provider-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      const { prompt, systemInstruction, responseSchema, model } = req.body ?? {};
-
-      if (typeof prompt !== 'string' || !prompt.trim()) {
-        res.status(400).json({
-          error: 'A non-empty prompt is required for structured generation.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-          provider,
-        });
-        return;
-      }
-
-      const result = await generateProviderJson({
-        provider,
-        apiKey: resolved.apiKey,
-        prompt,
-        systemInstruction:
-          typeof systemInstruction === 'string' ? systemInstruction : undefined,
-        responseSchema:
-          responseSchema && typeof responseSchema === 'object'
-            ? (responseSchema as Record<string, unknown>)
-            : undefined,
-        model: typeof model === 'string' ? model : undefined,
-      });
-
-      res.json({
-        data: result.data,
-        rawText: result.rawText,
-        model: result.model,
-        provider,
-        keySource: resolved.keySource,
-      });
     } catch (err) {
-      sendProviderError(res, provider ?? req.params.provider, err);
+      sendProviderError(res, req.params.provider, err);
+      return;
     }
+
+    const { prompt, systemInstruction, responseSchema, model } = req.body ?? {};
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      res.status(400).json({
+        error: 'A non-empty prompt is required for structured generation.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+        provider,
+      });
+      return;
+    }
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider,
+      task: 'structured_json',
+      keyHeaderName: 'x-sotal-provider-key',
+      run: async (ctx) => {
+        const result = await generateProviderJson({
+          provider,
+          apiKey: ctx.apiKey,
+          prompt,
+          systemInstruction:
+            typeof systemInstruction === 'string' ? systemInstruction : undefined,
+          responseSchema:
+            responseSchema && typeof responseSchema === 'object'
+              ? (responseSchema as Record<string, unknown>)
+              : undefined,
+          model: typeof model === 'string' ? model : undefined,
+        });
+        return {
+          payload: { data: result.data, rawText: result.rawText },
+          model: result.model,
+          tokens: extractOpenAiTokenUsage(result.usage),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      data: executed.result.payload.data,
+      rawText: executed.result.payload.rawText,
+      model: executed.result.model,
+      provider,
+      keySource: executed.keySource,
+      quota: executed.quota,
+    });
   });
 
-  app.post('/api/providers/:provider/vision', async (req, res) => {
-    let provider: OpenAiProviderId | null = null;
+  app.post('/api/providers/:provider/vision', requireAuth, async (req, res) => {
+    let provider: OpenAiProviderId;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(
-        provider,
-        req.headers['x-sotal-provider-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      const { imageBase64, mimeType, mode = 'textbook_photo', pageNumber, model } = req.body ?? {};
-
-      if (typeof imageBase64 !== 'string' || imageBase64.length < 20) {
-        res.status(400).json({
-          error: 'Missing or invalid image payload.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-          provider,
-        });
-        return;
-      }
-
-      if (imageBase64.length > 14_000_000) {
-        res.status(413).json({
-          error: 'Image is too large. Please resize or crop before uploading.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-          provider,
-        });
-        return;
-      }
-
-      const normalizedMime =
-        typeof mimeType === 'string' && ALLOWED_IMAGE_MIMES.has(mimeType.toLowerCase())
-          ? mimeType.toLowerCase() === 'image/jpg'
-            ? 'image/jpeg'
-            : mimeType.toLowerCase()
-          : 'image/jpeg';
-
-      const result = await extractProviderVision({
-        provider,
-        apiKey: resolved.apiKey,
-        imageBase64,
-        mimeType: normalizedMime,
-        mode: String(mode),
-        pageNumber: typeof pageNumber === 'number' ? pageNumber : undefined,
-        model: typeof model === 'string' ? model : undefined,
-      });
-
-      res.json({
-        sections: result.sections,
-        uncertainCount: result.uncertainCount,
-        notes: result.notes,
-        model: result.model,
-        provider,
-        keySource: resolved.keySource,
-      });
     } catch (err) {
-      sendProviderError(res, provider ?? req.params.provider, err);
+      sendProviderError(res, req.params.provider, err);
+      return;
     }
+
+    const { imageBase64, mimeType, mode = 'textbook_photo', pageNumber, model } = req.body ?? {};
+    if (typeof imageBase64 !== 'string' || imageBase64.length < 20) {
+      res.status(400).json({
+        error: 'Missing or invalid image payload.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+        provider,
+      });
+      return;
+    }
+
+    if (imageBase64.length > 14_000_000) {
+      res.status(413).json({
+        error: 'Image is too large. Please resize or crop before uploading.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+        provider,
+      });
+      return;
+    }
+
+    const normalizedMime =
+      typeof mimeType === 'string' && ALLOWED_IMAGE_MIMES.has(mimeType.toLowerCase())
+        ? mimeType.toLowerCase() === 'image/jpg'
+          ? 'image/jpeg'
+          : mimeType.toLowerCase()
+        : 'image/jpeg';
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider,
+      task: 'vision',
+      keyHeaderName: 'x-sotal-provider-key',
+      run: async (ctx) => {
+        const result = await extractProviderVision({
+          provider,
+          apiKey: ctx.apiKey,
+          imageBase64,
+          mimeType: normalizedMime,
+          mode: String(mode),
+          pageNumber: typeof pageNumber === 'number' ? pageNumber : undefined,
+          model: typeof model === 'string' ? model : undefined,
+        });
+        return {
+          payload: {
+            sections: result.sections,
+            uncertainCount: result.uncertainCount,
+            notes: result.notes,
+          },
+          model: result.model,
+          tokens: extractOpenAiTokenUsage(result.usage),
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      ...executed.result.payload,
+      model: executed.result.model,
+      provider,
+      keySource: executed.keySource,
+      quota: executed.quota,
+    });
   });
 
-  app.post('/api/providers/:provider/transcribe', async (req, res) => {
-    let provider: OpenAiProviderId | null = null;
+  app.post('/api/providers/:provider/transcribe', requireAuth, async (req, res) => {
+    let provider: OpenAiProviderId;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const resolved = resolveProviderKey(
-        provider,
-        req.headers['x-sotal-provider-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      const { audioBase64, mimeType, courseContextHint, model } = req.body ?? {};
-
-      if (typeof audioBase64 !== 'string' || audioBase64.length < 40) {
-        res.status(400).json({
-          error: 'Missing or invalid audio recording payload.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-          provider,
-        });
-        return;
-      }
-
-      if (audioBase64.length > 14_000_000) {
-        res.status(413).json({
-          error: 'Audio note is too large. Please keep voice notes under 2 minutes.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-          provider,
-        });
-        return;
-      }
-
-      const rawMime =
-        typeof mimeType === 'string' ? mimeType.split(';')[0].toLowerCase().trim() : 'audio/wav';
-
-      const result = await transcribeProviderAudio({
-        provider,
-        apiKey: resolved.apiKey,
-        audioBase64,
-        mimeType: rawMime,
-        courseContextHint:
-          typeof courseContextHint === 'string' ? courseContextHint : undefined,
-        model: typeof model === 'string' ? model : undefined,
-      });
-
-      res.json({
-        text: result.text,
-        model: result.model,
-        provider,
-        keySource: resolved.keySource,
-      });
     } catch (err) {
-      sendProviderError(res, provider ?? req.params.provider, err);
+      sendProviderError(res, req.params.provider, err);
+      return;
     }
+
+    const { audioBase64, mimeType, courseContextHint, model } = req.body ?? {};
+    if (typeof audioBase64 !== 'string' || audioBase64.length < 40) {
+      res.status(400).json({
+        error: 'Missing or invalid audio recording payload.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+        provider,
+      });
+      return;
+    }
+
+    if (audioBase64.length > 14_000_000) {
+      res.status(413).json({
+        error: 'Audio note is too large. Please keep voice notes under 2 minutes.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+        provider,
+      });
+      return;
+    }
+
+    const rawMime =
+      typeof mimeType === 'string' ? mimeType.split(';')[0].toLowerCase().trim() : 'audio/wav';
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider,
+      task: 'transcription',
+      keyHeaderName: 'x-sotal-provider-key',
+      run: async (ctx) => {
+        const result = await transcribeProviderAudio({
+          provider,
+          apiKey: ctx.apiKey,
+          audioBase64,
+          mimeType: rawMime,
+          courseContextHint:
+            typeof courseContextHint === 'string' ? courseContextHint : undefined,
+          model: typeof model === 'string' ? model : undefined,
+        });
+        return {
+          payload: { text: result.text },
+          model: result.model,
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      text: executed.result.payload.text,
+      model: executed.result.model,
+      provider,
+      keySource: executed.keySource,
+      quota: executed.quota,
+    });
   });
 
-  // Speech output: Groq serves as the fast speech playback fallback for Gemini.
-  app.post('/api/providers/:provider/tts', async (req, res) => {
-    let provider: OpenAiProviderId | null = null;
+  app.post('/api/providers/:provider/tts', requireAuth, async (req, res) => {
+    let provider: OpenAiProviderId;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-      if (!text) {
-        res.status(400).json({
-          error: 'A non-empty text string is required for speech synthesis.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-          provider,
-        });
-        return;
-      }
-
-      const resolved = resolveProviderKey(
-        provider,
-        req.headers['x-sotal-provider-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      const result = await synthesizeProviderSpeech({
-        provider,
-        apiKey: resolved.apiKey,
-        text,
-        voiceName: typeof req.body?.voiceName === 'string' ? req.body.voiceName : undefined,
-        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
-      });
-
-      res.json({
-        audioBase64: result.audioBase64,
-        mimeType: result.mimeType,
-        voiceName: result.voiceName,
-        model: result.model,
-        provider,
-        keySource: resolved.keySource,
-      });
     } catch (err) {
-      sendProviderError(res, provider ?? req.params.provider, err);
+      sendProviderError(res, req.params.provider, err);
+      return;
     }
+
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) {
+      res.status(400).json({
+        error: 'A non-empty text string is required for speech synthesis.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+        provider,
+      });
+      return;
+    }
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider,
+      task: 'tts',
+      keyHeaderName: 'x-sotal-provider-key',
+      run: async (ctx) => {
+        const result = await synthesizeProviderSpeech({
+          provider,
+          apiKey: ctx.apiKey,
+          text,
+          voiceName: typeof req.body?.voiceName === 'string' ? req.body.voiceName : undefined,
+          model: typeof req.body?.model === 'string' ? req.body.model : undefined,
+        });
+        return {
+          payload: {
+            audioBase64: result.audioBase64,
+            mimeType: result.mimeType,
+            voiceName: result.voiceName,
+          },
+          model: result.model,
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      ...executed.result.payload,
+      model: executed.result.model,
+      provider,
+      keySource: executed.keySource,
+      quota: executed.quota,
+    });
   });
 
-  // Concept Infographic / Illustrative Image Generation fallback (Cloudflare FLUX, OpenRouter, NVIDIA NIM)
-  app.post('/api/providers/:provider/generate-image', async (req, res) => {
-    let provider: OpenAiProviderId | null = null;
+  app.post('/api/providers/:provider/generate-image', requireAuth, async (req, res) => {
+    let provider: OpenAiProviderId;
     try {
       provider = resolveProviderParam(req.params.provider);
-      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
-      if (!prompt) {
-        res.status(400).json({
-          error: 'A non-empty visual prompt is required for image generation.',
-          code: 'INVALID_REQUEST',
-          retryable: false,
-          shouldRotateKey: false,
-          cooldownMs: 0,
-          provider,
-        });
-        return;
-      }
-
-      const resolved = resolveProviderKey(
-        provider,
-        req.headers['x-sotal-provider-key'],
-        req.headers['x-sotal-byok-only']
-      );
-      const result = await generateProviderImage({
-        provider,
-        apiKey: resolved.apiKey,
-        prompt,
-        aspectRatio: typeof req.body?.aspectRatio === 'string' ? req.body.aspectRatio : undefined,
-        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
-      });
-
-      res.json({
-        imageBase64: result.imageBase64,
-        mimeType: result.mimeType,
-        model: result.model,
-        provider,
-        keySource: resolved.keySource,
-      });
     } catch (err) {
-      sendProviderError(res, provider ?? req.params.provider, err);
+      sendProviderError(res, req.params.provider, err);
+      return;
     }
+
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    if (!prompt) {
+      res.status(400).json({
+        error: 'A non-empty visual prompt is required for image generation.',
+        code: 'INVALID_REQUEST',
+        retryable: false,
+        shouldRotateKey: false,
+        cooldownMs: 0,
+        provider,
+      });
+      return;
+    }
+
+    const executed = await executeProtectedAiRoute({
+      req,
+      res,
+      provider,
+      task: 'image_generation',
+      keyHeaderName: 'x-sotal-provider-key',
+      run: async (ctx) => {
+        const result = await generateProviderImage({
+          provider,
+          apiKey: ctx.apiKey,
+          prompt,
+          aspectRatio: typeof req.body?.aspectRatio === 'string' ? req.body.aspectRatio : undefined,
+          model: typeof req.body?.model === 'string' ? req.body.model : undefined,
+        });
+        return {
+          payload: { imageBase64: result.imageBase64, mimeType: result.mimeType },
+          model: result.model,
+        };
+      },
+    });
+
+    if (!executed) return;
+    res.json({
+      ...executed.result.payload,
+      model: executed.result.model,
+      provider,
+      keySource: executed.keySource,
+      quota: executed.quota,
+    });
   });
+
+  return app;
+}
+
+async function startServer() {
+  const app = createApiApp();
 
   if (!IS_PROD) {
     const { createServer: createViteServer } = await import('vite');
@@ -1069,9 +1157,6 @@ async function startServer() {
       appType: 'spa',
     });
 
-    // Vite 8 injects /@vite/client even when hmr/ws are disabled, which tries to
-    // connect to an unreachable HMR WebSocket port in proxied middleware mode.
-    // Serve a clean WebSocket-free client shim preserving CSS injection and HMR context APIs.
     const viteClientShim = `
 const sheetsMap = new Map();
 let lastInsertedStyle;
@@ -1157,4 +1242,9 @@ export class ErrorOverlay extends HTMLElement {}
   });
 }
 
-void startServer();
+// Only start listening when executed directly as entrypoint (not when imported by tests)
+const isDirectEntry =
+  process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename);
+if (isDirectEntry) {
+  void startServer();
+}

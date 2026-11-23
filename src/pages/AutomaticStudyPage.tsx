@@ -76,6 +76,7 @@ import {
 import { formatShortDate, generateDocumentId } from '../utils/validation';
 import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
 import { MarkdownMessage } from '../components/tutor/MarkdownMessage';
+import { LessonAudioPlayer } from '../components/study/LessonAudioPlayer';
 import { Button } from '../components/ui/Button';
 import { GeneratedStudyImageCard } from '../components/ui/GeneratedStudyImageCard';
 import { Modal } from '../components/ui/Modal';
@@ -449,8 +450,27 @@ export const AutomaticStudyPage: React.FC = () => {
     );
   };
 
+  const startLessonAudioNarration = (
+    entryId: string,
+    markdown: string,
+    sessionId: string
+  ) => {
+    if (!user || !activeCourse || !isOnline) return;
+    void geminiAudioPlayer.playMessage({
+      id: entryId,
+      text: markdown,
+      voiceName: prefs.ttsVoice,
+      playbackRate: prefs.voiceRate,
+      style: 'Clear, engaging, well-paced university lecturer narrating a study lesson',
+      persist: {
+        userId: user.uid,
+        courseId: activeCourse.id,
+        conversationId: `auto_study_${sessionId}`,
+      },
+    });
+  };
+
   const handleTogglePlay = async (entryId: string, markdown: string) => {
-    if (!prefs.voiceEnabled) return;
     if (playback.activeId === entryId) {
       if (playback.status === 'playing' || playback.status === 'paused') {
         geminiAudioPlayer.togglePause();
@@ -472,6 +492,15 @@ export const AutomaticStudyPage: React.FC = () => {
       text: markdown,
       voiceName: prefs.ttsVoice,
       playbackRate: prefs.voiceRate,
+      style: 'Clear, engaging, well-paced university lecturer narrating a study lesson',
+      persist:
+        user && activeCourse && activeSessionId
+          ? {
+              userId: user.uid,
+              courseId: activeCourse.id,
+              conversationId: `auto_study_${activeSessionId}`,
+            }
+          : undefined,
     });
   };
 
@@ -552,6 +581,8 @@ export const AutomaticStudyPage: React.FC = () => {
     setCreating(true);
     setError(null);
     setNotice(null);
+    // Synchronously unlock browser audio element inside the submit gesture so narration auto-plays immediately when ready
+    geminiAudioPlayer.unlockForAutoplay();
 
     try {
       setCreationPhase('Designing sequential study plan from your course materials...');
@@ -611,6 +642,9 @@ export const AutomaticStudyPage: React.FC = () => {
 
       // Generate illustrative concept visual in the background & cache locally on device
       void triggerEntryImageGeneration(initialEntry, session.id);
+
+      // Automatically generate and begin playing audio narration for the newly generated lesson
+      startLessonAudioNarration(initialEntry.id, initialEntry.markdown, session.id);
     } catch (err) {
       setError(formatReadableError(err));
     } finally {
@@ -906,6 +940,8 @@ export const AutomaticStudyPage: React.FC = () => {
     setBusyAction('next_unit');
     setError(null);
     setNotice(null);
+    // Unlock audio element synchronously inside user click gesture for immediate playback
+    geminiAudioPlayer.unlockForAutoplay();
 
     try {
       const nextIdx = activeSession.currentUnitIndex + 1;
@@ -978,6 +1014,9 @@ export const AutomaticStudyPage: React.FC = () => {
 
       // Generate illustrative concept visual in the background & cache locally on device
       void triggerEntryImageGeneration(lessonEntry, activeSession.id);
+
+      // Automatically generate and begin playing audio narration for the newly generated unit lesson
+      startLessonAudioNarration(lessonEntry.id, lessonEntry.markdown, activeSession.id);
     } catch (err) {
       setError(formatReadableError(err));
     } finally {
@@ -1576,7 +1615,7 @@ export const AutomaticStudyPage: React.FC = () => {
                         )}
                       </div>
 
-                      {prefs.voiceEnabled && (
+                      {entry.kind !== 'lesson' && prefs.voiceEnabled && (
                         <div className="flex items-center gap-1.5">
                           <button
                             type="button"
@@ -1616,6 +1655,20 @@ export const AutomaticStudyPage: React.FC = () => {
                         </div>
                       )}
                     </div>
+
+                    {entry.kind === 'lesson' && (
+                      <LessonAudioPlayer
+                        entryId={entry.id}
+                        title={entry.unitTitle}
+                        playback={playback}
+                        isOnline={isOnline}
+                        onPlayOrToggle={() => void handleTogglePlay(entry.id, entry.markdown)}
+                        onRetry={() => {
+                          geminiAudioPlayer.stop();
+                          startLessonAudioNarration(entry.id, entry.markdown, activeSession.id);
+                        }}
+                      />
+                    )}
 
                     <MarkdownMessage content={entry.markdown} />
 

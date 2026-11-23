@@ -49,12 +49,14 @@ export interface AiExecuteResult<T> {
 
 export interface RunAiTaskParams<T> {
   task: AiTask;
+  /** Optional feature attribution sent to backend telemetry/flags (e.g., tutor, practice_cbt, automatic_study). */
+  feature?: string;
   /** Optional primary model hint shown in the subtle live AI model badge before the response arrives. */
   requestedModel?: string;
   signal?: AbortSignal;
   /** Optional post-processing gate (e.g. structured-output schema validation). */
   validate?: (value: T) => T;
-  execute: (attempt: RouteAttempt) => Promise<AiExecuteResult<T>>;
+  execute: (attempt: RouteAttempt, context: { requestId: string; feature?: string }) => Promise<AiExecuteResult<T>>;
 }
 
 let aiOperationSequence = 0;
@@ -288,7 +290,10 @@ export async function runAiTask<T>(
       // Key-level loop: one candidate may be retried for transient failures.
       for (;;) {
         try {
-          const result = await params.execute(attempt);
+          const result = await params.execute(attempt, {
+            requestId: opId,
+            feature: params.feature,
+          });
           const value = params.validate ? params.validate(result.value) : result.value;
 
           if (attempt.keyId) {
@@ -324,6 +329,36 @@ export async function runAiTask<T>(
                 'UNKNOWN',
                 { provider: attempt.provider, retryable: true }
               );
+
+          if (error.code === 'FREE_TRIAL_EXPIRED') {
+            emitApiKeyLimitReached({
+              provider: attempt.provider,
+              task: params.task,
+              reason: 'free_trial_expired',
+              message: error.message,
+            });
+            throw error;
+          }
+
+          if (error.code === 'SHARED_QUOTA_EXHAUSTED') {
+            const meta = error.meta ?? {};
+            emitApiKeyLimitReached({
+              provider: attempt.provider,
+              task: params.task,
+              reason: 'shared_quota_exhausted',
+              message: error.message,
+              quota:
+                typeof meta.used === 'number' && typeof meta.limit === 'number'
+                  ? {
+                      used: meta.used,
+                      limit: meta.limit,
+                      remaining: typeof meta.remaining === 'number' ? meta.remaining : 0,
+                      resetLabel: typeof meta.resetLabel === 'string' ? meta.resetLabel : undefined,
+                    }
+                  : undefined,
+            });
+            throw error;
+          }
 
           if (NON_ROTATABLE_CODES.has(error.code)) {
             throw error;

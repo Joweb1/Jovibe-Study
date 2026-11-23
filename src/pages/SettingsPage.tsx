@@ -10,6 +10,7 @@ import {
 } from '../types/models';
 import { useAuth } from '../context/AuthContext';
 import { useCourses } from '../context/CourseContext';
+import { usePlatformAccess } from '../context/PlatformAccessContext';
 import { useTheme } from '../context/ThemeContext';
 import { useRouter } from '../router/RouterContext';
 import { db } from '../services/firebase/config';
@@ -30,6 +31,7 @@ import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
 export const SettingsPage: React.FC = () => {
   const { user, profile, isOnline, savePreferences, signOut } = useAuth();
   const { courses } = useCourses();
+  const { status: platformStatus, usingPersonalKey } = usePlatformAccess();
   const { navigate } = useRouter();
   const { theme, toggleTheme } = useTheme();
 
@@ -229,6 +231,18 @@ export const SettingsPage: React.FC = () => {
             Sign out
           </Button>
         </div>
+
+        {/* Expired Free AI Access Notice */}
+        {platformStatus && !usingPersonalKey && platformStatus.freeAccess.expired && (
+          <div className="rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/35 p-4 space-y-1.5 text-xs">
+            <div className="font-semibold text-red-900 dark:text-red-200">
+              7-Day Free AI Access Expired
+            </div>
+            <p className="text-red-700 dark:text-red-300 leading-relaxed">
+              Your 7-day free AI trial has ended and shared API access is no longer available. Add your own free Google Gemini (or fallback provider) API key in the AI Providers section below to continue using AI features.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Appearance */}

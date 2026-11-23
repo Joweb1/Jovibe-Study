@@ -3,8 +3,19 @@ import type { AiProvider, AiTask } from './providers';
 export interface ApiKeyLimitEvent {
   provider: AiProvider;
   task: AiTask | 'live';
-  reason: 'quota_exhausted' | 'rate_limit' | 'all_keys_cooling_down';
+  reason:
+    | 'quota_exhausted'
+    | 'rate_limit'
+    | 'all_keys_cooling_down'
+    | 'free_trial_expired'
+    | 'shared_quota_exhausted';
   message: string;
+  quota?: {
+    used: number;
+    limit: number;
+    remaining: number;
+    resetLabel?: string;
+  };
   timestampMs: number;
 }
 
@@ -14,15 +25,14 @@ const listeners = new Set<Listener>();
 let lastEmittedAtMs = 0;
 
 /**
- * Broadcasts that the user's own configured API key(s) hit their limit and no
- * other configured BYOK provider was able to fulfill the request.
+ * Broadcasts that the user hit a key limit, shared daily quota limit, or 7-day free-access expiry.
  * Debounced slightly so parallel failed requests open the popup cleanly once.
  */
 export function emitApiKeyLimitReached(
   payload: Omit<ApiKeyLimitEvent, 'timestampMs'>
 ): void {
   const now = Date.now();
-  if (now - lastEmittedAtMs < 1500) {
+  if (now - lastEmittedAtMs < 1200) {
     return;
   }
   lastEmittedAtMs = now;

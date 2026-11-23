@@ -12,7 +12,8 @@ export type AppRoute =
   | '/manage-course'
   | '/join'
   | '/streak'
-  | '/dashboard';
+  | '/dashboard'
+  | '/admin';
 
 export type TutorSourceMode = 'materials_only' | 'materials_plus_ai' | 'general_ai';
 

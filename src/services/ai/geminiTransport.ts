@@ -7,6 +7,7 @@ import {
 } from './http';
 import { hasUserEnteredOwnKey } from './keyManager';
 import type { AiProvider } from './providers';
+import { buildAuthHeaders, notifyQuotaFromHeaders } from '../api/authHeaders';
 
 export type ServerFallbackProviders = Record<AiProvider, boolean>;
 
@@ -22,8 +23,10 @@ const EMPTY_SERVER_PROVIDERS: ServerFallbackProviders = {
 interface GeminiCallParams {
   endpoint: string;
   payload: Record<string, unknown>;
-  /** BYOK key. `null` uses the server-managed GEMINI_API_KEY (only when user has never entered a personal key). */
+  /** BYOK key. `null` uses the admin shared pool / server-managed fallback key (only during eligible free trial). */
   apiKey: string | null;
+  requestId?: string;
+  feature?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -36,12 +39,18 @@ interface GeminiCallParams {
 export async function callGeminiEndpoint<TResponse extends { model?: string }>(
   params: GeminiCallParams
 ): Promise<TResponse> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
   if (params.apiKey) {
     headers['x-sotal-gemini-key'] = params.apiKey;
   }
   if (hasUserEnteredOwnKey()) {
     headers['x-sotal-byok-only'] = '1';
+  }
+  if (params.requestId) {
+    headers['x-sotal-request-id'] = params.requestId;
+  }
+  if (params.feature) {
+    headers['x-sotal-feature'] = params.feature;
   }
 
   try {
@@ -56,6 +65,7 @@ export async function callGeminiEndpoint<TResponse extends { model?: string }>(
       params.signal
     );
 
+    notifyQuotaFromHeaders(response.headers);
     const json = (await response.json().catch(() => ({}))) as TResponse & Record<string, unknown>;
 
     if (response.ok) return json;

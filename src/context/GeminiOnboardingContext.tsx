@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { useAuth } from './AuthContext';
+import { usePlatformAccess } from './PlatformAccessContext';
 import { useRouter } from '../router/RouterContext';
 import { listStoredApiKeys } from '../services/ai/keyManager';
 import {
@@ -51,6 +52,7 @@ const GeminiOnboardingContext = createContext<GeminiOnboardingContextValue | nul
 
 export const GeminiOnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
+  const { status: platformStatus } = usePlatformAccess();
   const { route, navigate } = useRouter();
   const userId = user?.uid ?? '';
 
@@ -107,8 +109,25 @@ export const GeminiOnboardingProvider: React.FC<{ children: React.ReactNode }> =
       currentRoute: routeRef.current,
     });
 
-    setState(resolved);
-    writePersistedOnboardingState(userId, resolved);
+    // Newly onboarded users receive 7 days of free AI access via shared keys, so do not force
+    // the immediate BYOK tutorial overlay on welcome while free trial is active (they see the 7-day welcome popup instead).
+    if (
+      resolved.status === 'in_progress' &&
+      resolved.step === 'welcome' &&
+      !persisted
+    ) {
+      const deferred = {
+        ...resolved,
+        status: 'skipped' as const,
+        skippedAtMs: Date.now(),
+        updatedAtMs: Date.now(),
+      };
+      setState(deferred);
+      writePersistedOnboardingState(userId, deferred);
+    } else {
+      setState(resolved);
+      writePersistedOnboardingState(userId, resolved);
+    }
     setHydrated(true);
     setReminderDismissedThisSession(false);
   }, [userId]);
@@ -379,7 +398,8 @@ export const GeminiOnboardingProvider: React.FC<{ children: React.ReactNode }> =
     Boolean(userId) &&
     !hasConfiguredKey &&
     state.status !== 'in_progress' &&
-    state.status !== 'completed';
+    state.status !== 'completed' &&
+    Boolean(platformStatus?.freeAccess.expired);
 
   const value = useMemo<GeminiOnboardingContextValue>(
     () => ({

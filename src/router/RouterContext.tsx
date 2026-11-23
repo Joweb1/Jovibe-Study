@@ -13,6 +13,7 @@ const STATIC_ROUTES: AppRoute[] = [
   '/manage-course',
   '/streak',
   '/dashboard',
+  '/admin',
 ];
 
 export const PENDING_JOIN_TOKEN_KEY = 'sotal_pending_join_token';

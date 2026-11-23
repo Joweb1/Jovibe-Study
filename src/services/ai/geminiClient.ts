@@ -127,19 +127,23 @@ export async function generateText(params: {
   messages?: Array<{ role: 'user' | 'assistant'; text: string }>;
   systemInstruction?: string;
   model?: string;
+  feature?: string;
   signal?: AbortSignal;
 }): Promise<{ text: string; meta: AiRequestMeta }> {
   const model = params.model || DEFAULT_CHAT_MODEL;
 
   const { value, meta } = await runAiTask<{ text: string }>({
     task: 'chat',
+    feature: params.feature || 'tutor',
     requestedModel: model,
     signal: params.signal,
-    execute: async (attempt) => {
+    execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
         const body = await callGeminiEndpoint<ProviderTextBody>({
           endpoint: '/api/ai/generate',
           apiKey: attempt.apiKey,
+          requestId: ctx.requestId,
+          feature: ctx.feature,
           signal: params.signal,
           payload: {
             prompt: params.prompt,
@@ -155,6 +159,8 @@ export async function generateText(params: {
         provider: providerForAttempt(attempt),
         task: 'chat',
         apiKey: attempt.apiKey,
+        requestId: ctx.requestId,
+        feature: ctx.feature,
         signal: params.signal,
         payload: {
           prompt: params.prompt,
@@ -175,6 +181,7 @@ export async function generateStructuredJson<T>(params: {
   responseSchema?: Record<string, unknown>;
   validator: (raw: unknown) => { valid: boolean; data?: T; error?: string };
   model?: string;
+  feature?: string;
   signal?: AbortSignal;
 }): Promise<{ data: T; meta: AiRequestMeta }> {
   const model = params.model || DEFAULT_CHAT_MODEL;
@@ -193,14 +200,17 @@ export async function generateStructuredJson<T>(params: {
 
   const { value, meta } = await runAiTask<T>({
     task: 'structured_json',
+    feature: params.feature || 'automatic_study',
     requestedModel: model,
     signal: params.signal,
     validate,
-    execute: async (attempt) => {
+    execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
         const body = await callGeminiEndpoint<ProviderJsonBody<T>>({
           endpoint: '/api/ai/generate-json',
           apiKey: attempt.apiKey,
+          requestId: ctx.requestId,
+          feature: ctx.feature,
           signal: params.signal,
           payload: {
             prompt: params.prompt,
@@ -216,6 +226,8 @@ export async function generateStructuredJson<T>(params: {
         provider: providerForAttempt(attempt),
         task: 'structured_json',
         apiKey: attempt.apiKey,
+        requestId: ctx.requestId,
+        feature: ctx.feature,
         signal: params.signal,
         timeoutMs: PROVIDER_JSON_TIMEOUT_MS,
         payload: {
@@ -255,13 +267,16 @@ export async function extractVisionWithClient(params: {
 
   const { value, meta } = await runAiTask<ProviderVisionBody>({
     task: 'vision',
+    feature: 'vision_ocr',
     requestedModel: model,
     signal: params.signal,
-    execute: async (attempt) => {
+    execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
         const body = await callGeminiEndpoint<ProviderVisionBody>({
           endpoint: '/api/extract/vision',
           apiKey: attempt.apiKey,
+          requestId: ctx.requestId,
+          feature: ctx.feature,
           signal: params.signal,
           payload: {
             imageBase64: params.imageBase64,
@@ -278,6 +293,8 @@ export async function extractVisionWithClient(params: {
         provider: providerForAttempt(attempt),
         task: 'vision',
         apiKey: attempt.apiKey,
+        requestId: ctx.requestId,
+        feature: ctx.feature,
         signal: params.signal,
         timeoutMs: PROVIDER_VISION_TIMEOUT_MS,
         payload: {
@@ -303,6 +320,7 @@ export async function synthesizeSpeechWithClient(params: {
   text: string;
   voiceName?: string;
   style?: string;
+  feature?: string;
   signal?: AbortSignal;
 }): Promise<{
   audioBase64: string;
@@ -312,13 +330,16 @@ export async function synthesizeSpeechWithClient(params: {
 }> {
   const { value, meta } = await runAiTask<ProviderTtsBody>({
     task: 'tts',
+    feature: params.feature || 'tts',
     requestedModel: 'gemini-3.8-flash-lite-tts',
     signal: params.signal,
-    execute: async (attempt) => {
+    execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
         const body = await callGeminiEndpoint<ProviderTtsBody>({
           endpoint: '/api/ai/tts',
           apiKey: attempt.apiKey,
+          requestId: ctx.requestId,
+          feature: ctx.feature,
           signal: params.signal,
           payload: {
             text: params.text,
@@ -334,6 +355,8 @@ export async function synthesizeSpeechWithClient(params: {
         provider: providerForAttempt(attempt),
         task: 'tts',
         apiKey: attempt.apiKey,
+        requestId: ctx.requestId,
+        feature: ctx.feature,
         payload: {
           text: params.text,
           voiceName: params.voiceName,
@@ -369,13 +392,16 @@ export async function transcribeAudioWithClient(params: {
 }> {
   const { value, meta } = await runAiTask<{ text: string }>({
     task: 'transcription',
+    feature: 'transcription',
     requestedModel: 'gemini-3.5-transcribe',
     signal: params.signal,
-    execute: async (attempt) => {
+    execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
         const body = await callGeminiEndpoint<ProviderTranscribeBody>({
           endpoint: '/api/ai/transcribe',
           apiKey: attempt.apiKey,
+          requestId: ctx.requestId,
+          feature: ctx.feature,
           signal: params.signal,
           payload: {
             audioBase64: params.audioBase64,
@@ -397,6 +423,8 @@ export async function transcribeAudioWithClient(params: {
         provider: providerForAttempt(attempt),
         task: 'transcription',
         apiKey: attempt.apiKey,
+        requestId: ctx.requestId,
+        feature: ctx.feature,
         signal: params.signal,
         payload: {
           audioBase64: safeAudio.audioBase64,
@@ -427,13 +455,16 @@ export async function generateStudyImageWithClient(params: {
 
   const { value, meta } = await runAiTask<ProviderImageBody>({
     task: 'image_generation',
+    feature: 'image_generation',
     requestedModel: 'gemini-3.1-flash-image',
     signal: params.signal,
-    execute: async (attempt) => {
+    execute: async (attempt, ctx) => {
       if (attempt.provider === 'gemini') {
         const body = await callGeminiEndpoint<ProviderImageBody>({
           endpoint: '/api/ai/generate-image',
           apiKey: attempt.apiKey,
+          requestId: ctx.requestId,
+          feature: ctx.feature,
           timeoutMs: PROVIDER_IMAGE_TIMEOUT_MS,
           signal: params.signal,
           payload: {
@@ -451,6 +482,8 @@ export async function generateStudyImageWithClient(params: {
         provider: providerForAttempt(attempt),
         task: 'image_generation',
         apiKey: attempt.apiKey,
+        requestId: ctx.requestId,
+        feature: ctx.feature,
         timeoutMs: PROVIDER_IMAGE_TIMEOUT_MS,
         signal: params.signal,
         payload: {

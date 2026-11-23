@@ -138,6 +138,7 @@ export async function generateFlashcardsDeck(params: {
   const { data } = await generateStructuredJson({
     prompt,
     model: params.model,
+    feature: 'practice_flashcards',
     validator: flashcardsValidator,
     responseSchema: {
       type: 'OBJECT',
@@ -221,6 +222,7 @@ export async function generateCbtQuestions(params: {
   const { data } = await generateStructuredJson({
     prompt,
     model: params.model,
+    feature: 'practice_cbt',
     validator: cbtValidator,
     responseSchema: {
       type: 'OBJECT',
@@ -305,6 +307,7 @@ export async function generateFillGapExercises(params: {
   const { data } = await generateStructuredJson({
     prompt,
     model: params.model,
+    feature: 'practice_fill_gap',
     validator: fillGapValidator,
     responseSchema: {
       type: 'OBJECT',
@@ -402,6 +405,7 @@ export async function evaluateFillGapAnswer(params: {
   const { data } = await generateStructuredJson({
     prompt,
     model: params.model,
+    feature: 'practice_fill_gap',
     validator: gapEvalValidator,
     responseSchema: {
       type: 'OBJECT',
@@ -473,6 +477,7 @@ export async function generateOralExamQuestion(params: {
   const { data } = await generateStructuredJson({
     prompt,
     model: params.model,
+    feature: 'practice_exam_prep',
     validator: oralQuestionValidator,
     responseSchema: {
       type: 'OBJECT',
@@ -531,6 +536,7 @@ export async function evaluateOralExamAnswer(params: {
   const { data } = await generateStructuredJson({
     prompt,
     model: params.model,
+    feature: 'practice_exam_prep',
     validator: oralEvalValidator,
     responseSchema: {
       type: 'OBJECT',

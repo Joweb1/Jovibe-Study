@@ -8,6 +8,7 @@ import {
 } from './http';
 import { hasUserEnteredOwnKey } from './keyManager';
 import type { AiProvider, AiTask } from './providers';
+import { buildAuthHeaders, notifyQuotaFromHeaders } from '../api/authHeaders';
 
 type NonGeminiProvider = Exclude<AiProvider, 'gemini'>;
 
@@ -24,8 +25,10 @@ export interface ProviderCallParams {
   provider: NonGeminiProvider;
   task: AiTask;
   payload: Record<string, unknown>;
-  /** BYOK key, or `null` to use the server-managed `.env` fallback key (only when user has never entered a personal key). */
+  /** BYOK key, or `null` to use the server-managed shared pool / fallback key. */
   apiKey: string | null;
+  requestId?: string;
+  feature?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -37,14 +40,20 @@ export interface ProviderCallParams {
 export async function callProviderTask<TResponse extends { model?: string }>(
   params: ProviderCallParams
 ): Promise<TResponse> {
-  const headers: Record<string, string> = {
+  const headers = await buildAuthHeaders({
     'Content-Type': 'application/json',
-  };
+  });
   if (params.apiKey) {
     headers['x-sotal-provider-key'] = params.apiKey;
   }
   if (hasUserEnteredOwnKey()) {
     headers['x-sotal-byok-only'] = '1';
+  }
+  if (params.requestId) {
+    headers['x-sotal-request-id'] = params.requestId;
+  }
+  if (params.feature) {
+    headers['x-sotal-feature'] = params.feature;
   }
 
   try {
@@ -59,6 +68,7 @@ export async function callProviderTask<TResponse extends { model?: string }>(
       params.signal
     );
 
+    notifyQuotaFromHeaders(response.headers);
     const json = (await response.json().catch(() => ({}))) as TResponse & Record<string, unknown>;
     if (response.ok) return json;
 
@@ -91,15 +101,16 @@ export async function testProviderApiKey(params: {
   const { recordApiKeyFailure, recordApiKeySuccess } = await import('./keyManager');
 
   try {
+    const authHeaders = await buildAuthHeaders({
+      'Content-Type': 'application/json',
+      'x-sotal-provider-key': params.rawKey,
+      'x-sotal-byok-only': '1',
+    });
     const response = await fetchWithTimeout(
       `/api/providers/${params.provider}/test-key`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-sotal-provider-key': params.rawKey,
-          'x-sotal-byok-only': '1',
-        },
+        headers: authHeaders,
         body: JSON.stringify({}),
       },
       PROVIDER_KEY_TEST_TIMEOUT_MS

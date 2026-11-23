@@ -59,6 +59,7 @@ export interface RawErrorBody {
   retryable?: unknown;
   shouldRotateKey?: unknown;
   cooldownMs?: unknown;
+  meta?: unknown;
 }
 
 /** Normalizes any JSON body into the optional fields toHttpError understands. */
@@ -120,6 +121,7 @@ export function toHttpError(
           code === 'NETWORK_ERROR',
     cooldownMs,
     status,
+    meta: body.meta && typeof body.meta === 'object' ? (body.meta as Record<string, unknown>) : undefined,
   });
 }
 

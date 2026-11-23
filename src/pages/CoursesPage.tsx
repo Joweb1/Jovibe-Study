@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { Course } from '../types/models';
 import { useCourses } from '../context/CourseContext';
+import { usePlatformAccess } from '../context/PlatformAccessContext';
 import { useRouter } from '../router/RouterContext';
 import { formatReadableError } from '../services/firebase/errors';
 import {
@@ -200,6 +201,7 @@ export const CoursesPage: React.FC = () => {
     deleteCourse,
     leaveCourse,
   } = useCourses();
+  const { status: platformStatus, usingPersonalKey } = usePlatformAccess();
   const { navigate } = useRouter();
 
   const [courseFilter, setCourseFilter] = useState<CourseFilter>('all');
@@ -651,6 +653,39 @@ export const CoursesPage: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Shared AI Quota Progress Bar (Courses page only, directly below course cards) */}
+      {platformStatus && platformStatus.freeAccess.active && !usingPersonalKey && (
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/95 dark:bg-zinc-900/90 px-4 py-2.5 text-xs text-zinc-700 dark:text-zinc-300">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="font-mono font-semibold text-zinc-950 dark:text-zinc-100 tabular-nums">
+                {platformStatus.quota.used}/{platformStatus.quota.limit} requests used ·{' '}
+                {platformStatus.quota.remaining} remaining
+              </span>
+              <span aria-hidden="true" className="text-zinc-400">
+                ·
+              </span>
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                {platformStatus.quota.resetLabel}
+              </span>
+              <span aria-hidden="true" className="text-zinc-400 hidden sm:inline">
+                ·
+              </span>
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 hidden sm:inline">
+                Free trial: {platformStatus.freeAccess.daysRemaining}d left
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/settings')}
+              className="text-[11px] font-medium text-zinc-900 dark:text-zinc-200 underline underline-offset-2 hover:opacity-80 cursor-pointer"
+            >
+              Add own API key
+            </button>
+          </div>
         </div>
       )}
 

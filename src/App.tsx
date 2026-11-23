@@ -5,16 +5,19 @@ import { BackgroundIngestionProvider } from './context/BackgroundIngestionContex
 import { ThemeProvider } from './context/ThemeContext';
 import { CourseProvider, useCourses } from './context/CourseContext';
 import { GeminiOnboardingProvider } from './context/GeminiOnboardingContext';
+import { PlatformAccessProvider, usePlatformAccess } from './context/PlatformAccessContext';
 import { PWAInstallProvider } from './context/PWAInstallContext';
 import { StreakProvider } from './context/StreakContext';
 import { WorkspaceUiProvider } from './context/WorkspaceUiContext';
 import { PENDING_JOIN_TOKEN_KEY, RouterProvider, useRouter } from './router/RouterContext';
 import { AppShell } from './components/layout/AppShell';
 import { ApiKeyLimitModal } from './components/onboarding/ApiKeyLimitModal';
+import { FreeAccessWelcomeModal } from './components/onboarding/FreeAccessWelcomeModal';
 import { GeminiOnboardingOverlay } from './components/onboarding/GeminiOnboardingOverlay';
 import { PWAInstallPromptPopup } from './components/pwa/PWAInstallPromptPopup';
 import { ErrorBoundary } from './components/ui/StateViews';
 import { SotalLogo } from './components/ui/SotalLogo';
+import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AuthPage } from './pages/AuthPage';
 import { AutomaticStudyPage } from './pages/AutomaticStudyPage';
 import { CourseManagePage } from './pages/CourseManagePage';
@@ -32,9 +35,11 @@ import { TutorPage } from './pages/TutorPage';
 const WorkspaceRouter: React.FC = () => {
   const { route, navigate } = useRouter();
   const { courses, coursesLoading } = useCourses();
+  const { signOut } = useAuth();
+  const { status: platformStatus } = usePlatformAccess();
 
   // When a signed-in user has no courses yet (e.g., fresh signup), keep Courses as the default landing page,
-  // unless they are visiting Settings or joining a shared course via an invite link.
+  // unless they are visiting Settings, Admin Dashboard, or joining a shared course via an invite link.
   useEffect(() => {
     if (
       !coursesLoading &&
@@ -44,11 +49,39 @@ const WorkspaceRouter: React.FC = () => {
       route !== '/join' &&
       route !== '/live' &&
       route !== '/streak' &&
-      route !== '/dashboard'
+      route !== '/dashboard' &&
+      route !== '/admin'
     ) {
       navigate('/courses');
     }
   }, [coursesLoading, courses.length, route, navigate]);
+
+  if (
+    platformStatus &&
+    (platformStatus.accountStatus === 'suspended' || platformStatus.accountStatus === 'deleted')
+  ) {
+    return (
+      <div className="mx-auto max-w-md py-16 text-center space-y-4">
+        <h1 className="font-display text-xl font-semibold text-zinc-950 dark:text-zinc-100">
+          {platformStatus.accountStatus === 'suspended'
+            ? 'Account Suspended'
+            : 'Account Deactivated'}
+        </h1>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          {platformStatus.accountStatus === 'suspended'
+            ? 'Your SOTAL Study account has been suspended by an administrator. Please contact support if you believe this is an error.'
+            : 'This SOTAL Study account is no longer active.'}
+        </p>
+        <button
+          type="button"
+          onClick={() => void signOut()}
+          className="rounded-md bg-zinc-950 dark:bg-zinc-100 px-4 py-2 text-xs font-medium text-white dark:text-zinc-950 cursor-pointer"
+        >
+          Sign out
+        </button>
+      </div>
+    );
+  }
 
   const renderPage = () => {
     switch (route) {
@@ -76,6 +109,8 @@ const WorkspaceRouter: React.FC = () => {
         return <StreakPage />;
       case '/dashboard':
         return <DashboardPage />;
+      case '/admin':
+        return <AdminDashboardPage />;
       default:
         return <CoursesPage />;
     }
@@ -134,21 +169,24 @@ const AuthenticatedApp: React.FC = () => {
 
   return (
     <CourseProvider>
-      <BackgroundIngestionProvider>
-        <StreakProvider>
-          <RouterProvider>
-            <GeminiOnboardingProvider>
-              <WorkspaceUiProvider>
-                <AppShell>
-                  <WorkspaceRouter />
-                </AppShell>
-                <GeminiOnboardingOverlay />
-                <ApiKeyLimitModal />
-              </WorkspaceUiProvider>
-            </GeminiOnboardingProvider>
-          </RouterProvider>
-        </StreakProvider>
-      </BackgroundIngestionProvider>
+      <PlatformAccessProvider>
+        <BackgroundIngestionProvider>
+          <StreakProvider>
+            <RouterProvider>
+              <GeminiOnboardingProvider>
+                <WorkspaceUiProvider>
+                  <AppShell>
+                    <WorkspaceRouter />
+                  </AppShell>
+                  <FreeAccessWelcomeModal />
+                  <GeminiOnboardingOverlay />
+                  <ApiKeyLimitModal />
+                </WorkspaceUiProvider>
+              </GeminiOnboardingProvider>
+            </RouterProvider>
+          </StreakProvider>
+        </BackgroundIngestionProvider>
+      </PlatformAccessProvider>
     </CourseProvider>
   );
 };

@@ -18,6 +18,7 @@ import {
 import type { CourseGroup, CourseMember } from '../types/models';
 import { useAuth } from '../context/AuthContext';
 import { useCourses } from '../context/CourseContext';
+import { usePlatformAccess } from '../context/PlatformAccessContext';
 import { useRouter } from '../router/RouterContext';
 import { formatReadableError } from '../services/firebase/errors';
 import {
@@ -46,6 +47,7 @@ export const CourseManagePage: React.FC = () => {
     rotateCourseShareLink,
   } = useCourses();
   const { routeParams, navigate } = useRouter();
+  const { syncGroupsMetadata } = usePlatformAccess();
 
   const targetCourse = useMemo(() => {
     if (routeParams.courseId) {
@@ -134,6 +136,32 @@ export const CourseManagePage: React.FC = () => {
       unsubGroups();
     };
   }, [user, targetCourse?.id]);
+
+  // Mirror course study groups & members to server DB for Admin Group Study Management
+  useEffect(() => {
+    if (!user || !targetCourse || groupsLoading || membersLoading) return;
+    if (groups.length === 0) return;
+    void syncGroupsMetadata(
+      groups.map((g) => ({
+        id: g.id,
+        courseId: targetCourse.id,
+        courseCode: targetCourse.code,
+        courseName: targetCourse.name,
+        name: g.name,
+        description: g.description,
+        shareToken: targetCourse.shareToken || '',
+        authorUid: user.uid,
+        authorName: targetCourse.authorName || user.displayName || 'Course Author',
+        members: members
+          .filter((m) => !m.groupId || m.groupId === g.id)
+          .map((m) => ({
+            uid: m.memberUid,
+            displayName: m.displayName,
+            photoURL: m.photoURL,
+          })),
+      }))
+    );
+  }, [user, targetCourse, groups, members, groupsLoading, membersLoading, syncGroupsMetadata]);
 
   const groupMemberCounts = useMemo(() => {
     const counts = new Map<string, number>();

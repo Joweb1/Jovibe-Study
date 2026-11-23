@@ -59,6 +59,11 @@ export interface PlaybackState {
   status: PlaybackStatus;
   voiceName: GeminiTtsVoice | null;
   error: string | null;
+  currentTime: number;
+  duration: number;
+  volume: number;
+  muted: boolean;
+  autoplayBlocked: boolean;
 }
 
 type PlaybackListener = (state: PlaybackState) => void;
@@ -109,7 +114,13 @@ class GeminiAudioPlayer {
     status: 'idle',
     voiceName: null,
     error: null,
+    currentTime: 0,
+    duration: 0,
+    volume: 1,
+    muted: false,
+    autoplayBlocked: false,
   };
+  private lastTimeEmitMs = 0;
 
   subscribe(listener: PlaybackListener): () => void {
     this.listeners.add(listener);
@@ -186,19 +197,89 @@ class GeminiAudioPlayer {
       this.audio.currentTime = 0;
       this.audio.onended = null;
       this.audio.onerror = null;
+      this.audio.ontimeupdate = null;
+      this.audio.onloadedmetadata = null;
       this.audio = null;
     }
-    this.emit({ activeId: null, status: 'idle', error: null });
+    this.emit({
+      activeId: null,
+      status: 'idle',
+      error: null,
+      currentTime: 0,
+      duration: 0,
+      autoplayBlocked: false,
+    });
   }
 
   togglePause(): void {
     if (!this.audio) return;
     if (this.audio.paused) {
-      void this.audio.play();
-      this.emit({ status: 'playing', error: null });
+      void this.audio
+        .play()
+        .then(() => {
+          this.emit({ status: 'playing', error: null, autoplayBlocked: false });
+        })
+        .catch((err) => {
+          this.emit({
+            status: 'paused',
+            autoplayBlocked: true,
+            error: err instanceof Error ? err.message : 'Tap Play to resume audio playback.',
+          });
+        });
     } else {
       this.audio.pause();
-      this.emit({ status: 'paused' });
+      this.emit({ status: 'paused', currentTime: this.audio.currentTime || 0 });
+    }
+  }
+
+  seek(seconds: number): void {
+    if (!this.audio || !Number.isFinite(seconds)) return;
+    const duration =
+      Number.isFinite(this.audio.duration) && this.audio.duration > 0 ? this.audio.duration : 0;
+    const clamped = duration > 0 ? Math.max(0, Math.min(duration, seconds)) : Math.max(0, seconds);
+    try {
+      this.audio.currentTime = clamped;
+    } catch {
+      // Ignore seek before metadata ready
+    }
+    this.emit({ currentTime: clamped, duration });
+  }
+
+  setVolume(volume: number): void {
+    const clamped = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+    const muted = clamped === 0;
+    if (this.audio) {
+      this.audio.volume = clamped;
+      this.audio.muted = muted;
+    }
+    this.emit({ volume: clamped, muted });
+  }
+
+  toggleMute(): void {
+    const nextMuted = !this.state.muted;
+    const nextVolume = !nextMuted && this.state.volume === 0 ? 0.8 : this.state.volume;
+    if (this.audio) {
+      this.audio.muted = nextMuted;
+      this.audio.volume = nextVolume;
+    }
+    this.emit({ muted: nextMuted, volume: nextVolume });
+  }
+
+  async resumeBlockedAutoplay(): Promise<boolean> {
+    if (!this.audio) return false;
+    try {
+      this.audio.muted = this.state.muted;
+      this.audio.volume = this.state.volume;
+      await this.audio.play();
+      this.emit({ status: 'playing', error: null, autoplayBlocked: false });
+      return true;
+    } catch (err) {
+      this.emit({
+        status: 'paused',
+        autoplayBlocked: true,
+        error: err instanceof Error ? err.message : 'Unable to start audio playback.',
+      });
+      return false;
     }
   }
 
@@ -391,13 +472,34 @@ class GeminiAudioPlayer {
     }
 
     const audio = this.unlockedAudio || new Audio();
-    audio.muted = false;
+    audio.muted = this.state.muted;
+    audio.volume = this.state.volume;
     audio.src = blobUrl;
     audio.currentTime = 0;
     audio.playbackRate = Math.min(2.0, Math.max(0.5, params.playbackRate ?? 1.0));
+    audio.onloadedmetadata = () => {
+      if (this.audio !== audio) return;
+      const dur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+      this.emit({ duration: dur, currentTime: audio.currentTime || 0 });
+    };
+    audio.ontimeupdate = () => {
+      if (this.audio !== audio) return;
+      const now = Date.now();
+      if (now - this.lastTimeEmitMs < 150) return;
+      this.lastTimeEmitMs = now;
+      const dur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : this.state.duration;
+      this.emit({ currentTime: audio.currentTime || 0, duration: dur });
+    };
     audio.onended = () => {
       this.audio = null;
-      this.emit({ activeId: null, status: 'idle', error: null });
+      this.emit({
+        activeId: null,
+        status: 'idle',
+        error: null,
+        currentTime: 0,
+        duration: 0,
+        autoplayBlocked: false,
+      });
     };
     audio.onerror = () => {
       this.audio = null;
@@ -405,25 +507,47 @@ class GeminiAudioPlayer {
         activeId: params.id,
         status: 'idle',
         error: 'Audio playback failed in this browser.',
+        autoplayBlocked: false,
       });
     };
 
     this.audio = audio;
     try {
       await audio.play();
+      const dur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
       this.emit({
         activeId: params.id,
         status: 'playing',
         voiceName: resolvedVoice,
         error: null,
+        currentTime: 0,
+        duration: dur,
+        autoplayBlocked: false,
       });
       return true;
     } catch (err) {
+      const isAutoplayBlock =
+        err instanceof DOMException && err.name === 'NotAllowedError';
+      if (isAutoplayBlock) {
+        // Keep audio loaded so clicking Play starts instantaneously without regenerating TTS!
+        const dur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+        this.emit({
+          activeId: params.id,
+          status: 'paused',
+          voiceName: resolvedVoice,
+          currentTime: 0,
+          duration: dur,
+          autoplayBlocked: true,
+          error: 'Audio narration is ready — tap Play to begin listening.',
+        });
+        return false;
+      }
       this.audio = null;
       this.emit({
         activeId: params.id,
         status: 'idle',
         error: err instanceof Error ? err.message : 'Browser blocked audio playback.',
+        autoplayBlocked: false,
       });
       return false;
     }

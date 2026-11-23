@@ -3,11 +3,26 @@ import type { Duplex } from 'stream';
 import { EndSensitivity, Modality, StartSensitivity, type LiveServerMessage } from '@google/genai';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
+  recordAdminKeyFailure,
+  recordAdminKeySuccess,
+  resolveSharedKeyCandidates,
+  shouldRotateAdminKeyForCode,
+} from './adminKeyPool.ts';
+import { upsertUserFromAuth, verifyFirebaseIdToken } from './auth.ts';
+import { sanitizeErrorMessage } from './crypto.ts';
+import {
   classifyAiError,
   createGeminiClient,
-  resolveApiKey,
   resolveTtsVoice,
 } from './geminiService.ts';
+import {
+  AiAccessError,
+  finalizeLogicalRequest,
+  recordAiAttemptLog,
+  refundLogicalRequestQuota,
+  reserveAiExecution,
+  type KeyOrigin,
+} from './quotaService.ts';
 
 export const LIVE_VOICE_MODEL = 'gemini-3.8-live';
 
@@ -27,6 +42,8 @@ interface LiveLessonPayload {
 
 interface ClientInitMessage {
   type: 'init';
+  idToken?: string;
+  requestId?: string;
   apiKey?: string;
   byokOnly?: boolean;
   voiceName?: string;
@@ -182,153 +199,356 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
         }
         connecting = true;
 
-        let keySource: 'byok' | 'server_fallback' = 'server_fallback';
         try {
-          const resolved = resolveApiKey(
-            typeof msg.apiKey === 'string' ? msg.apiKey : undefined,
-            Boolean(msg.byokOnly)
-          );
-          keySource = resolved.keySource;
+          // 1. Verify Firebase ID token on the backend
+          const token = typeof msg.idToken === 'string' ? msg.idToken.trim() : '';
+          if (!token) {
+            connecting = false;
+            safeSend(clientWs, {
+              type: 'error',
+              code: 'UNAUTHENTICATED',
+              message: 'Please sign in to start a SOTAL Live voice session.',
+              shouldRotateKey: false,
+              cooldownMs: 0,
+            });
+            return;
+          }
+
+          let authUser;
+          try {
+            authUser = await verifyFirebaseIdToken(token);
+            upsertUserFromAuth(authUser);
+          } catch (authErr) {
+            connecting = false;
+            safeSend(clientWs, {
+              type: 'error',
+              code: 'UNAUTHENTICATED',
+              message: authErr instanceof Error ? authErr.message : 'Authentication required.',
+              shouldRotateKey: false,
+              cooldownMs: 0,
+            });
+            return;
+          }
+
+          const personalKey = typeof msg.apiKey === 'string' ? msg.apiKey.trim() : '';
+          const usesPersonalKey = personalKey.length > 0;
+          if (!usesPersonalKey && Boolean(msg.byokOnly)) {
+            connecting = false;
+            safeSend(clientWs, {
+              type: 'error',
+              code: 'NO_API_KEY',
+              message: 'No personal Gemini API key was provided. Add your own key in Settings.',
+              shouldRotateKey: false,
+              cooldownMs: 0,
+            });
+            return;
+          }
+
+          // 2. Enforce feature flags (Live Voice AI + global AI), suspension, 7-day trial, and atomic daily quota
+          let reserved;
+          try {
+            reserved = reserveAiExecution({
+              uid: authUser.uid,
+              userEmail: authUser.email,
+              feature: 'live_voice_ai',
+              task: 'live',
+              usesPersonalKey,
+              logicalRequestId: typeof msg.requestId === 'string' ? msg.requestId : undefined,
+            });
+          } catch (accessErr) {
+            connecting = false;
+            if (accessErr instanceof AiAccessError) {
+              safeSend(clientWs, {
+                type: 'error',
+                code: accessErr.code,
+                message: accessErr.message,
+                shouldRotateKey: false,
+                cooldownMs: 0,
+                ...(accessErr.meta ? { meta: accessErr.meta } : {}),
+              });
+              return;
+            }
+            throw accessErr;
+          }
+
+          // 3. Build key candidates (personal BYOK OR admin key pool with rotation -> .env fallback)
+          const candidates: Array<{
+            apiKey: string;
+            keySource: 'byok' | 'server_fallback';
+            keyOrigin: KeyOrigin;
+            adminKeyId: string | null;
+          }> = usesPersonalKey
+            ? [{ apiKey: personalKey, keySource: 'byok', keyOrigin: 'personal_byok', adminKeyId: null }]
+            : resolveSharedKeyCandidates('gemini').map((c) => ({
+                apiKey: c.apiKey,
+                keySource: 'server_fallback' as const,
+                keyOrigin: c.keyOrigin,
+                adminKeyId: c.adminKeyId,
+              }));
+
+          if (candidates.length === 0) {
+            connecting = false;
+            if (!usesPersonalKey) {
+              refundLogicalRequestQuota(reserved.logicalRequestId);
+            }
+            safeSend(clientWs, {
+              type: 'error',
+              code: 'NO_API_KEY',
+              message:
+                'No Gemini API key is currently available for SOTAL Live. Add your own Gemini API key in Settings.',
+              shouldRotateKey: false,
+              cooldownMs: 0,
+            });
+            return;
+          }
+
           const voiceName = resolveTtsVoice(msg.voiceName || 'Zephyr');
           const systemInstruction = buildLiveSystemInstruction(msg.lesson);
-          const ai = createGeminiClient(resolved.apiKey, 'v1beta');
+          const allSecrets = candidates.map((c) => c.apiKey);
 
-          const session = await ai.live.connect({
-            model: LIVE_VOICE_MODEL,
-            config: {
-              responseModalities: [Modality.AUDIO],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName },
+          let connectedSession: LiveSession | null = null;
+          let activeCandidate = candidates[0];
+          let lastError: ReturnType<typeof classifyAiError> | null = null;
+
+          for (let i = 0; i < candidates.length; i++) {
+            const candidate = candidates[i];
+            const hasNext = i < candidates.length - 1;
+            const startMs = Date.now();
+            try {
+              const ai = createGeminiClient(candidate.apiKey, 'v1beta');
+              const session = await ai.live.connect({
+                model: LIVE_VOICE_MODEL,
+                config: {
+                  responseModalities: [Modality.AUDIO],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: { voiceName },
+                    },
+                  },
+                  inputAudioTranscription: {},
+                  outputAudioTranscription: {},
+                  realtimeInputConfig: {
+                    automaticActivityDetection: {
+                      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+                      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+                      prefixPaddingMs: 180,
+                      silenceDurationMs: 650,
+                    },
+                  },
+                  systemInstruction,
                 },
-              },
-              inputAudioTranscription: {},
-              outputAudioTranscription: {},
-              realtimeInputConfig: {
-                automaticActivityDetection: {
-                  startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
-                  endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-                  prefixPaddingMs: 180,
-                  silenceDurationMs: 650,
-                },
-              },
-              systemInstruction,
-            },
-            callbacks: {
-              onopen: () => {
-                // Connected to Gemini Live upstream
-              },
-              onmessage: (message: LiveServerMessage) => {
-                if (closedByClient || clientWs.readyState !== WebSocket.OPEN) return;
+                callbacks: {
+                  onopen: () => {
+                    // Connected to Gemini Live upstream
+                  },
+                  onmessage: (message: LiveServerMessage) => {
+                    if (closedByClient || clientWs.readyState !== WebSocket.OPEN) return;
 
-                const serverContent = message.serverContent;
-                if (!serverContent) return;
+                    const serverContent = message.serverContent;
+                    if (!serverContent) return;
 
-                if (serverContent.interrupted) {
-                  safeSend(clientWs, { type: 'interrupted' });
-                }
+                    if (serverContent.interrupted) {
+                      safeSend(clientWs, { type: 'interrupted' });
+                    }
 
-                if (serverContent.interimInputTranscription?.text) {
-                  safeSend(clientWs, {
-                    type: 'interimInputTranscript',
-                    text: serverContent.interimInputTranscription.text,
-                  });
-                }
+                    if (serverContent.interimInputTranscription?.text) {
+                      safeSend(clientWs, {
+                        type: 'interimInputTranscript',
+                        text: serverContent.interimInputTranscription.text,
+                      });
+                    }
 
-                if (serverContent.inputTranscription?.text) {
-                  safeSend(clientWs, {
-                    type: 'inputTranscript',
-                    text: serverContent.inputTranscription.text,
-                  });
-                }
+                    if (serverContent.inputTranscription?.text) {
+                      safeSend(clientWs, {
+                        type: 'inputTranscript',
+                        text: serverContent.inputTranscription.text,
+                      });
+                    }
 
-                if (serverContent.outputTranscription?.text) {
-                  safeSend(clientWs, {
-                    type: 'outputTranscript',
-                    text: serverContent.outputTranscription.text,
-                  });
-                }
+                    if (serverContent.outputTranscription?.text) {
+                      safeSend(clientWs, {
+                        type: 'outputTranscript',
+                        text: serverContent.outputTranscription.text,
+                      });
+                    }
 
-                const parts = serverContent.modelTurn?.parts ?? [];
-                for (const part of parts) {
-                  if (part.inlineData?.data) {
+                    const parts = serverContent.modelTurn?.parts ?? [];
+                    for (const part of parts) {
+                      if (part.inlineData?.data) {
+                        safeSend(clientWs, {
+                          type: 'audio',
+                          data: part.inlineData.data,
+                          mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
+                        });
+                      }
+                    }
+
+                    if (serverContent.turnComplete) {
+                      safeSend(clientWs, { type: 'turnComplete' });
+                    }
+                  },
+                  onerror: (event: unknown) => {
+                    if (closedByClient) return;
+                    const errObj =
+                      event && typeof event === 'object' && 'error' in event
+                        ? (event as { error?: unknown }).error
+                        : event;
+                    const classified = classifyAiError(errObj, candidate.keySource);
                     safeSend(clientWs, {
-                      type: 'audio',
-                      data: part.inlineData.data,
-                      mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
+                      type: 'error',
+                      code: classified.code,
+                      message: sanitizeErrorMessage(classified.message, allSecrets),
+                      shouldRotateKey: classified.shouldRotateKey,
+                      cooldownMs: classified.cooldownMs,
                     });
-                  }
-                }
+                  },
+                  onclose: (event: unknown) => {
+                    liveSession = null;
+                    if (closedByClient) return;
+                    const reason =
+                      event && typeof event === 'object' && 'reason' in event
+                        ? String((event as { reason?: unknown }).reason || '')
+                        : '';
+                    const code =
+                      event && typeof event === 'object' && 'code' in event
+                        ? Number((event as { code?: unknown }).code || 0)
+                        : 0;
 
-                if (serverContent.turnComplete) {
-                  safeSend(clientWs, { type: 'turnComplete' });
-                }
-              },
-              onerror: (event: unknown) => {
-                if (closedByClient) return;
-                const errObj =
-                  event && typeof event === 'object' && 'error' in event
-                    ? (event as { error?: unknown }).error
-                    : event;
-                const classified = classifyAiError(errObj, keySource);
-                safeSend(clientWs, {
-                  type: 'error',
-                  code: classified.code,
-                  message: classified.message,
-                  shouldRotateKey: classified.shouldRotateKey,
-                  cooldownMs: classified.cooldownMs,
+                    if (reason && /quota|rate|api key|permission|invalid|403|429|1008/i.test(reason)) {
+                      const classified = classifyAiError(new Error(reason), candidate.keySource);
+                      safeSend(clientWs, {
+                        type: 'error',
+                        code: classified.code,
+                        message: sanitizeErrorMessage(classified.message, allSecrets),
+                        shouldRotateKey: classified.shouldRotateKey,
+                        cooldownMs: classified.cooldownMs,
+                      });
+                    }
+                    safeSend(clientWs, { type: 'closed', code, reason: sanitizeErrorMessage(reason, allSecrets) });
+                  },
+                },
+              });
+
+              connectedSession = session;
+              activeCandidate = candidate;
+
+              if (candidate.adminKeyId) {
+                recordAdminKeySuccess(candidate.adminKeyId);
+              }
+              if (!usesPersonalKey) {
+                finalizeLogicalRequest({
+                  logicalRequestId: reserved.logicalRequestId,
+                  status: 'success',
+                  keyOrigin: candidate.keyOrigin,
                 });
-              },
-              onclose: (event: unknown) => {
-                liveSession = null;
-                if (closedByClient) return;
-                const reason =
-                  event && typeof event === 'object' && 'reason' in event
-                    ? String((event as { reason?: unknown }).reason || '')
-                    : '';
-                const code =
-                  event && typeof event === 'object' && 'code' in event
-                    ? Number((event as { code?: unknown }).code || 0)
-                    : 0;
+              }
+              recordAiAttemptLog({
+                logicalRequestId: reserved.logicalRequestId,
+                uid: authUser.uid,
+                userEmail: authUser.email,
+                feature: 'live_voice_ai',
+                task: 'live',
+                keyOrigin: candidate.keyOrigin,
+                provider: 'gemini',
+                adminKeyId: candidate.adminKeyId,
+                model: LIVE_VOICE_MODEL,
+                status: 'success',
+                isLogicalRoot: !reserved.isFailoverReuse && i === 0,
+                isFailover: reserved.isFailoverReuse || i > 0,
+                latencyMs: Date.now() - startMs,
+              });
+              break;
+            } catch (connectErr) {
+              const classified = classifyAiError(connectErr, candidate.keySource);
+              classified.message = sanitizeErrorMessage(classified.message, allSecrets);
+              lastError = classified;
+              const willRotate = !usesPersonalKey && hasNext && shouldRotateAdminKeyForCode(classified.code);
 
-                if (reason && /quota|rate|api key|permission|invalid|403|429|1008/i.test(reason)) {
-                  const classified = classifyAiError(new Error(reason), keySource);
-                  safeSend(clientWs, {
-                    type: 'error',
-                    code: classified.code,
-                    message: classified.message,
-                    shouldRotateKey: classified.shouldRotateKey,
-                    cooldownMs: classified.cooldownMs,
-                  });
-                }
-                safeSend(clientWs, { type: 'closed', code, reason });
-              },
-            },
-          });
+              if (candidate.adminKeyId) {
+                recordAdminKeyFailure(
+                  candidate.adminKeyId,
+                  'gemini',
+                  classified.code,
+                  classified.message,
+                  classified.cooldownMs,
+                  willRotate
+                );
+              }
+
+              recordAiAttemptLog({
+                logicalRequestId: reserved.logicalRequestId,
+                uid: authUser.uid,
+                userEmail: authUser.email,
+                feature: 'live_voice_ai',
+                task: 'live',
+                keyOrigin: candidate.keyOrigin,
+                provider: 'gemini',
+                adminKeyId: candidate.adminKeyId,
+                model: LIVE_VOICE_MODEL,
+                status: classified.code === 'RATE_LIMIT' ? 'rate_limited' : willRotate ? 'failover' : 'failed',
+                isLogicalRoot: !reserved.isFailoverReuse && i === 0,
+                isFailover: reserved.isFailoverReuse || i > 0,
+                latencyMs: Date.now() - startMs,
+                errorCode: classified.code,
+                errorMessage: classified.message,
+                knownSecrets: allSecrets,
+              });
+
+              if (willRotate) {
+                continue;
+              }
+              break;
+            }
+          }
+
+          if (!connectedSession) {
+            connecting = false;
+            if (!usesPersonalKey) {
+              finalizeLogicalRequest({
+                logicalRequestId: reserved.logicalRequestId,
+                status: 'failed',
+              });
+            }
+            const errOut = lastError ?? {
+              code: 'SERVER_ERROR',
+              message: 'Could not connect to SOTAL Live right now.',
+              shouldRotateKey: false,
+              cooldownMs: 0,
+            };
+            safeSend(clientWs, {
+              type: 'error',
+              code: errOut.code,
+              message: errOut.message,
+              shouldRotateKey: errOut.shouldRotateKey,
+              cooldownMs: errOut.cooldownMs,
+            });
+            return;
+          }
 
           if (closedByClient || clientWs.readyState !== WebSocket.OPEN) {
             try {
-              session.close();
+              connectedSession.close();
             } catch {
               // Ignore
             }
             return;
           }
 
-          liveSession = session;
+          liveSession = connectedSession;
           connecting = false;
 
           safeSend(clientWs, {
             type: 'ready',
             model: LIVE_VOICE_MODEL,
             voiceName,
-            keySource,
+            keySource: activeCandidate.keySource,
+            quota: reserved.quotaSnapshot,
           });
 
           if (msg.sendGreeting) {
             const title = (msg.lesson?.lessonTitle || 'this lesson').trim().slice(0, 140);
             try {
-              session.sendRealtimeInput({
+              connectedSession.sendRealtimeInput({
                 text: `The student just joined SOTAL Live to talk about "${title}". Greet them warmly in 1 to 2 relaxed spoken sentences and invite them to jump in whenever they're ready.`,
               });
             } catch (greetErr) {
@@ -337,11 +557,11 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
           }
         } catch (err) {
           connecting = false;
-          const classified = classifyAiError(err, keySource);
+          const classified = classifyAiError(err, 'server_fallback');
           safeSend(clientWs, {
             type: 'error',
             code: classified.code,
-            message: classified.message,
+            message: sanitizeErrorMessage(classified.message),
             shouldRotateKey: classified.shouldRotateKey,
             cooldownMs: classified.cooldownMs,
           });

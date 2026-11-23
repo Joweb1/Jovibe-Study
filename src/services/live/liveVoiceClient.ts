@@ -13,6 +13,7 @@ import {
   type ExecutionCandidate,
 } from '../ai/keyManager';
 import { emitApiKeyLimitReached } from '../ai/keyLimitBus';
+import { emitQuotaSnapshot, getFirebaseIdToken } from '../api/authHeaders';
 
 export interface LiveVoiceCallbacks {
   onStateChange: (state: LiveVoiceState) => void;
@@ -287,10 +288,12 @@ export class LiveVoiceClient {
 
     let lastErrorMessage = 'Could not connect to SOTAL Live right now.';
     let sawLimitFailure = false;
+    const idToken = await getFirebaseIdToken(false);
+    const liveRequestId = `live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     for (const candidate of attemptList) {
       if (this.disposed) return false;
-      const result = await this.openSocketWithCandidate(candidate, options);
+      const result = await this.openSocketWithCandidate(candidate, options, idToken, liveRequestId);
       if (result.ok) {
         this.isConnected = true;
         if (candidate.keyId) {
@@ -314,6 +317,24 @@ export class LiveVoiceClient {
       }
 
       lastErrorMessage = result.errorMessage || lastErrorMessage;
+      if (result.code === 'FREE_TRIAL_EXPIRED') {
+        emitApiKeyLimitReached({
+          provider: 'gemini',
+          task: 'live',
+          reason: 'free_trial_expired',
+          message: lastErrorMessage,
+        });
+        break;
+      }
+      if (result.code === 'SHARED_QUOTA_EXHAUSTED') {
+        emitApiKeyLimitReached({
+          provider: 'gemini',
+          task: 'live',
+          reason: 'shared_quota_exhausted',
+          message: lastErrorMessage,
+        });
+        break;
+      }
       if (candidate.keyId && result.shouldRotateKey) {
         recordApiKeyFailure(
           candidate.keyId,
@@ -664,7 +685,9 @@ export class LiveVoiceClient {
 
   private openSocketWithCandidate(
     candidate: ExecutionCandidate,
-    options: LiveConnectOptions
+    options: LiveConnectOptions,
+    idToken: string | null,
+    requestId: string
   ): Promise<{
     ok: boolean;
     errorMessage?: string;
@@ -726,6 +749,8 @@ export class LiveVoiceClient {
         ws.send(
           JSON.stringify({
             type: 'init',
+            idToken: idToken || undefined,
+            requestId,
             apiKey: candidate.apiKey || undefined,
             byokOnly: hasUserEnteredOwnKey(),
             voiceName: options.voiceName || 'Zephyr',
@@ -768,6 +793,15 @@ export class LiveVoiceClient {
         }
 
         if (msg.type === 'ready') {
+          const maybeQuota = (msg as unknown as { quota?: { used?: number; limit?: number; remaining?: number; resetAtIso?: string } }).quota;
+          if (maybeQuota && typeof maybeQuota.used === 'number' && typeof maybeQuota.limit === 'number') {
+            emitQuotaSnapshot({
+              used: maybeQuota.used,
+              limit: maybeQuota.limit,
+              remaining: typeof maybeQuota.remaining === 'number' ? maybeQuota.remaining : Math.max(0, maybeQuota.limit - maybeQuota.used),
+              resetAtIso: maybeQuota.resetAtIso,
+            });
+          }
           finish({ ok: true });
           return;
         }

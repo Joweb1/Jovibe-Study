@@ -240,12 +240,34 @@ export const ApiKeyLimitModal: React.FC = () => {
                   id="api-key-limit-title"
                   className="font-display text-lg sm:text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-100"
                 >
-                  Your API key reached its limit
+                  {limitEvent.reason === 'free_trial_expired'
+                    ? 'Your 7-day free AI access has expired'
+                    : limitEvent.reason === 'shared_quota_exhausted'
+                    ? 'Daily shared AI quota reached'
+                    : 'Your API key reached its limit'}
                 </h2>
                 <p className="text-xs sm:text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-                  Add another Gemini API key from a different Google account, or grab a free
-                  fallback key from any provider below so SOTAL rotates automatically.
+                  {limitEvent.reason === 'free_trial_expired'
+                    ? 'Add your own free API key in Settings to continue using AI Tutor, Automatic Study, Practice, and Live Voice AI without interruption.'
+                    : limitEvent.reason === 'shared_quota_exhausted'
+                    ? limitEvent.message ||
+                      'You have used all of your shared AI requests for today (resets at 12:00 AM WAT / Africa/Lagos). Add your own free API key in Settings to continue right away.'
+                    : 'Add another Gemini API key from a different Google account, or grab a free fallback key from any provider below so SOTAL rotates automatically.'}
                 </p>
+                {limitEvent.reason === 'shared_quota_exhausted' && limitEvent.quota && (
+                  <div className="mt-2 inline-flex flex-wrap items-center justify-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-xs text-amber-900 dark:text-amber-200 font-mono tabular-nums">
+                    <span>
+                      {limitEvent.quota.used}/{limitEvent.quota.limit} requests used ·{' '}
+                      {limitEvent.quota.remaining} remaining
+                    </span>
+                    {limitEvent.quota.resetLabel && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>{limitEvent.quota.resetLabel}</span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Colorful provider direct links */}
@@ -294,8 +316,11 @@ export const ApiKeyLimitModal: React.FC = () => {
               </div>
 
               <p className="text-center text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
-                Personal key mode is active — SOTAL will not switch back to the app&apos;s default
-                key once you add your own.
+                {limitEvent.reason === 'free_trial_expired'
+                  ? 'Shared keys are disabled once your 7-day free access ends. Your personal keys are stored locally on your device.'
+                  : limitEvent.reason === 'shared_quota_exhausted'
+                  ? 'Personal API keys bypass shared daily limits and stay stored privately on your device.'
+                  : 'Personal key mode is active — SOTAL will not switch back to the app’s default key once you add your own.'}
               </p>
             </div>
 
