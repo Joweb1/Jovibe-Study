@@ -17,6 +17,7 @@ import type {
 } from '../types/models';
 import { useAuth } from './AuthContext';
 import { auth } from '../services/firebase/config';
+import { isTransientNetworkFirestoreError } from '../services/firebase/errors';
 import { getLocalDateKey } from '../services/streak/streakEngine';
 import {
   claimTodayStreakTransaction,
@@ -549,6 +550,12 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setClaimModalOpen(true);
         }
       } catch (err) {
+        if (isTransientNetworkFirestoreError(err)) {
+          const queued = readQueuedOfflineActivities(userId);
+          queued.push({ ...input, dateKey: currentDayKey });
+          writeQueuedOfflineActivities(userId, queued);
+          return;
+        }
         console.warn('Failed to record learning activity / streak:', err);
       }
     },

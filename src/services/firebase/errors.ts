@@ -36,7 +36,8 @@ export function isTransientNetworkFirestoreError(error: unknown): boolean {
     code === 'unavailable' ||
     code === 'deadline-exceeded' ||
     code === 'cancelled' ||
-    code === 'aborted'
+    code === 'aborted' ||
+    code === 'auth/network-request-failed'
   ) {
     return true;
   }
@@ -44,6 +45,7 @@ export function isTransientNetworkFirestoreError(error: unknown): boolean {
   return (
     msg.includes('connection failed') ||
     msg.includes('client is offline') ||
+    msg.includes('auth/network-request-failed') ||
     msg.includes('could not reach cloud firestore') ||
     msg.includes('network error') ||
     msg.includes('transport errored') ||

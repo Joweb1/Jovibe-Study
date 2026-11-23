@@ -4,7 +4,6 @@ import {
   getDoc,
   getDocFromCache,
   onSnapshot,
-  runTransaction,
   serverTimestamp,
   updateDoc,
   type Unsubscribe,
@@ -20,7 +19,12 @@ import {
   SCHEMA_LIMITS,
 } from '../../utils/validation';
 import { db } from './config';
-import { handleFirestoreError, OperationType } from './errors';
+import {
+  handleFirestoreError,
+  isTransientNetworkFirestoreError,
+  OperationType,
+} from './errors';
+import { safeRunTransaction } from './safeTransaction';
 
 const CACHED_PROFILE_PREFIX = 'sotal_cached_profile_v1:';
 
@@ -178,7 +182,7 @@ async function ensureUserProfileInternal(user: User): Promise<UserProfile> {
   };
 
   try {
-    const ensured = await runTransaction(db, async (tx) => {
+    const ensured = await safeRunTransaction(db, async (tx) => {
       const latestSnap = await tx.get(ref);
       if (latestSnap.exists()) {
         const existingData = latestSnap.data() as UserProfile;
@@ -205,7 +209,7 @@ async function ensureUserProfileInternal(user: User): Promise<UserProfile> {
     writeCachedLocalProfile(ensured);
     return ensured;
   } catch (error) {
-    if (isOfflineReadError(error)) {
+    if (isOfflineReadError(error) || isTransientNetworkFirestoreError(error)) {
       return buildFallbackProfile(user);
     }
     handleFirestoreError(error, OperationType.CREATE, path);

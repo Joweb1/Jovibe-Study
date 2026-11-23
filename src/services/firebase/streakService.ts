@@ -3,7 +3,6 @@ import {
   doc,
   onSnapshot,
   query,
-  runTransaction,
   serverTimestamp,
   setDoc,
   where,
@@ -39,6 +38,7 @@ import {
   isTransientNetworkFirestoreError,
   OperationType,
 } from './errors';
+import { safeRunTransaction } from './safeTransaction';
 
 function streakProfileRef(userId: string) {
   return doc(db, 'users', userId, 'streakProfile', 'current');
@@ -119,7 +119,7 @@ async function ensureAndReconcileStreakInternal(
     for (let pass = 0; pass < 6; pass += 1) {
       needsAnotherPass = false;
 
-      resultProfile = await runTransaction(db, async (tx) => {
+      resultProfile = await safeRunTransaction(db, async (tx) => {
         const profRef = streakProfileRef(userId);
         const initGrantRef = freezeLedgerRef(userId, 'init_grant');
         const [profSnap, initGrantSnap] = await Promise.all([
@@ -362,7 +362,7 @@ export async function recordQualifyingLearningActivity(
   // 4. Atomically register today's qualification in a transaction
   const path = `users/${userId}/streakDays/${todayKey}`;
   try {
-    return await runTransaction(db, async (tx) => {
+    return await safeRunTransaction(db, async (tx) => {
       const profRef = streakProfileRef(userId);
       const dayRef = streakDayRef(userId, todayKey);
       const initGrantRef = freezeLedgerRef(userId, 'init_grant');
@@ -446,6 +446,9 @@ export async function recordQualifyingLearningActivity(
       };
     });
   } catch (error) {
+    if (isTransientNetworkFirestoreError(error)) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -460,7 +463,7 @@ export async function claimTodayStreakTransaction(
 ): Promise<{ alreadyClaimed: boolean; committedStreak: number }> {
   const path = `users/${userId}/streakDays/${todayKey}`;
   try {
-    return await runTransaction(db, async (tx) => {
+    return await safeRunTransaction(db, async (tx) => {
       const profRef = streakProfileRef(userId);
       const dayRef = streakDayRef(userId, todayKey);
       const earnRef = freezeLedgerRef(userId, `earn_${todayKey}`);
@@ -535,6 +538,9 @@ export async function claimTodayStreakTransaction(
       };
     });
   } catch (error) {
+    if (isTransientNetworkFirestoreError(error)) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -553,7 +559,7 @@ export async function flushAppTimeSeconds(
 
   const path = `users/${userId}/appUsage/summary`;
   try {
-    await runTransaction(db, async (tx) => {
+    await safeRunTransaction(db, async (tx) => {
       const sumRef = appUsageSummaryRef(userId);
       const dayRef = appUsageDayRef(userId, todayKey);
       const [sumSnap, daySnap] = await Promise.all([tx.get(sumRef), tx.get(dayRef)]);
@@ -620,7 +626,7 @@ export async function addActiveLearningSeconds(
 
   const path = `users/${userId}/appUsageDays/${todayKey}`;
   try {
-    await runTransaction(db, async (tx) => {
+    await safeRunTransaction(db, async (tx) => {
       const sumRef = appUsageSummaryRef(userId);
       const dayRef = appUsageDayRef(userId, todayKey);
       const [sumSnap, daySnap] = await Promise.all([tx.get(sumRef), tx.get(dayRef)]);
