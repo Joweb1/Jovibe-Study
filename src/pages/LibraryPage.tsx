@@ -452,7 +452,7 @@ export const LibraryPage: React.FC = () => {
             </div>
 
             {/* Action Row: (Owner: Add material) + Study + (Owner/Admin: Share) on left; Manage + History on right */}
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                 {isOwner && (
                   <Button
@@ -464,7 +464,7 @@ export const LibraryPage: React.FC = () => {
                     }}
                     className="px-2.5 sm:px-3"
                   >
-                    <Upload className="h-3.5 w-3.5" />
+                    <Upload className="h-3.5 w-3.5 shrink-0" />
                     Add material
                   </Button>
                 )}
@@ -474,7 +474,7 @@ export const LibraryPage: React.FC = () => {
                   onClick={() => navigate('/automatic-study')}
                   className="px-2.5 sm:px-3"
                 >
-                  <GraduationCap className="h-3.5 w-3.5" />
+                  <GraduationCap className="h-3.5 w-3.5 shrink-0" />
                   Study
                 </Button>
                 {canShareCourse && (
@@ -488,7 +488,7 @@ export const LibraryPage: React.FC = () => {
                     }}
                     className="px-2.5 sm:px-3"
                   >
-                    <Share2 className="h-3.5 w-3.5" />
+                    <Share2 className="h-3.5 w-3.5 shrink-0" />
                     Share
                   </Button>
                 )}
@@ -587,7 +587,7 @@ export const LibraryPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -4, scale: 0.97 }}
                     transition={{ duration: 0.14 }}
-                    className="absolute right-0 z-40 mt-2.5 w-52 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1.5 shadow-lg dark:shadow-black/40"
+                    className="absolute right-0 z-40 mt-2.5 w-52 max-w-[calc(100vw-1.5rem)] origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1.5 shadow-lg dark:shadow-black/40"
                   >
                     {/* Tooltip pointer arrow */}
                     <span
@@ -640,7 +640,7 @@ export const LibraryPage: React.FC = () => {
             <div
               role="tablist"
               aria-label="Library sections"
-              className="inline-flex items-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 p-1"
+              className="inline-flex max-w-full flex-wrap justify-center items-center gap-0.5 rounded-2xl sm:rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 p-1"
             >
               {(
                 [
@@ -1001,7 +1001,7 @@ export const LibraryPage: React.FC = () => {
               </div>
             )}
 
-            <div className="flex items-center justify-between gap-2 border-t border-zinc-200 dark:border-zinc-800 pt-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200 dark:border-zinc-800 pt-3">
               <Button
                 variant="ghost"
                 size="sm"

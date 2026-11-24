@@ -96,7 +96,7 @@ export const HeroOrbStage: React.FC<HeroOrbStageProps> = ({
         {/* Central 3D Liquid-Glass AI Orb */}
         <motion.div
           style={reducedMotion ? undefined : { scale: orbScale }}
-          className="relative z-10 flex h-[268px] w-[268px] sm:h-[324px] sm:w-[324px] lg:h-[364px] lg:w-[364px] items-center justify-center will-change-transform"
+          className="relative z-10 flex h-[min(268px,72vw)] w-[min(268px,72vw)] sm:h-[324px] sm:w-[324px] lg:h-[364px] lg:w-[364px] items-center justify-center will-change-transform"
         >
           <LiquidGlassOrb
             voiceState={orbVoiceState}
@@ -139,15 +139,15 @@ export const HeroOrbStage: React.FC<HeroOrbStageProps> = ({
             size="md"
             onClick={onSignIn}
             loading={signingIn}
-            className="h-11 rounded-full px-6 shadow-sm"
+            className="min-h-11 rounded-full px-6 py-2 shadow-sm"
           >
             Continue with Google
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-4 w-4 shrink-0" />
           </Button>
           <button
             type="button"
             onClick={onExploreClick}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-5 text-sm font-medium text-zinc-700 dark:text-zinc-300 backdrop-blur-sm hover:border-zinc-400 dark:hover:border-zinc-600 hover:text-zinc-950 dark:hover:text-zinc-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex min-h-11 max-w-full items-center justify-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-5 py-2 text-center text-sm font-medium text-zinc-700 dark:text-zinc-300 backdrop-blur-sm hover:border-zinc-400 dark:hover:border-zinc-600 hover:text-zinc-950 dark:hover:text-zinc-100 transition-colors cursor-pointer"
           >
             Explore workspace
           </button>

@@ -29,6 +29,7 @@ export interface LiveConnectOptions {
   lesson: LiveLessonContext;
   voiceName?: string;
   sendGreeting?: boolean;
+  preAcquiredStream?: MediaStream | null;
 }
 
 interface ServerLiveMessage {
@@ -246,9 +247,14 @@ export class LiveVoiceClient {
     // Prepare output AudioContext immediately (inside user gesture if possible)
     this.ensureOutputAudioContext();
 
-    // Request microphone access (gracefully continue in text/listen-only mode if denied)
-    await this.setupMicrophone();
-    if (this.disposed) return false;
+    // Request microphone access (or reuse already-authorized stream from entry check)
+    await this.setupMicrophone(options.preAcquiredStream);
+    if (this.disposed) {
+      if (options.preAcquiredStream && options.preAcquiredStream !== this.micStream) {
+        options.preAcquiredStream.getTracks().forEach((t) => t.stop());
+      }
+      return false;
+    }
 
     const candidates = buildProviderCandidates('gemini');
     const attemptList: ExecutionCandidate[] =
@@ -562,8 +568,15 @@ export class LiveVoiceClient {
     }
   }
 
-  private async setupMicrophone(): Promise<void> {
-    if (!navigator.mediaDevices?.getUserMedia) {
+  private async setupMicrophone(preAcquiredStream?: MediaStream | null): Promise<void> {
+    const hasLivePreAcquired = Boolean(
+      preAcquiredStream &&
+        preAcquiredStream
+          .getAudioTracks()
+          .some((track) => track.readyState === 'live')
+    );
+
+    if (!hasLivePreAcquired && !navigator.mediaDevices?.getUserMedia) {
       this.micAvailable = false;
       this.micErrorDetail = 'Microphone unavailable — type below to talk.';
       this.callbacks.onStatusDetail?.(this.micErrorDetail);
@@ -571,14 +584,16 @@ export class LiveVoiceClient {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const stream = hasLivePreAcquired && preAcquiredStream
+        ? preAcquiredStream
+        : await navigator.mediaDevices.getUserMedia({
+            audio: {
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
       if (this.disposed) {
         stream.getTracks().forEach((t) => t.stop());
         return;

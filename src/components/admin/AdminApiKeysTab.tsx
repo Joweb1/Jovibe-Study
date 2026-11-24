@@ -199,8 +199,8 @@ export const AdminApiKeysTab: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/60 p-4 text-xs text-zinc-600 dark:text-zinc-400">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
             <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-800 dark:text-zinc-200" />
             <div>
               <span className="font-semibold text-zinc-950 dark:text-zinc-100">
@@ -381,7 +381,7 @@ export const AdminApiKeysTab: React.FC = () => {
 
       {/* Managed Keys Table */}
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-x-auto">
-        <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 dark:border-zinc-800 px-4 py-3">
           <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
             Stored Admin API Keys ({keys.length})
           </h3>

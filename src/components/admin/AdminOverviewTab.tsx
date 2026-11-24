@@ -42,7 +42,7 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({
   return (
     <div className="space-y-6">
       {/* Primary KPI Grid */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
           <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
             <span>Total Users</span>
@@ -64,7 +64,7 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({
           <div className="mt-2 font-mono text-2xl font-semibold text-zinc-950 dark:text-zinc-100 tabular-nums">
             {overview.users.active.toLocaleString()}
           </div>
-          <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
             <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
               <UserMinus className="h-3 w-3" /> {overview.users.suspended} suspended
             </span>
@@ -106,7 +106,7 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({
       {/* Secondary Metrics Row */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
               Shared vs Personal AI
             </h3>
@@ -118,7 +118,7 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({
               View analytics →
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-3 pt-1">
+          <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3 pt-1">
             <div>
               <div className="text-[11px] text-zinc-500 dark:text-zinc-400">Shared Admin Keys</div>
               <div className="font-mono text-lg font-semibold text-zinc-950 dark:text-zinc-100 tabular-nums">
@@ -140,7 +140,7 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({
         </div>
 
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
               Study Groups & Moderation
             </h3>
@@ -152,7 +152,7 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({
               Manage groups →
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-3 pt-1">
+          <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3 pt-1">
             <div>
               <div className="text-[11px] text-zinc-500 dark:text-zinc-400">Active Groups</div>
               <div className="font-mono text-lg font-semibold text-zinc-950 dark:text-zinc-100 tabular-nums">
@@ -224,7 +224,7 @@ export const AdminOverviewTab: React.FC<AdminOverviewTabProps> = ({
 
       {/* Provider Key Routing Status */}
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-zinc-500" />
             <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">

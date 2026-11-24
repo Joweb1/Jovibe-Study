@@ -100,7 +100,7 @@ export const AdminFeaturesTab: React.FC<AdminFeaturesTabProps> = ({ flags, onUpd
             aria-checked={flags.aiGlobalEnabled}
             disabled={savingKey !== null}
             onClick={() => void toggleGlobal()}
-            className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
+            className={`inline-flex min-h-10 max-w-full shrink-0 items-center justify-center gap-2 rounded-lg px-4 py-2 text-center text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
               flags.aiGlobalEnabled
                 ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                 : 'bg-red-600 text-white hover:bg-red-700'
@@ -127,10 +127,10 @@ export const AdminFeaturesTab: React.FC<AdminFeaturesTabProps> = ({ flags, onUpd
               return (
                 <div
                   key={key}
-                  className="flex items-center justify-between gap-4 px-5 py-3.5"
+                  className="flex flex-wrap items-center justify-between gap-4 px-4 sm:px-5 py-3.5"
                 >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1 basis-[220px]">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium text-zinc-950 dark:text-zinc-100">
                         {FEATURE_LABELS[key] || key}
                       </span>

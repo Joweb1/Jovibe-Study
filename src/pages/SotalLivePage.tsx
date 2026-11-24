@@ -14,6 +14,8 @@ import {
   PhoneOff,
   Play,
   RefreshCw,
+  Settings,
+  ShieldAlert,
   SlidersHorizontal,
   Smartphone,
   Square,
@@ -34,6 +36,13 @@ import { useWorkspaceUi } from '../context/WorkspaceUiContext';
 import { useCourseSources } from '../hooks/useCourseSources';
 import { useRouter } from '../router/RouterContext';
 import { LiveVoiceClient } from '../services/live/liveVoiceClient';
+import {
+  ensureLiveMicrophoneAccess,
+  stopMediaStream,
+  subscribeMicrophonePermissionChange,
+  type MicrophoneAccessResult,
+  type MicrophonePermissionUiState,
+} from '../utils/microphonePermission';
 import { LessonContextDrawer } from '../components/live/LessonContextDrawer';
 import { LiquidGlassOrb } from '../components/live/LiquidGlassOrb';
 import {
@@ -169,6 +178,13 @@ export const SotalLivePage: React.FC = () => {
 
   const [statusDetail, setStatusDetail] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [micPermissionState, setMicPermissionState] =
+    useState<MicrophonePermissionUiState>('checking');
+  const [micPermissionInfo, setMicPermissionInfo] = useState<{
+    title: string;
+    message: string;
+    settingsHint?: string;
+  } | null>(null);
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<LiveNetworkStatus>(() => ({
     quality: typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'good',
@@ -199,6 +215,19 @@ export const SotalLivePage: React.FC = () => {
   const recordLearningActivityRef = useRef(recordLearningActivity);
   recordLearningActivityRef.current = recordLearningActivity;
 
+  // Single-flight guards for microphone permission checks & session lifecycle
+  const micAttemptCountRef = useRef(0);
+  const micCheckInFlightRef = useRef<Promise<MicrophoneAccessResult> | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   previewOverrideRef.current = previewOverrideMode;
 
   const clearScheduledTimers = useCallback(() => {
@@ -210,9 +239,14 @@ export const SotalLivePage: React.FC = () => {
     return () => clearScheduledTimers();
   }, [clearScheduledTimers]);
 
-  // Create and manage the real-time Gemini Live voice session
+  // Create and manage the real-time Gemini Live voice session, gated by microphone permission
   const connectLiveSession = useCallback(
-    async (targetLesson: LiveLessonContext, voiceName: string) => {
+    async (
+      targetLesson: LiveLessonContext,
+      voiceName: string,
+      options?: { isRetry?: boolean }
+    ) => {
+      const generation = ++sessionGenerationRef.current;
       clearScheduledTimers();
       studentEngagedInLiveRef.current = false;
       setWalkthroughPlaying(false);
@@ -238,7 +272,72 @@ export const SotalLivePage: React.FC = () => {
         return;
       }
 
+      // Actively verify / request microphone permission whenever entering or initializing Live AI
       setErrorMessage(null);
+      setMicPermissionState('checking');
+      setMicPermissionInfo(null);
+      setVoiceState('thinking');
+      setAudioLevel(0.16);
+      setStatusDetail('Checking microphone access...');
+      setSubtitle({
+        speaker: 'system',
+        text: 'Checking microphone permission for Jovibe Live...',
+      });
+
+      let accessPromise = micCheckInFlightRef.current;
+      if (!accessPromise) {
+        if (options?.isRetry) {
+          micAttemptCountRef.current += 1;
+        } else if (micAttemptCountRef.current === 0) {
+          micAttemptCountRef.current = 1;
+        }
+        const attemptNumber = micAttemptCountRef.current;
+        accessPromise = ensureLiveMicrophoneAccess({
+          attemptNumber,
+          acquireStreamIfGranted: true,
+        }).finally(() => {
+          if (micCheckInFlightRef.current === accessPromise) {
+            micCheckInFlightRef.current = null;
+          }
+        });
+        micCheckInFlightRef.current = accessPromise;
+      }
+
+      const micResult = await accessPromise;
+
+      if (!isMountedRef.current || sessionGenerationRef.current !== generation) {
+        stopMediaStream(micResult.stream);
+        return;
+      }
+
+      setMicPermissionState(micResult.status);
+
+      if (micResult.status !== 'granted' || !micResult.stream) {
+        stopMediaStream(micResult.stream);
+        setMicMuted(true);
+        setVoiceState('disconnected');
+        setAudioLevel(0.06);
+        setStatusDetail(
+          micResult.status === 'permanently_denied'
+            ? 'Microphone blocked'
+            : micResult.status === 'unavailable'
+            ? 'Microphone unavailable'
+            : 'Microphone permission needed'
+        );
+        setMicPermissionInfo({
+          title: micResult.title,
+          message: micResult.message,
+          settingsHint: micResult.settingsHint,
+        });
+        setErrorMessage(micResult.message);
+        setSubtitle({
+          speaker: 'system',
+          text: micResult.message,
+        });
+        return;
+      }
+
+      setMicPermissionInfo(null);
       setStatusDetail('Connecting...');
       setSubtitle({
         speaker: 'system',
@@ -304,7 +403,13 @@ export const SotalLivePage: React.FC = () => {
         lesson: targetLesson,
         voiceName,
         sendGreeting: true,
+        preAcquiredStream: micResult.stream,
       });
+
+      if (!isMountedRef.current || sessionGenerationRef.current !== generation) {
+        client.disconnect(true);
+        return;
+      }
 
       if (connected) {
         setMicMuted(!client.hasMicrophone);
@@ -326,10 +431,24 @@ export const SotalLivePage: React.FC = () => {
     void connectLiveSession(lessonRef.current, preferredVoice);
 
     return () => {
+      sessionGenerationRef.current += 1;
       liveClientRef.current?.disconnect(true);
       liveClientRef.current = null;
     };
   }, [lessonSessionKey, waitingForInitialSources, preferredVoice, isOnline, connectLiveSession]);
+
+  // If browser permission flips to 'granted' from site settings while on Live AI, auto-initialize
+  useEffect(() => {
+    return subscribeMicrophonePermissionChange((nextBrowserState) => {
+      if (
+        nextBrowserState === 'granted' &&
+        (micPermissionState === 'denied_retryable' ||
+          micPermissionState === 'permanently_denied')
+      ) {
+        void connectLiveSession(lessonRef.current, preferredVoice, { isRetry: true });
+      }
+    });
+  }, [micPermissionState, preferredVoice, connectLiveSession]);
 
   // Automatically resume suspended input/output AudioContexts on the first pointer or key gesture
   useEffect(() => {
@@ -446,7 +565,7 @@ export const SotalLivePage: React.FC = () => {
     }
 
     if (voiceState === 'disconnected' || !liveClientRef.current?.connected) {
-      void connectLiveSession(lesson, preferredVoice);
+      void connectLiveSession(lesson, preferredVoice, { isRetry: true });
       return;
     }
 
@@ -457,9 +576,7 @@ export const SotalLivePage: React.FC = () => {
     }
 
     if (!liveClientRef.current.hasMicrophone) {
-      void liveClientRef.current.enableMicrophone().then((enabled) => {
-        setMicMuted(!enabled);
-      });
+      void connectLiveSession(lesson, preferredVoice, { isRetry: true });
       return;
     }
 
@@ -487,15 +604,13 @@ export const SotalLivePage: React.FC = () => {
     }
 
     if (voiceState === 'disconnected' || !liveClientRef.current?.connected) {
-      void connectLiveSession(lesson, preferredVoice);
+      void connectLiveSession(lesson, preferredVoice, { isRetry: true });
       return;
     }
 
     if (!liveClientRef.current.hasMicrophone) {
-      // Enable microphone in-place without disconnecting the active Live voice session
-      void liveClientRef.current.enableMicrophone().then((enabled) => {
-        setMicMuted(!enabled);
-      });
+      // Run full permission check/request again if microphone was unavailable
+      void connectLiveSession(lesson, preferredVoice, { isRetry: true });
       return;
     }
 
@@ -618,8 +733,8 @@ export const SotalLivePage: React.FC = () => {
         className={`relative flex flex-col overflow-hidden text-zinc-900 dark:text-zinc-100 transition-all duration-300 ${frameWrapperClasses}`}
       >
         {/* TOP BAR */}
-        <header className="relative z-20 flex shrink-0 items-center justify-between gap-3 px-4 sm:px-6 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="relative z-20 flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 sm:px-6 pt-[max(0.85rem,env(safe-area-inset-top))] pb-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <div className="flex items-baseline gap-1.5 shrink-0 select-none">
               <span className="font-display text-[15px] font-semibold tracking-tight text-zinc-950 dark:text-zinc-100">
                 Jovibe
@@ -656,7 +771,7 @@ export const SotalLivePage: React.FC = () => {
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 min-w-0">
             {/* Live Network Quality Indicator */}
             <div
               role="status"
@@ -674,7 +789,7 @@ export const SotalLivePage: React.FC = () => {
                     }`
                   : `Network good${networkStatus.rttMs ? ` (${networkStatus.rttMs}ms)` : ''}`
               }
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium select-none transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-2 sm:px-2.5 py-1 text-[11px] font-medium select-none transition-colors ${
                 networkStatus.quality === 'offline'
                   ? 'border border-rose-300/80 bg-rose-500/10 text-rose-700 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-300'
                   : networkStatus.quality === 'poor'
@@ -692,7 +807,7 @@ export const SotalLivePage: React.FC = () => {
               ) : networkStatus.quality === 'poor' ? (
                 <>
                   <WifiLow className="h-3.5 w-3.5 shrink-0" />
-                  <span>Very slow</span>
+                  <span className="hidden min-[360px]:inline">Very slow</span>
                   {networkStatus.rttMs !== null && !isMobileFrame && (
                     <span className="hidden sm:inline font-mono text-[10px] opacity-80 tabular-nums">
                       · {networkStatus.rttMs}ms
@@ -702,7 +817,7 @@ export const SotalLivePage: React.FC = () => {
               ) : networkStatus.quality === 'slow' ? (
                 <>
                   <WifiLow className="h-3.5 w-3.5 shrink-0" />
-                  <span>Slow network</span>
+                  <span className="hidden min-[360px]:inline">Slow</span>
                   {networkStatus.rttMs !== null && !isMobileFrame && (
                     <span className="hidden sm:inline font-mono text-[10px] opacity-80 tabular-nums">
                       · {networkStatus.rttMs}ms
@@ -723,7 +838,7 @@ export const SotalLivePage: React.FC = () => {
 
             <span
               aria-label={`Session duration ${formatElapsed(elapsedSeconds)}`}
-              className="mr-1 font-mono text-xs tabular-nums text-zinc-500 dark:text-zinc-400 select-none"
+              className="mr-0.5 sm:mr-1 font-mono text-xs tabular-nums text-zinc-500 dark:text-zinc-400 select-none"
             >
               {formatElapsed(elapsedSeconds)}
             </span>
@@ -733,7 +848,7 @@ export const SotalLivePage: React.FC = () => {
               onClick={toggleTheme}
               aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
               title={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-900/6 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/8 dark:hover:text-zinc-100 transition-colors cursor-pointer"
+              className="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-900/6 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/8 dark:hover:text-zinc-100 transition-colors cursor-pointer"
             >
               {isDark ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
             </button>
@@ -743,7 +858,7 @@ export const SotalLivePage: React.FC = () => {
               onClick={handleMinimize}
               aria-label="Minimize Jovibe Live"
               title="Minimize to Library"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-900/6 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/8 dark:hover:text-zinc-100 transition-colors cursor-pointer"
+              className="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-900/6 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/8 dark:hover:text-zinc-100 transition-colors cursor-pointer"
             >
               <Minimize2 className="h-[17px] w-[17px]" />
             </button>
@@ -753,7 +868,7 @@ export const SotalLivePage: React.FC = () => {
               onClick={handleEndSession}
               aria-label="Close Jovibe Live"
               title="Close"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-900/6 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/8 dark:hover:text-zinc-100 transition-colors cursor-pointer"
+              className="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-900/6 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/8 dark:hover:text-zinc-100 transition-colors cursor-pointer"
             >
               <X className="h-[18px] w-[18px]" />
             </button>
@@ -786,13 +901,17 @@ export const SotalLivePage: React.FC = () => {
         {/* CENTER STAGE — 3D Liquid-Glass Orb + Dynamic Status + Live Subtitle */}
         <section
           aria-label="Voice companion stage"
-          className="relative flex flex-1 min-h-0 flex-col items-center justify-center px-5 sm:px-8"
+          className="relative flex flex-1 min-h-0 flex-col items-center justify-center overflow-y-auto px-4 sm:px-8 py-2"
         >
           <div
-            className={`relative flex w-full items-center justify-center ${
+            className={`relative flex w-full shrink-0 items-center justify-center ${
               isMobileFrame
-                ? 'h-[290px] max-w-[320px]'
-                : 'h-[min(46dvh,390px)] min-h-[250px] max-w-[440px]'
+                ? 'h-[260px] max-w-[300px]'
+                : micPermissionState === 'denied_retryable' ||
+                  micPermissionState === 'permanently_denied' ||
+                  micPermissionState === 'unavailable'
+                ? 'h-[min(30dvh,220px)] min-h-[150px] max-w-[260px]'
+                : 'h-[min(42dvh,380px)] min-h-[210px] max-w-[440px]'
             }`}
           >
             <LiquidGlassOrb
@@ -804,7 +923,7 @@ export const SotalLivePage: React.FC = () => {
             />
           </div>
 
-          <div className="relative z-10 mt-1 flex w-full max-w-[540px] flex-col items-center text-center min-h-[104px]">
+          <div className="relative z-10 mt-1 flex w-full max-w-[540px] flex-col items-center text-center">
             <AnimatePresence mode="wait">
               <motion.p
                 key={statusLabel}
@@ -826,101 +945,171 @@ export const SotalLivePage: React.FC = () => {
               </motion.p>
             </AnimatePresence>
 
-            <AnimatePresence mode="wait">
-              {showSubtitles && subtitle.text && (
-                <motion.p
-                  key={`${subtitle.speaker}:${subtitle.text.slice(0, 40)}`}
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-                  className={`mt-2.5 max-w-[46ch] text-[13.5px] sm:text-[14.5px] leading-relaxed line-clamp-3 ${
-                    subtitle.speaker === 'student'
-                      ? 'italic text-zinc-600 dark:text-zinc-400'
-                      : subtitle.speaker === 'system'
-                      ? 'text-zinc-500 dark:text-zinc-400'
-                      : 'text-zinc-700 dark:text-zinc-300'
-                  }`}
-                >
-                  {subtitle.text}
-                </motion.p>
-              )}
-            </AnimatePresence>
+            {/* Microphone Permission Guidance Card (shown whenever mic access was denied, blocked, or unavailable) */}
+            {!previewOverrideMode &&
+            (micPermissionState === 'denied_retryable' ||
+              micPermissionState === 'permanently_denied' ||
+              micPermissionState === 'unavailable') &&
+            micPermissionInfo ? (
+              <div
+                role="alert"
+                className="mt-3 w-full max-w-md rounded-2xl border border-amber-300/80 dark:border-amber-700/60 bg-white/95 dark:bg-[#141720]/95 p-4 text-left shadow-sm space-y-3"
+              >
+                <div className="flex items-start gap-2.5">
+                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <div className="min-w-0 space-y-1">
+                    <h2 className="font-display text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+                      {micPermissionInfo.title}
+                    </h2>
+                    <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+                      {micPermissionInfo.message}
+                    </p>
+                    {micPermissionInfo.settingsHint && (
+                      <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                        {micPermissionInfo.settingsHint}
+                      </p>
+                    )}
+                  </div>
+                </div>
 
-            {/* Slow / Poor Network Gentle Notice */}
-            <AnimatePresence>
-              {(networkStatus.quality === 'slow' || networkStatus.quality === 'poor') &&
-                voiceState !== 'disconnected' && (
-                  <motion.p
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 4 }}
-                    className={`mt-2 text-xs ${
-                      networkStatus.quality === 'poor'
-                        ? 'text-rose-600 dark:text-rose-300'
-                        : 'text-amber-700 dark:text-amber-300'
-                    }`}
-                  >
-                    {networkStatus.quality === 'poor'
-                      ? 'Very slow connection — voice replies may pause or lag.'
-                      : 'Slow network detected — replies may take a few extra seconds.'}
-                  </motion.p>
-                )}
-            </AnimatePresence>
-
-            {/* Browser Audio Autoplay Unlock Prompt (shown only if browser suspended AudioContext) */}
-            <AnimatePresence>
-              {needsAudioUnlock && voiceState !== 'disconnected' && (
-                <motion.div
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 4 }}
-                  className="mt-3.5"
-                >
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      void liveClientRef.current?.unlockAudio();
-                    }}
-                    className="inline-flex h-9 items-center gap-2 rounded-full bg-zinc-900 px-4 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white transition-colors cursor-pointer"
+                    onClick={() =>
+                      void connectLiveSession(lesson, preferredVoice, { isRetry: true })
+                    }
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-zinc-950 px-4 py-2 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white transition-colors cursor-pointer"
                   >
-                    <Volume2 className="h-3.5 w-3.5" />
-                    Tap to enable mic &amp; sound
+                    <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                    <span>Retry Microphone</span>
                   </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
-            {/* Reconnection Action when Disconnected */}
-            <AnimatePresence>
-              {voiceState === 'disconnected' && !previewOverrideMode && (
-                <motion.div
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 4 }}
-                  transition={{ duration: 0.2 }}
-                  className="mt-4 flex flex-wrap items-center justify-center gap-2.5"
-                >
-                  <button
-                    type="button"
-                    onClick={() => void connectLiveSession(lesson, preferredVoice)}
-                    className="inline-flex h-10 items-center gap-2 rounded-full bg-zinc-900 px-5 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white transition-colors cursor-pointer"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    Reconnect
-                  </button>
-                  {errorMessage && /key|settings/i.test(errorMessage) && (
+                  {micPermissionState === 'permanently_denied' && (
                     <button
                       type="button"
-                      onClick={() => navigate('/settings')}
-                      className="inline-flex h-10 items-center rounded-full border border-zinc-300 dark:border-zinc-700 px-4 text-xs font-medium text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-zinc-100 transition-colors cursor-pointer"
+                      onClick={() => {
+                        if (typeof window !== 'undefined') {
+                          window.sessionStorage.setItem('jovibe_focus_setting', 'microphone');
+                        }
+                        navigate('/settings');
+                      }}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2 text-xs font-medium text-zinc-800 hover:border-zinc-500 hover:text-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-500 dark:hover:text-white transition-colors cursor-pointer"
                     >
-                      Check Settings
+                      <Settings className="h-3.5 w-3.5 shrink-0" />
+                      <span>Open App Settings</span>
                     </button>
                   )}
-                </motion.div>
-              )}
-            </AnimatePresence>
+
+                  <button
+                    type="button"
+                    onClick={handleEndSession}
+                    className="inline-flex min-h-10 items-center justify-center rounded-full px-3 py-2 text-xs font-medium text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                  >
+                    Back to Library
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <AnimatePresence mode="wait">
+                  {showSubtitles && subtitle.text && (
+                    <motion.p
+                      key={`${subtitle.speaker}:${subtitle.text.slice(0, 40)}`}
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                      className={`mt-2.5 max-w-[46ch] text-[13.5px] sm:text-[14.5px] leading-relaxed ${
+                        subtitle.speaker === 'student'
+                          ? 'italic text-zinc-600 dark:text-zinc-400'
+                          : subtitle.speaker === 'system'
+                          ? 'text-zinc-500 dark:text-zinc-400'
+                          : 'text-zinc-700 dark:text-zinc-300'
+                      }`}
+                    >
+                      {subtitle.text}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
+
+                {/* Slow / Poor Network Gentle Notice */}
+                <AnimatePresence>
+                  {(networkStatus.quality === 'slow' || networkStatus.quality === 'poor') &&
+                    voiceState !== 'disconnected' && (
+                      <motion.p
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 4 }}
+                        className={`mt-2 text-xs ${
+                          networkStatus.quality === 'poor'
+                            ? 'text-rose-600 dark:text-rose-300'
+                            : 'text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {networkStatus.quality === 'poor'
+                          ? 'Very slow connection — voice replies may pause or lag.'
+                          : 'Slow network detected — replies may take a few extra seconds.'}
+                      </motion.p>
+                    )}
+                </AnimatePresence>
+
+                {/* Browser Audio Autoplay Unlock Prompt (shown only if browser suspended AudioContext) */}
+                <AnimatePresence>
+                  {needsAudioUnlock && voiceState !== 'disconnected' && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      className="mt-3.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void liveClientRef.current?.unlockAudio();
+                        }}
+                        className="inline-flex min-h-9 items-center gap-2 rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white transition-colors cursor-pointer"
+                      >
+                        <Volume2 className="h-3.5 w-3.5 shrink-0" />
+                        <span>Tap to enable mic &amp; sound</span>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Reconnection Action when Disconnected (non-mic failures) */}
+                <AnimatePresence>
+                  {voiceState === 'disconnected' && !previewOverrideMode && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      transition={{ duration: 0.2 }}
+                      className="mt-4 flex flex-wrap items-center justify-center gap-2.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void connectLiveSession(lesson, preferredVoice, { isRetry: true })
+                        }
+                        className="inline-flex min-h-10 items-center gap-2 rounded-full bg-zinc-900 px-5 py-2 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white transition-colors cursor-pointer"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                        <span>Reconnect</span>
+                      </button>
+                      {errorMessage && /key|settings/i.test(errorMessage) && (
+                        <button
+                          type="button"
+                          onClick={() => navigate('/settings')}
+                          className="inline-flex min-h-10 items-center rounded-full border border-zinc-300 dark:border-zinc-700 px-4 py-2 text-xs font-medium text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-zinc-100 transition-colors cursor-pointer"
+                        >
+                          Check Settings
+                        </button>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </>
+            )}
           </div>
         </section>
 
@@ -957,7 +1146,7 @@ export const SotalLivePage: React.FC = () => {
             )}
           </AnimatePresence>
 
-          <div className="mx-auto flex max-w-[360px] items-center justify-between gap-2">
+          <div className="mx-auto flex w-full max-w-[360px] flex-wrap items-center justify-center sm:justify-between gap-2">
             {/* 1. Lesson Context */}
             <button
               type="button"
@@ -1103,7 +1292,7 @@ export const SotalLivePage: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
-                  <label className="flex items-center gap-2 min-w-[165px] flex-1 max-w-[240px]">
+                  <label className="flex items-center gap-2 min-w-0 flex-1 basis-[160px] max-w-[240px]">
                     <span className="shrink-0">Voice level</span>
                     <input
                       type="range"

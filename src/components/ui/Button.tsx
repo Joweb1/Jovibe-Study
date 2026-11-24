@@ -39,7 +39,7 @@ export const Button: React.FC<ButtonProps> = ({
     <button
       type={type}
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap shrink-0 cursor-pointer disabled:cursor-not-allowed transition-colors ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
+      className={`inline-flex max-w-full items-center justify-center gap-2 rounded-md font-medium text-center whitespace-normal sm:whitespace-nowrap cursor-pointer disabled:cursor-not-allowed transition-colors ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
       {...props}
     >
       {loading && (

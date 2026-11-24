@@ -725,7 +725,7 @@ export const FeatureShowcaseSections: React.FC<FeatureShowcaseSectionsProps> = (
                 size="md"
                 onClick={onSignIn}
                 loading={signingIn}
-                className="h-11 rounded-full bg-white text-zinc-950 hover:bg-zinc-200 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 px-7"
+                className="min-h-11 rounded-full bg-white text-zinc-950 hover:bg-zinc-200 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 px-7 py-2"
               >
                 Sign in with Google
                 <ArrowRight className="h-4 w-4" />

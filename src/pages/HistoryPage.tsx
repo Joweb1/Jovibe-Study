@@ -240,7 +240,7 @@ export const HistoryPage: React.FC = () => {
             Study History & Progress
           </h1>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" size="sm" onClick={() => navigate('/practice')}>
             Start practice
           </Button>
@@ -311,7 +311,7 @@ export const HistoryPage: React.FC = () => {
       )}
 
       {/* Course Metrics Strip */}
-      <section className="grid grid-cols-2 gap-6 border-y border-zinc-200 dark:border-zinc-800 py-5 sm:grid-cols-4">
+      <section className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-4 sm:gap-6 border-y border-zinc-200 dark:border-zinc-800 py-5 sm:grid-cols-4">
         <div>
           <div className="text-xs text-zinc-500 dark:text-zinc-400">Logged sessions</div>
           <div className="mt-1 font-mono text-2xl font-semibold text-zinc-950 dark:text-zinc-200 tabular-nums">
@@ -420,11 +420,11 @@ export const HistoryPage: React.FC = () => {
 
             return (
               <div key={rec.id} className="py-4">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-wrap sm:flex-nowrap items-start justify-between gap-3 sm:gap-4">
                   <button
                     type="button"
                     onClick={() => setExpandedId(isExpanded ? null : rec.id)}
-                    className="min-w-0 flex-1 text-left cursor-pointer group"
+                    className="min-w-0 flex-1 basis-[220px] text-left cursor-pointer group"
                   >
                     <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                       <span className="inline-flex items-center gap-1 font-medium text-zinc-900 dark:text-zinc-200">
@@ -440,7 +440,7 @@ export const HistoryPage: React.FC = () => {
                       {topicNames && (
                         <>
                           <span aria-hidden="true">·</span>
-                          <span className="truncate max-w-xs">{topicNames}</span>
+                          <span className="truncate max-w-full sm:max-w-xs">{topicNames}</span>
                         </>
                       )}
                       <span aria-hidden="true">·</span>
@@ -452,7 +452,7 @@ export const HistoryPage: React.FC = () => {
                       <span>{formatShortDate(rec.updatedAt)}</span>
                     </div>
 
-                    <h3 className="mt-1 text-base font-medium text-zinc-950 dark:text-zinc-200 group-hover:underline underline-offset-4">
+                    <h3 className="mt-1 text-base font-medium text-zinc-950 dark:text-zinc-200 break-words group-hover:underline underline-offset-4">
                       {rec.title}
                     </h3>
 
@@ -461,7 +461,7 @@ export const HistoryPage: React.FC = () => {
                     )}
                   </button>
 
-                  <div className="flex items-center gap-4 shrink-0">
+                  <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                     <div className="text-right font-mono tabular-nums">
                       <div className="text-base font-semibold text-zinc-950 dark:text-zinc-200">
                         {rec.maxScore > 0 ? `${Math.round(rec.percentage)}%` : 'Logged'}
@@ -484,8 +484,8 @@ export const HistoryPage: React.FC = () => {
                 </div>
 
                 {isExpanded && (
-                  <div className="mt-4 ml-5 border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-4 text-sm">
-                    <div className="grid grid-cols-3 gap-4 max-w-md font-mono text-xs tabular-nums">
+                  <div className="mt-4 ml-0 sm:ml-5 border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-4 text-sm">
+                    <div className="grid grid-cols-1 min-[380px]:grid-cols-3 gap-3 sm:gap-4 max-w-md font-mono text-xs tabular-nums">
                       <div>
                         <span className="text-zinc-500 dark:text-zinc-400 block">Correct / Mastered</span>
                         <span className="text-zinc-950 dark:text-zinc-200 font-semibold text-sm">

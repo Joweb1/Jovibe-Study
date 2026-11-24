@@ -319,11 +319,11 @@ export const StreakPage: React.FC = () => {
         </div>
 
         {/* Weekday Headers */}
-        <div className="mt-4 grid grid-cols-7 gap-1.5 text-center">
+        <div className="mt-4 grid grid-cols-7 gap-1 sm:gap-1.5 text-center">
           {WEEKDAY_LABELS.map((day) => (
             <div
               key={day}
-              className="py-1 text-[11px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500"
+              className="py-1 text-[10px] sm:text-[11px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500"
             >
               {day}
             </div>
@@ -331,7 +331,7 @@ export const StreakPage: React.FC = () => {
         </div>
 
         {/* Calendar Grid */}
-        <div className="mt-1.5 grid grid-cols-7 gap-1.5 sm:gap-2">
+        <div className="mt-1.5 grid grid-cols-7 gap-1 sm:gap-2">
           {calendarCells.map((cell) => {
             const isSelected = selectedCell?.dateKey === cell.dateKey;
             const isStudied = cell.visualState === 'studied';
@@ -383,7 +383,7 @@ export const StreakPage: React.FC = () => {
                     ? 'Today'
                     : 'Upcoming'
                 }`}
-                className={`relative flex h-12 sm:h-14 flex-col items-center justify-center rounded-xl border text-xs transition-all cursor-pointer ${cellStyle} ${
+                className={`relative flex min-h-12 sm:min-h-14 py-1 flex-col items-center justify-center rounded-xl border text-xs transition-all cursor-pointer ${cellStyle} ${
                   cell.isToday
                     ? 'ring-2 ring-zinc-950/85 dark:ring-zinc-200/85 ring-offset-1 ring-offset-white dark:ring-offset-zinc-900'
                     : ''

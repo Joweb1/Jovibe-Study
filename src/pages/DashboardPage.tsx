@@ -282,11 +282,11 @@ export const DashboardPage: React.FC = () => {
 
       {/* Main 2-Column Workspace: Chart & Breakdown + Reusable Study Timer */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        <div className="lg:col-span-8 space-y-6">
+        <div className="lg:col-span-8 min-w-0 space-y-6">
           {/* 14-Day Activity & Time Chart */}
-          <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6">
+          <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <h2 className="font-display text-base font-semibold text-zinc-950 dark:text-zinc-100">
                   Last 14 days
                 </h2>
@@ -296,7 +296,7 @@ export const DashboardPage: React.FC = () => {
                     : 'Daily completed learning activities'}
                 </p>
               </div>
-              <div className="inline-flex rounded-lg border border-zinc-200 dark:border-zinc-700 p-0.5 text-xs">
+              <div className="inline-flex max-w-full flex-wrap rounded-lg border border-zinc-200 dark:border-zinc-700 p-0.5 text-xs">
                 <button
                   type="button"
                   onClick={() => setChartMetric('time')}
@@ -322,7 +322,7 @@ export const DashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-6 flex h-44 items-end gap-1.5 sm:gap-2.5">
+            <div className="mt-6 flex h-44 min-w-0 items-end gap-1 sm:gap-2.5">
               {last14Days.map((day) => {
                 const rawVal = chartMetric === 'time' ? day.appMinutes : day.activities;
                 const heightPct = rawVal > 0 ? Math.max(8, Math.round((rawVal / chartMax) * 100)) : 3;
@@ -365,7 +365,7 @@ export const DashboardPage: React.FC = () => {
           </section>
 
           {/* Activity Type Breakdown */}
-          <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6">
+          <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 sm:p-6">
             <h2 className="font-display text-base font-semibold text-zinc-950 dark:text-zinc-100">
               Learning breakdown
             </h2>
@@ -373,7 +373,7 @@ export const DashboardPage: React.FC = () => {
               Completed activities recorded across your courses
             </p>
 
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-1 min-[380px]:grid-cols-2 gap-3 sm:grid-cols-4">
               {(Object.keys(ACTIVITY_META) as StudyActivityType[]).map((type) => {
                 const meta = ACTIVITY_META[type];
                 const Icon = meta.icon;
@@ -385,10 +385,10 @@ export const DashboardPage: React.FC = () => {
                 return (
                   <div
                     key={type}
-                    className="rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 p-3.5"
+                    className="min-w-0 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 p-3.5"
                   >
                     <div className="flex items-center justify-between text-zinc-500 dark:text-zinc-400">
-                      <Icon className="h-4 w-4" />
+                      <Icon className="h-4 w-4 shrink-0" />
                       <span className="font-mono text-lg font-semibold tabular-nums text-zinc-950 dark:text-zinc-100">
                         {count}
                       </span>
@@ -404,7 +404,7 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* Right Rail: Reusable Standalone Study Timer */}
-        <aside className="lg:col-span-4 space-y-6">
+        <aside className="lg:col-span-4 min-w-0 space-y-6">
           <StudyTimer
             storageKey="sotal_dashboard_study_timer_v1"
             defaultMinutes={25}

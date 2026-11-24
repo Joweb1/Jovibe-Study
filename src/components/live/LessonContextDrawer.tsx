@@ -68,7 +68,7 @@ export const LessonContextDrawer: React.FC<LessonContextDrawerProps> = ({
             className={`relative z-10 flex max-h-[82%] w-full flex-col rounded-t-3xl border-t border-zinc-200 bg-[#FAFBFC] text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-[#111318] dark:text-zinc-200 ${
               forceMobileSheet
                 ? ''
-                : 'md:max-h-full md:h-full md:w-[390px] md:rounded-t-none md:rounded-l-2xl md:border-t-0 md:border-l'
+                : 'md:max-h-full md:h-full md:w-[min(390px,92vw)] md:rounded-t-none md:rounded-l-2xl md:border-t-0 md:border-l'
             }`}
           >
             {/* Mobile grab handle */}
@@ -82,12 +82,12 @@ export const LessonContextDrawer: React.FC<LessonContextDrawerProps> = ({
             {/* Header */}
             <div className="flex items-start justify-between gap-3 border-b border-zinc-200/80 dark:border-zinc-800/90 px-5 py-4">
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
                   <span className="font-mono">{lesson.courseCode}</span>
                   <span aria-hidden="true">·</span>
-                  <span className="truncate">{lesson.topicName}</span>
+                  <span className="break-words">{lesson.topicName}</span>
                 </div>
-                <h2 className="mt-1 font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-100">
+                <h2 className="mt-1 font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-100 break-words">
                   {lesson.lessonTitle}
                 </h2>
               </div>
@@ -157,7 +157,7 @@ export const LessonContextDrawer: React.FC<LessonContextDrawerProps> = ({
                           </h4>
                         </div>
                         {sec.content && (
-                          <p className="mt-1 pl-6 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400 line-clamp-3">
+                          <p className="mt-1 pl-6 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400 break-words">
                             {sec.content}
                           </p>
                         )}

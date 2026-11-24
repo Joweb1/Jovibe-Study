@@ -169,21 +169,21 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       {/* Top Bar: strict 3-zone contract (hidden on Tutor, focused search, and back-nav views) */}
       {!effectiveHideHeader && (
         <header className="sticky top-0 z-30 shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
-          <div className="mx-auto flex h-14 max-w-[1200px] items-center justify-between gap-4 md:gap-8 px-4 sm:px-6">
+          <div className="mx-auto flex min-h-14 max-w-[1200px] items-center justify-between gap-2 sm:gap-4 md:gap-8 px-3 sm:px-6 py-1.5">
             {/* Zone 1: Brand Logo & Wordmark */}
             <button
               type="button"
               onClick={() => navigate('/courses')}
-              className="inline-flex items-center gap-2 font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex min-w-0 shrink items-center gap-1.5 sm:gap-2 font-display text-sm sm:text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 cursor-pointer"
             >
-              <SotalLogo size="md" />
-              <span>Jovibe Study</span>
+              <SotalLogo size="md" className="shrink-0" />
+              <span className="truncate">Jovibe Study</span>
             </button>
 
             {/* Zone 2: Primary Desktop Navigation */}
             <nav
               aria-label="Primary navigation"
-              className="hidden md:flex items-center gap-6"
+              className="hidden md:flex items-center gap-4 lg:gap-6 min-w-0"
             >
               {DESKTOP_NAV_ITEMS.map((item) => {
                 const active = route === item.route;
@@ -227,12 +227,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             </nav>
 
           {/* Zone 3: Streak Indicator, Course Selector & Account Menu */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0">
             <StreakHeaderIndicator />
 
             <CourseSelector onNewCourse={() => setCourseModalOpen(true)} />
 
-            <div ref={accountMenuRef} className="relative">
+            <div ref={accountMenuRef} className="relative shrink-0">
               <button
                 type="button"
                 data-onboarding="profile-button"
@@ -260,7 +260,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -6, scale: 0.96 }}
                     transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute right-0 z-40 mt-2 w-56 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg"
+                    className="absolute right-0 z-40 mt-2 w-56 max-w-[calc(100vw-1.5rem)] origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg"
                   >
                     <div className="border-b border-zinc-100 dark:border-zinc-800 px-3 py-2.5">
                       <div className="truncate text-sm font-medium text-zinc-950 dark:text-zinc-200">
@@ -432,10 +432,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         route !== '/admin' &&
         route !== '/settings' && (
           <div className="shrink-0 border-b border-red-200/80 dark:border-red-900/50 bg-red-50/90 dark:bg-red-950/35 px-4 py-2 text-xs text-red-950 dark:text-red-100">
-            <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
+            <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-2 sm:gap-3">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 <KeyRound className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400" />
-                <span className="truncate">
+                <span className="break-words">
                   Your 7-day free AI access has expired. Add your own free API key in Settings to continue using AI features.
                 </span>
               </div>
@@ -453,10 +453,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       {/* Calm, non-blocking Gemini API key setup reminder shown only on AI routes when skipped/incomplete */}
       {needsSetupReminder && !reminderDismissedThisSession && AI_FEATURE_ROUTES.has(route) && (
         <div className="shrink-0 border-b border-amber-200/80 dark:border-amber-900/50 bg-amber-50/90 dark:bg-amber-950/35 px-4 py-2 text-xs text-amber-950 dark:text-amber-100">
-          <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
+          <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-2 sm:gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <KeyRound className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-400" />
-              <span className="truncate">
+              <span className="break-words">
                 Gemini API key not set up yet — add your free key to power Jovibe AI features.
               </span>
             </div>
@@ -578,12 +578,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.96 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 md:hidden"
+            className="fixed bottom-4 inset-x-2 z-30 flex justify-center md:hidden pointer-events-none"
           >
             <motion.div
               layout
               transition={{ type: 'spring', stiffness: 450, damping: 34 }}
-              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100/95 dark:bg-zinc-900/95 p-1 shadow-md backdrop-blur"
+              className="pointer-events-auto inline-flex max-w-full items-center gap-0.5 sm:gap-1 overflow-x-auto scrollbar-hide rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100/95 dark:bg-zinc-900/95 p-1 shadow-md backdrop-blur"
             >
               {BOTTOM_NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
@@ -598,10 +598,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                     title={item.label}
                     aria-current={active ? 'page' : undefined}
                     transition={{ type: 'spring', stiffness: 450, damping: 34 }}
-                    className={`relative inline-flex h-10 items-center justify-center rounded-full text-sm font-medium transition-colors cursor-pointer ${
+                    className={`relative inline-flex min-h-10 shrink-0 items-center justify-center rounded-full text-xs sm:text-sm font-medium transition-colors cursor-pointer ${
                       active
-                        ? 'gap-2 px-4 text-white dark:text-zinc-950'
-                        : 'w-11 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
+                        ? 'gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 text-white dark:text-zinc-950'
+                        : 'w-10 sm:w-11 py-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
                     }`}
                   >
                     {active && (

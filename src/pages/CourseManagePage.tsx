@@ -698,7 +698,7 @@ export const CourseManagePage: React.FC = () => {
 
       {/* Section 2: Named Study Groups */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-0.5">
             <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-200">
               Study groups
@@ -800,7 +800,7 @@ export const CourseManagePage: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[180px] flex-1 sm:flex-none">
+            <div className="relative min-w-0 w-full sm:w-auto sm:min-w-[180px] sm:flex-none">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400 dark:text-zinc-500" />
               <input
                 type="search"
@@ -826,7 +826,7 @@ export const CourseManagePage: React.FC = () => {
               value={selectedGroupFilter}
               onChange={(e) => setSelectedGroupFilter(e.target.value)}
               aria-label="Filter by group"
-              className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-900 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
+              className="max-w-full min-w-0 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-900 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
             >
               <option value="all">All groups ({members.length})</option>
               <option value="unassigned">Unassigned ({groupMemberCounts.unassigned})</option>
@@ -891,13 +891,13 @@ export const CourseManagePage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <select
                       aria-label={`Group for ${member.displayName}`}
                       value={member.groupId}
                       disabled={isUpdating}
                       onChange={(e) => void handleAssignGroup(member.memberUid, e.target.value)}
-                      className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-800 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none disabled:opacity-50"
+                      className="max-w-full min-w-0 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-800 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none disabled:opacity-50"
                     >
                       <option value="">Unassigned</option>
                       {groups.map((g) => (

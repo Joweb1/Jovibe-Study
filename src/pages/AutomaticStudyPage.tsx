@@ -1361,7 +1361,7 @@ export const AutomaticStudyPage: React.FC = () => {
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div className="min-w-0">
-              <h1 className="font-display text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 truncate">
+              <h1 className="font-display text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-200 break-words">
                 {activeSession.title}
               </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 font-mono tabular-nums">
@@ -1380,7 +1380,7 @@ export const AutomaticStudyPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="secondary"
               size="sm"
@@ -1445,7 +1445,7 @@ export const AutomaticStudyPage: React.FC = () => {
         {/* Two-column Classroom Layout */}
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
           {/* Syllabus Progress Rail */}
-          <aside className="lg:col-span-4 space-y-5">
+          <aside className="min-w-0 lg:col-span-4 space-y-5">
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
@@ -1548,7 +1548,7 @@ export const AutomaticStudyPage: React.FC = () => {
           </aside>
 
           {/* Main Lecturer Stream + Student Response Composer */}
-          <section className="lg:col-span-8 border-t border-zinc-200 dark:border-zinc-800 pt-6 lg:border-t-0 lg:border-l lg:pl-8 lg:pt-0 flex flex-col">
+          <section className="min-w-0 lg:col-span-8 border-t border-zinc-200 dark:border-zinc-800 pt-6 lg:border-t-0 lg:border-l lg:pl-8 lg:pt-0 flex flex-col">
             {/* Prior Checkpoint Carry-Over Summary (if segmentIndex > 0) */}
             {activeSegment?.summaryFromCheckpoint && (
               <div className="mb-5 border border-zinc-200 dark:border-zinc-800 rounded-md bg-zinc-50 dark:bg-zinc-900 px-4 py-3 text-xs">
@@ -1596,8 +1596,8 @@ export const AutomaticStudyPage: React.FC = () => {
 
                 return (
                   <article key={entry.id} className="border-b border-zinc-200 dark:border-zinc-800 pb-6 last:border-b-0">
-                    <div className="mb-2 flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                      <div className="flex items-center gap-2">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
                         <span className="font-medium text-zinc-900 dark:text-zinc-200">
                           {entry.kind === 'lesson'
                             ? 'Lecturer'

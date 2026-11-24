@@ -44,7 +44,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
       <button
         type="button"
         onClick={() => void handleClick()}
-        className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-zinc-200/80 dark:border-zinc-800/80 bg-white/60 dark:bg-zinc-900/60 px-3.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 backdrop-blur-sm hover:border-zinc-400 dark:hover:border-zinc-600 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0 ${className}`}
+        className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full border border-zinc-200/80 dark:border-zinc-800/80 bg-white/60 dark:bg-zinc-900/60 px-3.5 py-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 backdrop-blur-sm hover:border-zinc-400 dark:hover:border-zinc-600 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0 ${className}`}
       >
         <Download className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
         <span>Install app</span>
@@ -57,7 +57,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
       <button
         type="button"
         onClick={() => void handleClick()}
-        className={`inline-flex h-11 items-center justify-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-5 text-sm font-medium text-zinc-800 dark:text-zinc-200 backdrop-blur-sm hover:border-zinc-400 dark:hover:border-zinc-600 hover:text-zinc-950 dark:hover:text-zinc-100 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${className}`}
+        className={`inline-flex min-h-11 max-w-full items-center justify-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 px-5 py-2 text-center text-sm font-medium text-zinc-800 dark:text-zinc-200 backdrop-blur-sm hover:border-zinc-400 dark:hover:border-zinc-600 hover:text-zinc-950 dark:hover:text-zinc-100 transition-colors cursor-pointer ${className}`}
       >
         <Download className="h-4 w-4 text-sky-600 dark:text-sky-400 shrink-0" />
         <span>Install app</span>

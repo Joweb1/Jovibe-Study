@@ -603,7 +603,7 @@ export const PracticePage: React.FC = () => {
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-      <div className="grid grid-cols-2 gap-4 sm:gap-5 max-w-3xl">
+      <div className="responsive-compact-2col-grid max-w-3xl">
         {PRACTICE_METHODS.map((method) => {
           const Icon = method.icon;
           return (
@@ -611,18 +611,18 @@ export const PracticePage: React.FC = () => {
               key={method.id}
               type="button"
               onClick={() => setSelectedMethod(method.id)}
-              className="group relative overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6 min-h-[152px] sm:min-h-[176px] flex flex-col justify-between text-left transition-all duration-200 hover:border-zinc-900 dark:hover:border-zinc-600 hover:shadow-md dark:hover:shadow-black/30 hover:-translate-y-0.5 active:scale-[0.99] cursor-pointer"
+              className="group relative min-w-0 overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 sm:p-6 min-h-[144px] sm:min-h-[176px] flex flex-col justify-between text-left transition-all duration-200 hover:border-zinc-900 dark:hover:border-zinc-600 hover:shadow-md dark:hover:shadow-black/30 hover:-translate-y-0.5 active:scale-[0.99] cursor-pointer"
             >
               <PracticeCardIllustration id={method.id} />
 
               <div className="relative z-10 flex items-start justify-between gap-2">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950 shadow-xs transition-transform duration-200 group-hover:scale-105">
+                <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950 shadow-xs transition-transform duration-200 group-hover:scale-105">
                   <Icon className="h-5 w-5" />
                 </span>
-                <ArrowUpRight className="h-4 w-4 text-zinc-300 dark:text-zinc-600 transition-all duration-200 group-hover:text-zinc-950 dark:group-hover:text-zinc-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                <ArrowUpRight className="h-4 w-4 shrink-0 text-zinc-300 dark:text-zinc-600 transition-all duration-200 group-hover:text-zinc-950 dark:group-hover:text-zinc-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
               </div>
 
-              <h2 className="relative z-10 mt-6 font-display text-base sm:text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-200">
+              <h2 className="relative z-10 mt-6 font-display text-base sm:text-lg font-semibold tracking-tight break-words text-zinc-950 dark:text-zinc-200">
                 {method.title}
               </h2>
             </button>

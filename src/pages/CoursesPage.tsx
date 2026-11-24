@@ -328,7 +328,7 @@ export const CoursesPage: React.FC = () => {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
             size="sm"
@@ -356,11 +356,11 @@ export const CoursesPage: React.FC = () => {
 
       {/* Filter switch — only shown when the user has at least one joined shared course */}
       {!coursesLoading && sharedCourses.length > 0 && (
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div
             role="tablist"
             aria-label="Filter courses"
-            className="inline-flex items-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 p-1"
+            className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-2xl sm:rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 p-1"
           >
             {(
               [
@@ -436,7 +436,7 @@ export const CoursesPage: React.FC = () => {
           No courses in this view yet.
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+        <div className="responsive-course-grid">
           {visibleCourses.map((course) => {
             const isActive = activeCourse?.id === course.id;
             const isShared = Boolean(course.isShared);
@@ -448,7 +448,7 @@ export const CoursesPage: React.FC = () => {
             return (
               <div
                 key={course.id}
-                className={`group relative rounded-2xl border p-5 sm:p-6 min-h-[168px] sm:min-h-[188px] flex flex-col justify-between text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${
+                className={`group relative min-w-0 rounded-2xl border p-4 sm:p-5 lg:p-6 min-h-[152px] sm:min-h-[188px] flex flex-col justify-between text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${
                   isMenuOpen ? 'z-30 shadow-md' : 'z-0'
                 } ${
                   isActive
@@ -519,7 +519,7 @@ export const CoursesPage: React.FC = () => {
                           exit={{ opacity: 0, y: -4, scale: 0.96 }}
                           transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-full z-40 mt-2 w-44 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1.5 shadow-lg"
+                          className="absolute right-0 top-full z-40 mt-2 w-44 max-w-[calc(100vw-2rem)] origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1.5 shadow-lg"
                         >
                           {/* Tooltip caret arrow */}
                           <span
@@ -603,14 +603,14 @@ export const CoursesPage: React.FC = () => {
                 </div>
 
                 {/* Bottom Content: Course Code, Status Metadata, Title, & Author */}
-                <div className="relative z-10 mt-6 pointer-events-none">
+                <div className="relative z-10 mt-6 min-w-0 pointer-events-none">
                   <div
                     className={`flex flex-wrap items-center gap-1.5 text-xs ${
                       isActive ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-400'
                     }`}
                   >
                     <span
-                      className={`font-mono font-medium truncate ${
+                      className={`font-mono font-medium truncate max-w-full ${
                         isActive ? 'text-zinc-300 dark:text-zinc-800' : 'text-zinc-700 dark:text-zinc-300'
                       }`}
                     >
@@ -635,7 +635,7 @@ export const CoursesPage: React.FC = () => {
                     )}
                   </div>
                   <h2
-                    className={`mt-1 font-display text-base sm:text-lg font-semibold tracking-tight line-clamp-2 ${
+                    className={`mt-1 font-display text-base sm:text-lg font-semibold tracking-tight break-words line-clamp-2 ${
                       isActive ? 'text-white dark:text-zinc-950' : 'text-zinc-950 dark:text-zinc-200'
                     }`}
                   >

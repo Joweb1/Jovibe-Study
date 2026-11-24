@@ -33,15 +33,15 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({ onNewCourse }) =
   }, [open]);
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative min-w-0 max-w-full">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="inline-flex min-h-9 max-w-[180px] sm:max-w-[230px] items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-950 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+        className="inline-flex min-h-9 min-w-0 max-w-[124px] min-[380px]:max-w-[165px] sm:max-w-[230px] items-center justify-between gap-1.5 sm:gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-zinc-950 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800 whitespace-nowrap shrink cursor-pointer transition-colors"
       >
-        <span className="truncate">
+        <span className="min-w-0 truncate">
           {coursesLoading
             ? 'Loading courses...'
             : activeCourse
@@ -60,7 +60,7 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({ onNewCourse }) =
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.96 }}
             transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute right-0 z-40 mt-2 w-72 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg"
+            className="absolute right-0 z-40 mt-2 w-72 max-w-[calc(100vw-1.5rem)] origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg"
           >
             {activeCourse?.isAdminAccess && (
               <div className="border-b border-zinc-200 dark:border-zinc-800 px-3 py-2 bg-zinc-50 dark:bg-zinc-800/60">

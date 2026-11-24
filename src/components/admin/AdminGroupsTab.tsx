@@ -245,7 +245,7 @@ export const AdminGroupsTab: React.FC = () => {
 
       {/* Sub-navigation: All Groups vs Reports & Abuse */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-1 text-xs">
+        <div className="inline-flex max-w-full flex-wrap rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-1 text-xs">
           <button
             type="button"
             onClick={() => setSubView('groups')}
@@ -495,17 +495,17 @@ export const AdminGroupsTab: React.FC = () => {
       {/* Group Detail & Moderation Modal */}
       {selectedGroupId && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-zinc-950/60 p-3 sm:p-4 backdrop-blur-[2px]"
           role="dialog"
           aria-modal="true"
         >
-          <div className="relative flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-5 py-4">
-              <div>
-                <h3 className="text-base font-semibold text-zinc-950 dark:text-zinc-100">
+          <div className="relative my-auto flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 py-4">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-zinc-950 dark:text-zinc-100 break-words">
                   {detail?.group.name || 'Study Group'}
                 </h3>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-zinc-500 break-words">
                   {detail?.group.course_code} {detail?.group.course_name} · Owner:{' '}
                   {detail?.group.author_name} · Status: <strong className="capitalize">{detail?.group.status}</strong>
                 </p>
@@ -528,8 +528,8 @@ export const AdminGroupsTab: React.FC = () => {
             ) : (
               <>
                 {/* Group Action Bar */}
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 px-5 py-3">
-                  <div className="flex items-center gap-1 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 px-4 sm:px-5 py-3">
+                  <div className="flex flex-wrap items-center gap-1 text-xs">
                     {(['members', 'content', 'activity', 'reports'] as const).map((t) => (
                       <button
                         key={t}
@@ -545,7 +545,7 @@ export const AdminGroupsTab: React.FC = () => {
                       </button>
                     ))}
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {detail.group.status === 'active' ? (
                       <Button
                         size="sm"
@@ -593,7 +593,7 @@ export const AdminGroupsTab: React.FC = () => {
                         <select
                           value={transferTargetUid}
                           onChange={(e) => setTransferTargetUid(e.target.value)}
-                          className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1 text-xs"
+                          className="max-w-full min-w-0 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1 text-xs"
                         >
                           <option value="">Select active member...</option>
                           {detail.members
@@ -666,9 +666,9 @@ export const AdminGroupsTab: React.FC = () => {
                                 key={n.id}
                                 className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 text-xs space-y-1.5"
                               >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div>
-                                    <span className="font-semibold text-zinc-950 dark:text-zinc-100">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <span className="font-semibold text-zinc-950 dark:text-zinc-100 break-words">
                                       {n.title}
                                     </span>{' '}
                                     <span className="text-zinc-500">by {n.author_name}</span>{' '}
@@ -676,7 +676,7 @@ export const AdminGroupsTab: React.FC = () => {
                                       {n.status}
                                     </span>
                                   </div>
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex flex-wrap items-center gap-1.5">
                                     {n.status !== 'hidden' && (
                                       <button
                                         type="button"

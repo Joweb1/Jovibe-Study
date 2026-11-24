@@ -364,7 +364,7 @@ export const ApplicationCoursesSection: React.FC = () => {
           <div
             role="tablist"
             aria-label="Filter application courses by visibility"
-            className="inline-flex items-center self-start sm:self-auto rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 p-0.5"
+            className="inline-flex max-w-full flex-wrap items-center gap-0.5 self-start sm:self-auto rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 p-0.5"
           >
             {(
               [
@@ -443,7 +443,7 @@ export const ApplicationCoursesSection: React.FC = () => {
           No application courses match your current search or visibility filter.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+        <div className="responsive-course-grid">
           {filteredCourses.map((course) => {
             const cardKey = `${course.userId}:${course.id}`;
             const isActive = activeCourse?.id === course.id && (activeCourse.authorId || activeCourse.userId) === course.userId;
@@ -456,7 +456,7 @@ export const ApplicationCoursesSection: React.FC = () => {
             return (
               <div
                 key={cardKey}
-                className={`group relative rounded-2xl border p-5 sm:p-6 min-h-[212px] flex flex-col justify-between text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${
+                className={`group relative min-w-0 rounded-2xl border p-4 sm:p-5 lg:p-6 min-h-[196px] sm:min-h-[212px] flex flex-col justify-between text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${
                   isMenuOpen ? 'z-30 shadow-md' : 'z-0'
                 } ${
                   isActive
@@ -542,7 +542,7 @@ export const ApplicationCoursesSection: React.FC = () => {
                             exit={{ opacity: 0, y: -4, scale: 0.96 }}
                             transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
                             onClick={(e) => e.stopPropagation()}
-                            className="absolute right-0 top-full z-40 mt-2 w-48 origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1.5 shadow-lg"
+                            className="absolute right-0 top-full z-40 mt-2 w-48 max-w-[calc(100vw-2rem)] origin-top-right rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1.5 shadow-lg"
                           >
                             <span
                               aria-hidden="true"
@@ -636,14 +636,14 @@ export const ApplicationCoursesSection: React.FC = () => {
                 </div>
 
                 {/* Middle: Course Code, Title & Owner Email */}
-                <div className="relative z-10 mt-5 pointer-events-none space-y-1.5">
+                <div className="relative z-10 mt-5 min-w-0 pointer-events-none space-y-1.5">
                   <div
                     className={`flex flex-wrap items-center gap-1.5 text-xs ${
                       isActive ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-400'
                     }`}
                   >
                     <span
-                      className={`font-mono font-medium truncate ${
+                      className={`font-mono font-medium truncate max-w-full ${
                         isActive ? 'text-zinc-200 dark:text-zinc-800' : 'text-zinc-700 dark:text-zinc-300'
                       }`}
                     >
@@ -658,7 +658,7 @@ export const ApplicationCoursesSection: React.FC = () => {
                   </div>
 
                   <h3
-                    className={`font-display text-base sm:text-lg font-semibold tracking-tight line-clamp-2 ${
+                    className={`font-display text-base sm:text-lg font-semibold tracking-tight break-words line-clamp-2 ${
                       isActive ? 'text-white dark:text-zinc-950' : 'text-zinc-950 dark:text-zinc-200'
                     }`}
                   >
@@ -683,7 +683,7 @@ export const ApplicationCoursesSection: React.FC = () => {
 
                 {/* Footer Quick Actions: Remix + Manage */}
                 <div
-                  className={`relative z-20 mt-4 pt-3 border-t flex items-center justify-between gap-2 pointer-events-auto ${
+                  className={`relative z-20 mt-4 pt-3 border-t flex flex-wrap items-center justify-between gap-2 pointer-events-auto ${
                     isActive
                       ? 'border-zinc-800 dark:border-zinc-300'
                       : 'border-zinc-100 dark:border-zinc-800'

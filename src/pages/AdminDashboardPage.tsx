@@ -186,7 +186,7 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <Button
             variant="secondary"
             size="sm"
@@ -248,7 +248,7 @@ export const AdminDashboardPage: React.FC = () => {
               ).
             </span>
             {syncNotice.projectId && (
-              <span className="font-mono text-[11px] opacity-80">
+              <span className="font-mono text-[11px] opacity-80 break-all">
                 {syncNotice.projectId} / {syncNotice.firestoreDatabaseId || '(default)'}
               </span>
             )}

@@ -163,7 +163,7 @@ export const TopicPickerField: React.FC<TopicPickerFieldProps> = ({
         </select>
       ) : (
         <div className="mt-1 space-y-1.5">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
             <input
               id={id}
               type="text"
@@ -189,30 +189,32 @@ export const TopicPickerField: React.FC<TopicPickerFieldProps> = ({
                 }
               }}
               placeholder="New topic name (e.g., Week 2: Thermodynamics)"
-              className="min-w-0 flex-1 rounded-md border border-zinc-950 dark:border-zinc-400 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none"
+              className="min-w-0 flex-1 basis-[180px] rounded-md border border-zinc-950 dark:border-zinc-400 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none"
             />
-            <Button
-              type="button"
-              size="sm"
-              loading={submitting}
-              onClick={() => void handleCreateInlineTopic()}
-            >
-              <Check className="h-3.5 w-3.5" />
-              Add
-            </Button>
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => {
-                setCreatingMode(false);
-                setNewTopicName('');
-                setError(null);
-              }}
-              aria-label="Cancel new topic"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer shrink-0"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                loading={submitting}
+                onClick={() => void handleCreateInlineTopic()}
+              >
+                <Check className="h-3.5 w-3.5" />
+                Add
+              </Button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => {
+                  setCreatingMode(false);
+                  setNewTopicName('');
+                  setError(null);
+                }}
+                aria-label="Cancel new topic"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-zinc-200 cursor-pointer shrink-0"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
           {error && <p className="text-xs text-red-700 dark:text-red-400">{error}</p>}
         </div>

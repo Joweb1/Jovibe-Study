@@ -158,7 +158,7 @@ export const AdminAiUsageTab: React.FC<AdminAiUsageTabProps> = ({
             <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1.5">
               Default Daily Shared Quota
             </label>
-            <div className="flex items-center gap-1.5 mb-2">
+            <div className="flex flex-wrap items-center gap-1.5 mb-2">
               {QUOTA_PRESETS.map((preset) => (
                 <button
                   key={preset}
@@ -230,7 +230,7 @@ export const AdminAiUsageTab: React.FC<AdminAiUsageTabProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-between pt-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
           <span className="text-xs text-emerald-600 dark:text-emerald-400">
             {configSaved ? 'Quota policy saved and active immediately.' : ''}
           </span>
@@ -279,11 +279,11 @@ export const AdminAiUsageTab: React.FC<AdminAiUsageTabProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={originFilter}
             onChange={(e) => setOriginFilter(e.target.value as 'all' | 'shared' | 'personal')}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs"
+            className="max-w-full min-w-0 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs"
           >
             <option value="all">All Key Origins</option>
             <option value="shared">Shared Admin Keys Only</option>
@@ -303,7 +303,7 @@ export const AdminAiUsageTab: React.FC<AdminAiUsageTabProps> = ({
       {/* Summary KPIs */}
       {analytics && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+          <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3.5">
               <div className="text-[11px] text-zinc-500">Logical Requests</div>
               <div className="mt-1 font-mono text-xl font-semibold text-zinc-950 dark:text-zinc-100">
@@ -344,8 +344,8 @@ export const AdminAiUsageTab: React.FC<AdminAiUsageTabProps> = ({
 
           {/* Daily Trend Chart & Feature Breakdown */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-            <div className="lg:col-span-7 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-              <div className="flex items-center justify-between mb-4">
+            <div className="min-w-0 lg:col-span-7 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <div className="flex items-center gap-2">
                   <BarChart3 className="h-4 w-4 text-zinc-500" />
                   <h4 className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
@@ -402,7 +402,7 @@ export const AdminAiUsageTab: React.FC<AdminAiUsageTabProps> = ({
               )}
             </div>
 
-            <div className="lg:col-span-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <div className="min-w-0 lg:col-span-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
               <h4 className="text-sm font-semibold text-zinc-950 dark:text-zinc-100 mb-3">
                 Most-Used Features
               </h4>
@@ -414,7 +414,7 @@ export const AdminAiUsageTab: React.FC<AdminAiUsageTabProps> = ({
                     const width = Math.max(4, Math.round((f.requests / maxFeature) * 100));
                     return (
                       <div key={f.feature} className="space-y-1">
-                        <div className="flex items-center justify-between text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-1 text-xs">
                           <span className="font-medium text-zinc-800 dark:text-zinc-200">
                             {FEATURE_LABELS[f.feature] || f.feature}
                           </span>
@@ -484,7 +484,7 @@ export const AdminAiUsageTab: React.FC<AdminAiUsageTabProps> = ({
 
           {/* Heavy Users & Exhausted Quotas */}
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-x-auto">
-            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 dark:border-zinc-800 px-4 py-3">
               <div className="flex items-center gap-2">
                 <Flame className="h-4 w-4 text-amber-500" />
                 <h4 className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { onSnapshotsInSync } from 'firebase/firestore';
-import { ArrowLeft, Check, Download, LogOut, Moon, RefreshCw, Square, Sun, Trash2, Volume2 } from 'lucide-react';
+import { ArrowLeft, Check, Download, LogOut, Mic, Moon, RefreshCw, ShieldAlert, ShieldCheck, Square, Sun, Trash2, Volume2 } from 'lucide-react';
 import {
   DEFAULT_USER_PREFERENCES,
   type DifficultyLevel,
@@ -28,6 +28,14 @@ import { ErrorBanner } from '../components/ui/StateViews';
 import { AiKeySettingsSection } from '../components/settings/AiKeySettingsSection';
 import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import {
+  ensureLiveMicrophoneAccess,
+  queryMicrophonePermissionState,
+  stopMediaStream,
+  subscribeMicrophonePermissionChange,
+  type BrowserPermissionState,
+  type MicrophoneAccessResult,
+} from '../utils/microphonePermission';
 
 export const SettingsPage: React.FC = () => {
   const { user, profile, isOnline, savePreferences, signOut } = useAuth();
@@ -57,8 +65,61 @@ export const SettingsPage: React.FC = () => {
   const [offlineSyncStatus, setOfflineSyncStatus] = useState<string | null>(null);
   const [playback, setPlayback] = useState<PlaybackState>(() => geminiAudioPlayer.getState());
 
+  const microphoneSectionRef = useRef<HTMLElement>(null);
+  const micAttemptCountRef = useRef(0);
+  const [micPermissionState, setMicPermissionState] = useState<BrowserPermissionState>('unknown');
+  const [checkingMic, setCheckingMic] = useState(false);
+  const [micFeedback, setMicFeedback] = useState<Omit<MicrophoneAccessResult, 'stream'> | null>(null);
+  const [highlightMicSection, setHighlightMicSection] = useState(false);
+
   useEffect(() => {
     return geminiAudioPlayer.subscribe(setPlayback);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void queryMicrophonePermissionState().then((state) => {
+      if (active) setMicPermissionState(state);
+    });
+    const unsubscribe = subscribeMicrophonePermissionChange((nextState) => {
+      if (!active) return;
+      setMicPermissionState(nextState);
+      if (nextState === 'granted') {
+        setMicFeedback({
+          status: 'granted',
+          browserState: 'granted',
+          title: 'Microphone ready for Live AI',
+          message: 'Microphone access is enabled. Return to Jovibe Live to start talking.',
+        });
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const target = window.sessionStorage.getItem('jovibe_focus_setting');
+      if (target === 'microphone') {
+        window.sessionStorage.removeItem('jovibe_focus_setting');
+        setHighlightMicSection(true);
+        const scrollTimer = window.setTimeout(() => {
+          microphoneSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 80);
+        const fadeTimer = window.setTimeout(() => {
+          setHighlightMicSection(false);
+        }, 2600);
+        return () => {
+          window.clearTimeout(scrollTimer);
+          window.clearTimeout(fadeTimer);
+        };
+      }
+    } catch {
+      // Ignore sessionStorage errors
+    }
   }, []);
 
   useEffect(() => {
@@ -182,6 +243,31 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleEnableOrCheckMicrophone = async () => {
+    if (checkingMic) return;
+    setCheckingMic(true);
+    micAttemptCountRef.current += 1;
+    try {
+      const result = await ensureLiveMicrophoneAccess({
+        attemptNumber: micAttemptCountRef.current,
+        acquireStreamIfGranted: true,
+      });
+      if (result.stream) {
+        stopMediaStream(result.stream);
+      }
+      setMicPermissionState(result.browserState);
+      setMicFeedback({
+        status: result.status,
+        browserState: result.browserState,
+        title: result.title,
+        message: result.message,
+        settingsHint: result.settingsHint,
+      });
+    } finally {
+      setCheckingMic(false);
+    }
+  };
+
   return (
     <div className="max-w-3xl space-y-10">
       <div className="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-5">
@@ -255,8 +341,8 @@ export const SettingsPage: React.FC = () => {
             Stored locally on this device — not synced to the cloud.
           </p>
         </div>
-        <div className="flex items-center justify-between gap-4 border-y border-zinc-200 dark:border-zinc-800 py-4">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-y border-zinc-200 dark:border-zinc-800 py-4">
+          <div className="min-w-0">
             <div className="text-sm text-zinc-900 dark:text-zinc-200">Theme</div>
             <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
               {theme === 'dark' ? 'Dark mode is on' : 'Light mode is on'}
@@ -266,11 +352,131 @@ export const SettingsPage: React.FC = () => {
             type="button"
             onClick={toggleTheme}
             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="inline-flex items-center gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2 text-sm font-medium text-zinc-900 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="inline-flex max-w-full items-center gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2 text-sm font-medium text-zinc-900 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
-            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            {theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}
+            {theme === 'dark' ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+            <span>{theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}</span>
           </button>
+        </div>
+      </section>
+
+      {/* Microphone & Live AI Access */}
+      <section
+        id="microphone"
+        ref={microphoneSectionRef}
+        className={`space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-8 transition-colors duration-500 ${
+          highlightMicSection
+            ? 'rounded-xl bg-amber-50/60 dark:bg-amber-950/20 px-3 sm:px-4 pb-4 ring-1 ring-amber-300 dark:ring-amber-800'
+            : ''
+        }`}
+      >
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-200">
+            Microphone &amp; Live AI Access
+          </h2>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Jovibe Live uses your device microphone for real-time voice tutoring. Audio is streamed only while a Live AI session is open.
+          </p>
+        </div>
+
+        <div className="space-y-3 border-y border-zinc-200 dark:border-zinc-800 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200">
+                {micPermissionState === 'granted' ? (
+                  <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                ) : micPermissionState === 'denied' ? (
+                  <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-zinc-950 dark:text-zinc-200">
+                    Microphone permission
+                  </span>
+                  <span
+                    className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${
+                      micPermissionState === 'granted'
+                        ? 'border-emerald-200 dark:border-emerald-800/70 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                        : micPermissionState === 'denied'
+                        ? 'border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300'
+                        : 'border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'
+                    }`}
+                  >
+                    {micPermissionState === 'granted'
+                      ? 'Allowed'
+                      : micPermissionState === 'denied'
+                      ? 'Blocked in browser/OS'
+                      : micPermissionState === 'prompt'
+                      ? 'Ask when Live AI starts'
+                      : 'Needs check'}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                  {micPermissionState === 'granted'
+                    ? 'Live AI can access your microphone immediately.'
+                    : micPermissionState === 'denied'
+                    ? 'Browser or device settings currently block the microphone prompt.'
+                    : 'Tap Check or Enable to test and grant microphone permission.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                loading={checkingMic}
+                onClick={() => void handleEnableOrCheckMicrophone()}
+              >
+                <Mic className="h-3.5 w-3.5 shrink-0" />
+                {micPermissionState === 'granted' ? 'Re-test microphone' : 'Enable / Check microphone'}
+              </Button>
+              {micPermissionState === 'granted' && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => navigate('/live')}
+                >
+                  Open Live AI
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {micFeedback && (
+            <div
+              role="status"
+              className={`rounded-lg border px-3.5 py-2.5 text-xs space-y-1 ${
+                micFeedback.status === 'granted'
+                  ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200'
+                  : 'border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/35 text-amber-950 dark:text-amber-200'
+              }`}
+            >
+              <div className="font-semibold">{micFeedback.title}</div>
+              <p className="leading-relaxed opacity-90">{micFeedback.message}</p>
+              {micFeedback.settingsHint && (
+                <p className="leading-relaxed opacity-85">{micFeedback.settingsHint}</p>
+              )}
+            </div>
+          )}
+
+          {micPermissionState === 'denied' && (
+            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/70 px-3.5 py-3 text-xs text-zinc-600 dark:text-zinc-300 space-y-1.5">
+              <div className="font-medium text-zinc-900 dark:text-zinc-100">
+                How to enable a blocked microphone
+              </div>
+              <p>
+                <strong>Browser:</strong> Click the lock or site-settings icon beside the address bar, set <strong>Microphone</strong> to <strong>Allow</strong>, then tap <strong>Enable / Check microphone</strong> above.
+              </p>
+              <p>
+                <strong>Android / installed app:</strong> Open <strong>Device Settings &gt; Apps &gt; Jovibe Study (or your browser) &gt; Permissions &gt; Microphone</strong> and select <strong>Allow while using the app</strong>.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -380,8 +586,8 @@ export const SettingsPage: React.FC = () => {
               <label htmlFor="pref-tts-voice" className="sm:col-span-5 sm:pt-2 text-sm text-zinc-900 dark:text-zinc-200">
                 Gemini 3.8 voice
               </label>
-              <div className="sm:col-span-7 space-y-1.5">
-                <div className="flex items-center gap-2">
+              <div className="sm:col-span-7 min-w-0 space-y-1.5">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                   <select
                     id="pref-tts-voice"
                     value={prefs.ttsVoice}
@@ -391,7 +597,7 @@ export const SettingsPage: React.FC = () => {
                         ttsVoice: e.target.value as GeminiTtsVoice,
                       }))
                     }
-                    className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
+                    className="min-w-0 flex-1 w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-950 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
                   >
                     {AVAILABLE_TTS_VOICES.map((voice) => (
                       <option key={voice.id} value={voice.id}>

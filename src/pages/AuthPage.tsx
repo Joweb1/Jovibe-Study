@@ -59,15 +59,15 @@ export const AuthPage: React.FC = () => {
             : 'bg-transparent'
         }`}
       >
-        <div className="mx-auto flex h-16 max-w-[1120px] items-center justify-between gap-8 px-5 sm:px-6">
+        <div className="mx-auto flex min-h-16 max-w-[1120px] items-center justify-between gap-2 sm:gap-6 px-4 py-2 sm:px-6">
           {/* Left: Jovibe Study logo & wordmark */}
           <button
             type="button"
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="inline-flex items-center gap-2 font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-100 whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex min-w-0 shrink items-center gap-2 font-display text-base font-semibold tracking-tight text-zinc-950 dark:text-zinc-100 cursor-pointer"
           >
             <SotalLogo size="md" />
-            <span>Jovibe Study</span>
+            <span className="truncate">Jovibe Study</span>
           </button>
 
           {/* Center: Clean single-line section links on desktop */}
@@ -105,7 +105,7 @@ export const AuthPage: React.FC = () => {
               size="sm"
               onClick={handleSignIn}
               loading={signingIn}
-              className="rounded-full px-4 whitespace-nowrap shrink-0"
+              className="rounded-full px-3.5 sm:px-4"
             >
               <span className="sm:hidden">Sign in</span>
               <span className="hidden sm:inline">Sign in with Google</span>

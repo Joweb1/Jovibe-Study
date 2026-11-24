@@ -39,7 +39,7 @@ export const StreakHeaderIndicator: React.FC = () => {
           ? 'Tap to claim today’s streak'
           : `${currentStreak}-day study streak`
       }
-      className={`group relative inline-flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold tabular-nums transition-all cursor-pointer ${
+      className={`group relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border px-2 sm:px-2.5 py-1 text-xs font-semibold tabular-nums transition-all cursor-pointer ${
         hasPendingClaimToday
           ? 'border-orange-400/80 dark:border-orange-500/70 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 shadow-[0_0_12px_rgba(249,115,22,0.22)]'
           : isLit

@@ -439,17 +439,17 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({ syncVersion = 0, o
       {/* User Detail & Management Modal */}
       {selectedUid && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-zinc-950/60 p-3 sm:p-4 backdrop-blur-[2px]"
           role="dialog"
           aria-modal="true"
         >
-          <div className="relative flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-5 py-4">
-              <div>
-                <h3 className="text-base font-semibold text-zinc-950 dark:text-zinc-100">
+          <div className="relative my-auto flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 py-4">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-zinc-950 dark:text-zinc-100 break-words">
                   {detail?.user.displayName || 'User Details'}
                 </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 break-all">
                   {detail?.user.email} · UID: <span className="font-mono">{selectedUid}</span>
                 </p>
               </div>
@@ -470,13 +470,13 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({ syncVersion = 0, o
               <div className="p-8 text-center text-xs text-zinc-500">Loading user profile...</div>
             ) : (
               <>
-                <div className="flex items-center gap-1 border-b border-zinc-200 dark:border-zinc-800 px-5 pt-2 text-xs">
+                <div className="flex items-center gap-1 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 pt-2 text-xs">
                   {(['overview', 'courses', 'materials', 'activity'] as const).map((t) => (
                     <button
                       key={t}
                       type="button"
                       onClick={() => setDetailTab(t)}
-                      className={`border-b-2 px-3 py-2 font-medium capitalize cursor-pointer ${
+                      className={`shrink-0 border-b-2 px-3 py-2 font-medium capitalize cursor-pointer ${
                         detailTab === t
                           ? 'border-zinc-950 dark:border-zinc-100 text-zinc-950 dark:text-zinc-100'
                           : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
@@ -667,22 +667,22 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({ syncVersion = 0, o
                         detail.courses.map((c) => (
                           <div
                             key={c.course_id}
-                            className="flex items-center justify-between rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 text-xs"
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 text-xs"
                           >
-                            <div className="flex items-start gap-2.5">
-                              <BookOpen className="mt-0.5 h-4 w-4 text-zinc-400" />
-                              <div>
-                                <div className="font-semibold text-zinc-950 dark:text-zinc-100">
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                              <BookOpen className="mt-0.5 h-4 w-4 text-zinc-400 shrink-0" />
+                              <div className="min-w-0">
+                                <div className="font-semibold text-zinc-950 dark:text-zinc-100 break-words">
                                   {c.code} — {c.name}
                                 </div>
                                 {c.description && (
-                                  <p className="mt-0.5 text-zinc-500 dark:text-zinc-400 line-clamp-2">
+                                  <p className="mt-0.5 text-zinc-500 dark:text-zinc-400 line-clamp-2 break-words">
                                     {c.description}
                                   </p>
                                 )}
                               </div>
                             </div>
-                            <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px]">
+                            <span className="shrink-0 rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px]">
                               {c.is_public ? 'Public' : 'Private'}
                             </span>
                           </div>
@@ -699,7 +699,7 @@ export const AdminUsersTab: React.FC<AdminUsersTabProps> = ({ syncVersion = 0, o
                         detail.materials.map((m) => (
                           <div
                             key={`${m.course_id}_${m.source_id}`}
-                            className="flex items-center justify-between rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 text-xs"
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 text-xs"
                           >
                             <div className="flex items-start gap-2.5 min-w-0">
                               <FileText className="mt-0.5 h-4 w-4 text-zinc-400 shrink-0" />
