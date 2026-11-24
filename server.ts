@@ -5,6 +5,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getSharedProvidersAvailability } from './server/adminKeyPool.ts';
+import { hydrateAdminVaultFromFirestore } from './server/adminFirestoreVault.ts';
 import { createAdminRouter } from './server/adminRoutes.ts';
 import {
   executeProtectedAiRoute,
@@ -1221,6 +1222,25 @@ export function createApiApp(): express.Express {
 
 async function startServer() {
   const app = createApiApp();
+
+  // Restore encrypted Admin API keys & platform settings from Firestore on cold start
+  // (runs automatically when FIREBASE_SERVICE_ACCOUNT_JSON is configured).
+  try {
+    const vaultStatus = await hydrateAdminVaultFromFirestore({ force: true });
+    if (vaultStatus.persistentBackend === 'firestore_service_account') {
+      console.log(
+        `[Admin Vault] Restored ${vaultStatus.hydratedKeyCount} admin key(s) from Firestore.`
+      );
+    }
+    if (vaultStatus.warning) {
+      console.warn(`[Admin Vault] ${vaultStatus.warning}`);
+    }
+  } catch (err) {
+    console.warn(
+      '[Admin Vault] Startup Firestore hydration skipped:',
+      err instanceof Error ? err.message : String(err)
+    );
+  }
 
   if (!IS_PROD) {
     const { createServer: createViteServer } = await import('vite');

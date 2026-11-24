@@ -5,6 +5,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 import {
   recordAdminKeyFailure,
   recordAdminKeySuccess,
+  recordEnvKeyFailure,
+  recordEnvKeySuccess,
   resolveSharedKeyCandidates,
   shouldRotateAdminKeyForCode,
 } from './adminKeyPool.ts';
@@ -272,19 +274,29 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
             throw accessErr;
           }
 
-          // 3. Build key candidates (personal BYOK OR admin key pool with rotation -> .env fallback)
+          // 3. Build key candidates (personal BYOK OR admin key pool with rotation -> multi-key .env fallback)
           const candidates: Array<{
             apiKey: string;
             keySource: 'byok' | 'server_fallback';
             keyOrigin: KeyOrigin;
             adminKeyId: string | null;
+            envKeyId: string | null;
           }> = usesPersonalKey
-            ? [{ apiKey: personalKey, keySource: 'byok', keyOrigin: 'personal_byok', adminKeyId: null }]
+            ? [
+                {
+                  apiKey: personalKey,
+                  keySource: 'byok',
+                  keyOrigin: 'personal_byok',
+                  adminKeyId: null,
+                  envKeyId: null,
+                },
+              ]
             : resolveSharedKeyCandidates('gemini').map((c) => ({
                 apiKey: c.apiKey,
                 keySource: 'server_fallback' as const,
                 keyOrigin: c.keyOrigin,
                 adminKeyId: c.adminKeyId,
+                envKeyId: c.envKeyId,
               }));
 
           if (candidates.length === 0) {
@@ -442,6 +454,8 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
 
               if (candidate.adminKeyId) {
                 recordAdminKeySuccess(candidate.adminKeyId);
+              } else if (candidate.envKeyId) {
+                recordEnvKeySuccess(candidate.envKeyId);
               }
               if (!usesPersonalKey) {
                 finalizeLogicalRequest({
@@ -480,6 +494,13 @@ export function attachLiveWebSocketServer(httpServer: HttpServer): WebSocketServ
                   classified.message,
                   classified.cooldownMs,
                   willRotate
+                );
+              } else if (candidate.envKeyId) {
+                recordEnvKeyFailure(
+                  candidate.envKeyId,
+                  classified.code,
+                  classified.message,
+                  classified.cooldownMs
                 );
               }
 

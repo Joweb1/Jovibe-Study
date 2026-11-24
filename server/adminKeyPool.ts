@@ -8,13 +8,21 @@ import {
   executeGeminiWithModelFallback,
 } from './geminiService.ts';
 import {
-  areServerProviderKeysAllowed,
   getProviderDefinition,
   ProviderRequestError,
   testProviderConnection,
   type OpenAiProviderId,
 } from './openaiProvider.ts';
 import type { KeyOrigin } from './quotaService.ts';
+import {
+  getEnvKeyPoolSummary,
+  getHealthyEnvKeyEntries,
+  recordEnvKeyFailure,
+  recordEnvKeySuccess,
+} from './envKeyPool.ts';
+import { scheduleBackgroundKeySync } from './adminFirestoreVault.ts';
+
+export { recordEnvKeySuccess, recordEnvKeyFailure };
 
 /**
  * Supported AI providers for Admin-managed API keys.
@@ -65,6 +73,7 @@ export interface AdminKeyPublicView {
   failoverCount: number;
   lastUsedAtMs: number | null;
   lastError: string;
+  undecryptable?: boolean;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -103,6 +112,17 @@ function rowToPublicView(row: AdminKeyRow, nowMs = Date.now()): AdminKeyPublicVi
     cooldownUntilMs = null;
   }
 
+  let undecryptable = false;
+  try {
+    decryptSecret({
+      ciphertext: row.encrypted_key,
+      iv: row.iv,
+      authTag: row.auth_tag,
+    });
+  } catch {
+    undecryptable = true;
+  }
+
   return {
     id: row.id,
     provider: row.provider,
@@ -118,6 +138,7 @@ function rowToPublicView(row: AdminKeyRow, nowMs = Date.now()): AdminKeyPublicVi
     failoverCount: Number(row.failover_count),
     lastUsedAtMs: row.last_used_at_ms ? Number(row.last_used_at_ms) : null,
     lastError: row.last_error || '',
+    ...(undecryptable ? { undecryptable: true } : {}),
     createdAtMs: Number(row.created_at_ms),
     updatedAtMs: Number(row.updated_at_ms),
   };
@@ -336,39 +357,25 @@ export async function testAdminApiKeyById(id: string): Promise<{
 // Key Pool Resolution, Rotation & Automatic Failover
 // ---------------------------------------------------------------------------
 
-function getEnvKeyForProvider(provider: AnyAiProvider): string {
-  const env = (k: string) => (process.env[k] || '').trim();
-  if (provider === 'gemini') return env('GEMINI_API_KEY');
-  if (!areServerProviderKeysAllowed()) return '';
-  if (provider === 'openrouter') return env('OPENROUTER_API_KEY') || env('OPEN_ROUTER_API_KEY');
-  if (provider === 'groq') return env('GROQ_API_KEY');
-  if (provider === 'nvidia_nim') return env('NVIDIA_API_KEY');
-  if (provider === 'cerebras') return env('CEREBRAS_API_KEY');
-  if (provider === 'cloudflare') {
-    const token = env('CLOUDFLARE_API_TOKEN') || env('CLOUDFLARE_API_KEY');
-    if (!token) return '';
-    if (token.includes(':')) return token;
-    const accountId = env('CLOUDFLARE_ACCOUNT_ID');
-    return accountId ? `${accountId}:${token}` : '';
-  }
-  return '';
-}
-
 export interface SharedKeyCandidate {
   apiKey: string;
   keyOrigin: Extract<KeyOrigin, 'shared_admin' | 'shared_env'>;
   adminKeyId: string | null;
+  envKeyId: string | null;
   label: string;
 }
 
 /**
  * Resolves the ordered list of shared key candidates for a provider.
  * Policy:
- *  - Admin-managed keys ALWAYS take priority over `.env` keys.
- *  - Only if NO enabled admin keys exist for that provider does `.env` act as fallback.
- *  - Cerebras never has admin keys; uses `.env` if configured.
- *  - Healthy keys (not invalid, not cooling) are ordered by priority ASC, then
- *    least-recently-used (`last_used_at_ms ASC NULLS FIRST`) for automatic rotation.
+ *  - Admin-managed keys ALWAYS take priority over `.env` keys whenever any healthy
+ *    decryptable admin key is available for that provider.
+ *  - If no healthy admin keys are available for that provider (0 configured, disabled,
+ *    undecryptable, or all cooling/invalid), the server falls back to `.env` keys with
+ *    full multi-key rotation (`*_KEY`, `*_KEY_1`, `*_KEY_2`, ...) and cooldown tracking.
+ *  - Cerebras never has admin keys; uses `.env` multi-key pool if configured.
+ *  - Healthy keys are ordered by priority ASC, then least-recently-used (`last_used_at_ms ASC`)
+ *    for automatic rotation.
  */
 export function resolveSharedKeyCandidates(provider: AnyAiProvider): SharedKeyCandidate[] {
   const now = Date.now();
@@ -416,29 +423,31 @@ export function resolveSharedKeyCandidates(provider: AnyAiProvider): SharedKeyCa
               apiKey: decrypted.trim(),
               keyOrigin: 'shared_admin',
               adminKeyId: row.id,
+              envKeyId: null,
               label: row.label,
             });
           }
         } catch {
-          // Skip corrupted key safely without crashing
+          // Skip undecryptable key safely without crashing
         }
       }
-      // Admin keys exist for this provider -> do NOT fall back to .env
-      return healthy;
+      // Admin keys take strict priority whenever at least one healthy admin key is available
+      if (healthy.length > 0) {
+        return healthy;
+      }
     }
   }
 
-  // No enabled admin keys exist for this provider -> use existing .env fallback
-  const envKey = getEnvKeyForProvider(provider);
-  if (envKey) {
-    return [
-      {
-        apiKey: envKey,
-        keyOrigin: 'shared_env',
-        adminKeyId: null,
-        label: `Server ${provider} (.env)`,
-      },
-    ];
+  // No healthy admin keys available for this provider -> rotate across configured .env keys
+  const envEntries = getHealthyEnvKeyEntries(provider, now);
+  if (envEntries.length > 0) {
+    return envEntries.map((entry) => ({
+      apiKey: entry.apiKey,
+      keyOrigin: 'shared_env' as const,
+      adminKeyId: null,
+      envKeyId: entry.id,
+      label: entry.label,
+    }));
   }
 
   return [];
@@ -466,39 +475,77 @@ export function getSharedProvidersAvailability(): Record<AnyAiProvider, boolean>
 
 export function getProviderKeySourceSummary(): Record<
   AdminManagedProvider,
-  { adminKeyCount: number; activeAdminKeyCount: number; envFallbackConfigured: boolean; effectiveSource: 'admin_pool' | 'env_fallback' | 'unconfigured' }
+  {
+    adminKeyCount: number;
+    activeAdminKeyCount: number;
+    envFallbackConfigured: boolean;
+    envKeyCount: number;
+    activeEnvKeyCount: number;
+    envVarNames: string[];
+    effectiveSource: 'admin_pool' | 'env_fallback' | 'unconfigured';
+  }
 > {
   const db = getDb();
   const now = Date.now();
   const result = {} as Record<
     AdminManagedProvider,
-    { adminKeyCount: number; activeAdminKeyCount: number; envFallbackConfigured: boolean; effectiveSource: 'admin_pool' | 'env_fallback' | 'unconfigured' }
+    {
+      adminKeyCount: number;
+      activeAdminKeyCount: number;
+      envFallbackConfigured: boolean;
+      envKeyCount: number;
+      activeEnvKeyCount: number;
+      envVarNames: string[];
+      effectiveSource: 'admin_pool' | 'env_fallback' | 'unconfigured';
+    }
   >;
 
   for (const provider of ADMIN_MANAGED_PROVIDERS) {
     const rows = db
-      .prepare('SELECT enabled, status, cooldown_until_ms FROM admin_api_keys WHERE provider = ?')
-      .all(provider) as Array<{ enabled: number; status: string; cooldown_until_ms: number | null }>;
+      .prepare(
+        'SELECT enabled, status, cooldown_until_ms, encrypted_key, iv, auth_tag FROM admin_api_keys WHERE provider = ?'
+      )
+      .all(provider) as Array<{
+      enabled: number;
+      status: string;
+      cooldown_until_ms: number | null;
+      encrypted_key: string;
+      iv: string;
+      auth_tag: string;
+    }>;
     const enabledRows = rows.filter((r) => Boolean(r.enabled));
-    const activeRows = enabledRows.filter(
-      (r) =>
-        r.status !== 'invalid' &&
-        !(
-          (r.status === 'cooldown' || r.status === 'quota_exhausted') &&
-          r.cooldown_until_ms &&
-          Number(r.cooldown_until_ms) > now
-        )
-    );
-    const envConfigured = Boolean(getEnvKeyForProvider(provider));
+    const activeRows = enabledRows.filter((r) => {
+      if (r.status === 'invalid') return false;
+      if (
+        (r.status === 'cooldown' || r.status === 'quota_exhausted') &&
+        r.cooldown_until_ms &&
+        Number(r.cooldown_until_ms) > now
+      ) {
+        return false;
+      }
+      try {
+        decryptSecret({ ciphertext: r.encrypted_key, iv: r.iv, authTag: r.auth_tag });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    const envSummary = getEnvKeyPoolSummary(provider, now);
+    const envConfigured = envSummary.envKeyCount > 0;
     result[provider] = {
       adminKeyCount: rows.length,
       activeAdminKeyCount: activeRows.length,
       envFallbackConfigured: envConfigured,
+      envKeyCount: envSummary.envKeyCount,
+      activeEnvKeyCount: envSummary.activeEnvKeyCount,
+      envVarNames: envSummary.envVarNames,
       effectiveSource:
-        enabledRows.length > 0
+        activeRows.length > 0
           ? 'admin_pool'
           : envConfigured
           ? 'env_fallback'
+          : enabledRows.length > 0
+          ? 'admin_pool'
           : 'unconfigured',
     };
   }
@@ -581,14 +628,19 @@ export function recordAdminKeyFailure(
     adminKeyId
   );
 
+  // Persist failure status changes to Firestore vault in background if service account is active
+  if (nextStatus !== 'active') {
+    scheduleBackgroundKeySync(adminKeyId);
+  }
+
   // Check if all enabled admin keys for this provider are now exhausted/unavailable
   const remainingHealthy = resolveSharedKeyCandidates(provider);
   if (remainingHealthy.length === 0) {
     createAdminAlert({
       severity: 'critical',
       category: 'provider_exhaustion',
-      title: `All admin keys exhausted for ${provider}`,
-      message: `Every enabled admin key for ${provider} is currently cooling down, quota-exhausted, or invalid. Add another key or reset cooldowns in Admin → API Keys.`,
+      title: `All shared keys exhausted for ${provider}`,
+      message: `Every enabled admin key (and any .env fallback keys) for ${provider} is currently cooling down, quota-exhausted, or invalid. Add another key or reset cooldowns in Admin → API Keys.`,
       metadata: { provider, lastCode: code },
       dedupeWindowMs: 15 * 60_000,
     });

@@ -61,6 +61,10 @@ function getMasterKey(): Buffer {
   return generated;
 }
 
+export function isEnvEncryptionKeyConfigured(): boolean {
+  return (process.env.ADMIN_ENCRYPTION_KEY || '').trim().length > 0;
+}
+
 export function resetCachedMasterKey(): void {
   cachedMasterKey = null;
   cachedMasterKeyPath = null;

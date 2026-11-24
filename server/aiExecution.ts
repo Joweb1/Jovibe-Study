@@ -3,6 +3,8 @@ import {
   isAdminManagedProvider,
   recordAdminKeyFailure,
   recordAdminKeySuccess,
+  recordEnvKeyFailure,
+  recordEnvKeySuccess,
   resolveSharedKeyCandidates,
   shouldRotateAdminKeyForCode,
   type AnyAiProvider,
@@ -271,6 +273,8 @@ export async function executeProtectedAiRoute<T>(params: {
 
       if (candidate.adminKeyId) {
         recordAdminKeySuccess(candidate.adminKeyId);
+      } else if (candidate.envKeyId) {
+        recordEnvKeySuccess(candidate.envKeyId);
       }
 
       finalizeLogicalRequest({
@@ -317,6 +321,13 @@ export async function executeProtectedAiRoute<T>(params: {
           classified.message,
           classified.cooldownMs,
           willRotate
+        );
+      } else if (candidate.envKeyId) {
+        recordEnvKeyFailure(
+          candidate.envKeyId,
+          classified.code,
+          classified.message,
+          classified.cooldownMs
         );
       }
 

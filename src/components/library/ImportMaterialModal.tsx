@@ -6,6 +6,7 @@ import {
   EyeOff,
   FileText,
   HardDrive,
+  Image as ImageIcon,
   Trash2,
   Type as TypeIcon,
   Upload,
@@ -102,7 +103,34 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
 
   // Photo / Handwriting controls
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoDragOver, setPhotoDragOver] = useState<boolean>(false);
   const [photoMode, setPhotoMode] = useState<VisionExtractionMode>('textbook_photo');
+
+  useEffect(() => {
+    if (!photoFile) {
+      setPhotoPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(photoFile);
+    setPhotoPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [photoFile]);
+
+  const handleSelectPhotoFile = (file: File | null) => {
+    setError(null);
+    if (!file) {
+      setPhotoFile(null);
+      return;
+    }
+    if (file.type && !file.type.startsWith('image/')) {
+      setError('Please select an image file (PNG, JPEG, WebP, or photo from your gallery).');
+      return;
+    }
+    setPhotoFile(file);
+  };
 
   // Typed / Pasted text controls
   const [rawTitle, setRawTitle] = useState('');
@@ -736,25 +764,122 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                     </div>
                   </div>
 
-                  <label className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-950/60 px-6 py-10 text-center hover:border-zinc-500 cursor-pointer">
-                    <Camera className="h-5 w-5 text-zinc-600 dark:text-zinc-400" />
-                    <span className="mt-3 text-sm font-medium text-zinc-950 dark:text-zinc-200">
-                      {photoFile ? photoFile.name : 'Upload an image or take a photo'}
-                    </span>
-                    <span className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      Supports PNG, JPEG, and WebP. Unclear handwriting will be flagged as [unclear: ...] for you to verify.
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      capture="environment"
-                      onChange={(e) => {
-                        setError(null);
-                        setPhotoFile(e.target.files?.[0] ?? null);
-                      }}
-                      className="sr-only"
-                    />
-                  </label>
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setPhotoDragOver(true);
+                    }}
+                    onDragLeave={() => setPhotoDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setPhotoDragOver(false);
+                      const dropped = e.dataTransfer.files?.[0] ?? null;
+                      if (dropped) {
+                        handleSelectPhotoFile(dropped);
+                      }
+                    }}
+                    className={`rounded-md border border-dashed px-6 py-8 text-center transition-colors ${
+                      photoDragOver
+                        ? 'border-zinc-950 bg-zinc-100/80 dark:border-zinc-200 dark:bg-zinc-900'
+                        : 'border-zinc-300 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-950/60'
+                    }`}
+                  >
+                    {photoFile && photoPreviewUrl ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="relative overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+                          <img
+                            src={photoPreviewUrl}
+                            alt="Selected study material preview"
+                            className="max-h-48 max-w-full object-contain"
+                          />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-zinc-950 dark:text-zinc-200 break-all">
+                            {photoFile.name}
+                          </p>
+                          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                            {(photoFile.size / (1024 * 1024)).toFixed(2)} MB
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                          <label className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+                            <ImageIcon className="h-3.5 w-3.5" />
+                            Choose another image
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                handleSelectPhotoFile(e.target.files?.[0] ?? null);
+                                e.target.value = '';
+                              }}
+                              className="sr-only"
+                            />
+                          </label>
+                          <label className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+                            <Camera className="h-3.5 w-3.5" />
+                            Retake photo
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              onChange={(e) => {
+                                handleSelectPhotoFile(e.target.files?.[0] ?? null);
+                                e.target.value = '';
+                              }}
+                              className="sr-only"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectPhotoFile(null)}
+                            className="inline-flex items-center gap-1 rounded-md border border-zinc-200 dark:border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center">
+                        <ImageIcon className="h-6 w-6 text-zinc-600 dark:text-zinc-400" />
+                        <p className="mt-3 text-sm font-medium text-zinc-950 dark:text-zinc-200">
+                          Upload an image or snap a photo
+                        </p>
+                        <p className="mt-1 max-w-md text-xs text-zinc-500 dark:text-zinc-400">
+                          Choose a saved photo, screenshot, or image from your device, drag and drop it here, or take a photo with your camera. Supports PNG, JPEG, WebP, and gallery photos.
+                        </p>
+                        <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+                          <label className="inline-flex items-center gap-2 rounded-md bg-zinc-950 dark:bg-zinc-100 px-4 py-2 text-xs font-medium text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-zinc-200 cursor-pointer">
+                            <Upload className="h-3.5 w-3.5" />
+                            Upload image / photo
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                handleSelectPhotoFile(e.target.files?.[0] ?? null);
+                                e.target.value = '';
+                              }}
+                              className="sr-only"
+                            />
+                          </label>
+                          <label className="inline-flex items-center gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+                            <Camera className="h-3.5 w-3.5" />
+                            Take photo
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              onChange={(e) => {
+                                handleSelectPhotoFile(e.target.files?.[0] ?? null);
+                                e.target.value = '';
+                              }}
+                              className="sr-only"
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

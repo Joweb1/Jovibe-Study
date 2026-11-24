@@ -8,7 +8,7 @@ interface FirebaseAppletConfig {
   firestoreDatabaseId: string;
 }
 
-interface ServiceAccountJson {
+export interface ServiceAccountJson {
   client_email: string;
   private_key: string;
   project_id?: string;
@@ -65,7 +65,7 @@ export function getFirebaseConfig(): FirebaseAppletConfig {
   }
 }
 
-function loadServiceAccount(): ServiceAccountJson | null {
+export function loadServiceAccount(): ServiceAccountJson | null {
   const inlineJson = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
   if (inlineJson) {
     try {
@@ -128,7 +128,11 @@ function base64UrlEncode(input: string | Buffer): string {
     .replace(/=+$/g, '');
 }
 
-async function getServiceAccountAccessToken(sa: ServiceAccountJson): Promise<string> {
+export function isServiceAccountConfigured(): boolean {
+  return loadServiceAccount() !== null;
+}
+
+export async function getServiceAccountAccessToken(sa: ServiceAccountJson): Promise<string> {
   const now = Date.now();
   if (cachedOAuthToken && cachedOAuthToken.expiresAtMs > now + 60_000) {
     return cachedOAuthToken.token;

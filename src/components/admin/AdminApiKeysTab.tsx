@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
+  Cloud,
   KeyRound,
   Lock,
   Plus,
@@ -15,6 +17,7 @@ import {
   ADMIN_PROVIDER_LABELS,
   type AdminApiKeyView,
   type AdminManagedProvider,
+  type AdminVaultStatus,
   type ProviderSourceSummary,
 } from './adminTypes';
 
@@ -31,6 +34,8 @@ export const AdminApiKeysTab: React.FC = () => {
   const [providerSources, setProviderSources] = useState<
     Record<AdminManagedProvider, ProviderSourceSummary> | null
   >(null);
+  const [vaultStatus, setVaultStatus] = useState<AdminVaultStatus | null>(null);
+  const [syncingVault, setSyncingVault] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -45,20 +50,45 @@ export const AdminApiKeysTab: React.FC = () => {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const loadKeys = async () => {
+  const loadKeys = async (forceSync = false) => {
     setLoading(true);
     setError(null);
     try {
       const data = await apiFetchJson<{
         keys: AdminApiKeyView[];
         providerSources: Record<AdminManagedProvider, ProviderSourceSummary>;
-      }>('/api/admin/api-keys');
+        vaultStatus?: AdminVaultStatus;
+      }>(`/api/admin/api-keys${forceSync ? '?forceSync=1' : ''}`);
       setKeys(data.keys || []);
       setProviderSources(data.providerSources || null);
+      if (data.vaultStatus) setVaultStatus(data.vaultStatus);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load admin API keys.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSyncVault = async () => {
+    setSyncingVault(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const data = await apiFetchJson<{
+        ok: boolean;
+        pushed: number;
+        keys: AdminApiKeyView[];
+        providerSources: Record<AdminManagedProvider, ProviderSourceSummary>;
+        vaultStatus?: AdminVaultStatus;
+      }>('/api/admin/api-keys/sync-vault', { method: 'POST' });
+      setKeys(data.keys || []);
+      setProviderSources(data.providerSources || null);
+      if (data.vaultStatus) setVaultStatus(data.vaultStatus);
+      setNotice(`Synced ${data.keys?.length ?? 0} encrypted admin key(s) with Firestore Cloud Vault.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to sync keys with Firestore.');
+    } finally {
+      setSyncingVault(false);
     }
   };
 
@@ -76,6 +106,8 @@ export const AdminApiKeysTab: React.FC = () => {
       const res = await apiFetchJson<{
         key: AdminApiKeyView;
         providerSources: Record<AdminManagedProvider, ProviderSourceSummary>;
+        vaultSynced?: boolean;
+        vaultStatus?: AdminVaultStatus;
       }>('/api/admin/api-keys', {
         method: 'POST',
         body: {
@@ -87,7 +119,12 @@ export const AdminApiKeysTab: React.FC = () => {
       });
       setRawKey('');
       setLabel('');
-      setNotice(`Encrypted and saved ${res.key.label} (${res.key.keyMask}).`);
+      if (res.vaultStatus) setVaultStatus(res.vaultStatus);
+      setNotice(
+        `Encrypted and saved ${res.key.label} (${res.key.keyMask})${
+          res.vaultSynced ? ' — backed up to Firestore Cloud Vault.' : '.'
+        }`
+      );
       await loadKeys();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add API key.');
@@ -161,16 +198,61 @@ export const AdminApiKeysTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/60 p-4 text-xs text-zinc-600 dark:text-zinc-400">
-        <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-800 dark:text-zinc-200" />
-        <div>
-          <span className="font-semibold text-zinc-950 dark:text-zinc-100">
-            AES-256-GCM Encrypted Admin Key Pool (Rotation &amp; Automatic Failover)
-          </span>
-          <p className="mt-0.5 leading-relaxed">
-            Admin-managed keys take priority over <code className="font-mono">.env</code> keys and serve eligible users during their 7-day free AI access. If no admin keys exist for a provider, the server falls back to <code className="font-mono">.env</code>. Keys are never returned to the frontend or exposed in logs. Cerebras is excluded from admin-managed key pools.
-          </p>
+      <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/60 p-4 text-xs text-zinc-600 dark:text-zinc-400">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-800 dark:text-zinc-200" />
+            <div>
+              <span className="font-semibold text-zinc-950 dark:text-zinc-100">
+                AES-256-GCM Encrypted Admin Key Pool + Firestore Cloud Vault
+              </span>
+              <p className="mt-0.5 leading-relaxed">
+                Admin-managed keys are encrypted before saving and automatically synced to Firestore so they survive server restarts and redeploys. If no healthy admin keys are available for a provider, the server rotates across configured <code className="font-mono">.env</code> keys (<code className="font-mono">*_API_KEY</code>, <code className="font-mono">*_API_KEY_1</code>, <code className="font-mono">*_API_KEY_2</code>, ...).
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleSyncVault()}
+            disabled={syncingVault}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-[11px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
+          >
+            <Cloud className={`h-3.5 w-3.5 ${syncingVault ? 'animate-pulse' : ''}`} />
+            {syncingVault ? 'Syncing...' : 'Sync Vault'}
+          </button>
         </div>
+
+        {vaultStatus && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-200/80 dark:border-zinc-800 pt-2.5 text-[11px]">
+            <span className="inline-flex items-center gap-1.5 font-medium text-zinc-800 dark:text-zinc-200">
+              <Cloud className="h-3.5 w-3.5" />
+              Vault:{' '}
+              {vaultStatus.persistentBackend === 'firestore_service_account'
+                ? 'Firestore Auto-Restore Active'
+                : vaultStatus.persistentBackend === 'firestore_admin_token'
+                ? 'Firestore Synced (Admin Token)'
+                : 'Local SQLite Only'}
+            </span>
+            <span>
+              Encryption Key:{' '}
+              <strong className={vaultStatus.envEncryptionKeyConfigured ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}>
+                {vaultStatus.envEncryptionKeyConfigured ? 'Pinned via ADMIN_ENCRYPTION_KEY' : 'Ephemeral local file'}
+              </strong>
+            </span>
+            {vaultStatus.lastSyncedAtMs > 0 && (
+              <span className="text-zinc-500">
+                Last synced {new Date(vaultStatus.lastSyncedAtMs).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        )}
+
+        {vaultStatus?.warning && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900/70 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[11px] text-amber-900 dark:text-amber-200">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{vaultStatus.warning}</span>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -190,6 +272,8 @@ export const AdminApiKeysTab: React.FC = () => {
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
           {PROVIDER_LIST.map((p) => {
             const info = providerSources[p];
+            const envCount = info.envKeyCount ?? (info.envFallbackConfigured ? 1 : 0);
+            const activeEnvCount = info.activeEnvKeyCount ?? envCount;
             return (
               <div
                 key={p}
@@ -200,11 +284,16 @@ export const AdminApiKeysTab: React.FC = () => {
                 </div>
                 <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
                   {info.effectiveSource === 'admin_pool'
-                    ? `Using Admin Pool (${info.activeAdminKeyCount}/${info.adminKeyCount} active)`
+                    ? `Admin Pool (${info.activeAdminKeyCount}/${info.adminKeyCount} active)`
                     : info.effectiveSource === 'env_fallback'
-                    ? 'Using .env fallback (0 admin keys)'
+                    ? `.env Pool (${activeEnvCount}/${envCount} ${envCount === 1 ? 'key' : 'keys'} active)`
                     : 'Not configured'}
                 </div>
+                {envCount > 0 && info.effectiveSource === 'admin_pool' && (
+                  <div className="mt-0.5 text-[10px] text-zinc-400">
+                    Backup: {envCount} .env {envCount === 1 ? 'key' : 'keys'}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -339,7 +428,9 @@ export const AdminApiKeysTab: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span
                         className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                          !k.enabled
+                          k.undecryptable
+                            ? 'bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300'
+                            : !k.enabled
                             ? 'bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
                             : k.status === 'active'
                             ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
@@ -348,10 +439,15 @@ export const AdminApiKeysTab: React.FC = () => {
                             : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
                         }`}
                       >
-                        {!k.enabled ? 'Disabled' : k.status}
+                        {k.undecryptable ? 'Key mismatch' : !k.enabled ? 'Disabled' : k.status}
                       </span>
                     </div>
-                    {k.lastError && (
+                    {k.undecryptable && (
+                      <p className="mt-1 max-w-xs text-[10px] text-red-600 dark:text-red-400">
+                        Encrypted with a different ADMIN_ENCRYPTION_KEY. Restore original env key or delete &amp; re-add.
+                      </p>
+                    )}
+                    {k.lastError && !k.undecryptable && (
                       <p className="mt-1 max-w-xs truncate text-[10px] text-red-600 dark:text-red-400" title={k.lastError}>
                         {k.lastError}
                       </p>

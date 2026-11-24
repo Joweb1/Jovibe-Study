@@ -517,9 +517,76 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["dateKey", "userId", "appSeconds", "activeLearningSeconds", "sessionsCount", "createdAt", "updatedAt"]
+    },
+    "AdminApiKey": {
+      "title": "AdminApiKey",
+      "description": "AES-256-GCM encrypted shared provider API key record restricted strictly to the sole verified admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "provider": { "type": "string", "enum": ["gemini", "openrouter", "groq", "cloudflare", "nvidia_nim"] },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "encryptedKey": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "iv": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "authTag": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "keyMask": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "enabled": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "cooldown", "quota_exhausted", "invalid"] },
+        "cooldownUntilMs": { "type": "number" },
+        "priority": { "type": "number" },
+        "totalRequests": { "type": "number" },
+        "failedRequests": { "type": "number" },
+        "rateLimitHits": { "type": "number" },
+        "failoverCount": { "type": "number" },
+        "lastUsedAtMs": { "type": "number" },
+        "lastError": { "type": "string", "maxLength": 500 },
+        "createdAtMs": { "type": "number" },
+        "updatedAtMs": { "type": "number" }
+      },
+      "required": [
+        "id",
+        "provider",
+        "label",
+        "encryptedKey",
+        "iv",
+        "authTag",
+        "keyMask",
+        "enabled",
+        "status",
+        "cooldownUntilMs",
+        "priority",
+        "totalRequests",
+        "failedRequests",
+        "rateLimitHits",
+        "failoverCount",
+        "lastUsedAtMs",
+        "lastError",
+        "createdAtMs",
+        "updatedAtMs"
+      ]
+    },
+    "AdminSetting": {
+      "title": "AdminSetting",
+      "description": "Persistent platform settings (feature_flags, quota_config) restricted strictly to the sole verified admin.",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "enum": ["feature_flags", "quota_config"] },
+        "valueJson": { "type": "string", "minLength": 2, "maxLength": 20000 },
+        "updatedAtMs": { "type": "number" },
+        "updatedBy": { "type": "string", "maxLength": 160 }
+      },
+      "required": ["key", "valueJson", "updatedAtMs", "updatedBy"]
     }
   },
   "firestore": {
+    "/adminApiKeys/{keyId}": {
+      "schema": { "$ref": "#/entities/AdminApiKey" },
+      "description": "AES-256-GCM encrypted Admin API key vault persisted across container restarts (sole verified admin only)."
+    },
+    "/adminSettings/{settingKey}": {
+      "schema": { "$ref": "#/entities/AdminSetting" },
+      "description": "Persistent platform feature flags and quota settings (sole verified admin only)."
+    },
     "/courseShares/{shareToken}": {
       "schema": { "$ref": "#/entities/CourseShare" },
       "description": "PII-free public invite link lookup mapping a shareToken to an author's public course."

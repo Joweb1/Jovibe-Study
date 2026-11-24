@@ -6,7 +6,21 @@ export interface ProviderSourceSummary {
   adminKeyCount: number;
   activeAdminKeyCount: number;
   envFallbackConfigured: boolean;
+  envKeyCount?: number;
+  activeEnvKeyCount?: number;
+  envVarNames?: string[];
   effectiveSource: 'admin_pool' | 'env_fallback' | 'unconfigured';
+}
+
+export interface AdminVaultStatus {
+  persistentBackend: 'firestore_service_account' | 'firestore_admin_token' | 'local_sqlite_only';
+  envEncryptionKeyConfigured: boolean;
+  serviceAccountConfigured: boolean;
+  lastSyncedAtMs: number;
+  hydratedKeyCount: number;
+  undecryptableKeyCount: number;
+  lastError?: string;
+  warning?: string;
 }
 
 export interface QuotaConfig {
@@ -135,6 +149,7 @@ export interface AdminApiKeyView {
   failoverCount: number;
   lastUsedAtMs: number | null;
   lastError: string;
+  undecryptable?: boolean;
   createdAtMs: number;
   updatedAtMs: number;
 }

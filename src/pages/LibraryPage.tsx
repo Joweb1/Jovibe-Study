@@ -4,13 +4,13 @@ import {
   AlertTriangle,
   Check,
   Clock,
-  Folder,
+  Copy,
+  Globe,
   GraduationCap,
-  Pencil,
-  Plus,
+  Lock,
   Search,
+  Share2,
   SlidersHorizontal,
-  Trash2,
   Upload,
   Users,
   X,
@@ -25,7 +25,9 @@ import { useCourses } from '../context/CourseContext';
 import { useWorkspaceUi } from '../context/WorkspaceUiContext';
 import { useCourseSources } from '../hooks/useCourseSources';
 import { useRouter } from '../router/RouterContext';
+import { adminSetApplicationCourseVisibility } from '../services/firebase/adminCourseService';
 import { formatReadableError } from '../services/firebase/errors';
+import { buildCourseInviteUrl } from '../services/firebase/sharedCourseService';
 import {
   countUncertainMarkers,
   MATERIAL_TYPE_LABELS,
@@ -34,7 +36,6 @@ import { deleteLocalDraft, getLocalDraft } from '../services/local/indexedDb';
 import { formatShortDate } from '../utils/validation';
 import { CourseModal } from '../components/courses/CourseModal';
 import { RevokedCourseNotice } from '../components/courses/RevokedCourseNotice';
-import { TopicModal } from '../components/courses/TopicModal';
 import {
   ImportMaterialModal,
   type ExtractionDraftPayload,
@@ -60,12 +61,10 @@ export const LibraryPage: React.FC = () => {
     activeMemberGroupName,
     topics,
     coursesLoading,
-    topicsLoading,
     selectCourse,
     createCourse,
-    createTopic,
-    updateTopic,
-    deleteTopic,
+    setCourseVisibility,
+    updateExternalCourseState,
   } = useCourses();
   const { navigate } = useRouter();
   const { setHideHeader, setHideBottomNav, setLockViewport } = useWorkspaceUi();
@@ -87,18 +86,16 @@ export const LibraryPage: React.FC = () => {
   const isOwner = Boolean(activeCourse?.isOwner);
 
   const [courseModalOpen, setCourseModalOpen] = useState(false);
-  const [topicsListOpen, setTopicsListOpen] = useState(false);
-  const [topicModalOpen, setTopicModalOpen] = useState(false);
-  const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
-  const [topicToDelete, setTopicToDelete] = useState<Topic | null>(null);
-  const [deletingTopic, setDeletingTopic] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [togglingPublic, setTogglingPublic] = useState(false);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<ExtractionDraftPayload | null>(null);
   const [useRestoredDraft, setUseRestoredDraft] = useState(false);
   const [reviewingJobDraft, setReviewingJobDraft] = useState<ExtractionDraftPayload | null>(null);
 
-  const [selectedTopicId, setSelectedTopicId] = useState<string>('all');
   const [materialTypeFilter, setMaterialTypeFilter] = useState<MaterialType | 'all'>('all');
   const [savedTypeFilter, setSavedTypeFilter] = useState<SavedMaterialType | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -178,12 +175,14 @@ export const LibraryPage: React.FC = () => {
 
   // Reset filters & check for recoverable extraction draft when active course changes
   useEffect(() => {
-    setSelectedTopicId('all');
     setMaterialTypeFilter('all');
     setSavedTypeFilter('all');
     setSearchQuery('');
     setSearchFocused(false);
     setFilterMenuOpen(false);
+    setShareModalOpen(false);
+    setShareError(null);
+    setCopiedShareLink(false);
     setActiveSourceId(null);
     setSavedReaderOpen(false);
     setPendingDraft(null);
@@ -253,10 +252,6 @@ export const LibraryPage: React.FC = () => {
   const filteredSources = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return sources.filter((src) => {
-      if (selectedTopicId === 'unassigned' && src.topicId !== '') return false;
-      if (selectedTopicId !== 'all' && selectedTopicId !== 'unassigned' && src.topicId !== selectedTopicId) {
-        return false;
-      }
       if (materialTypeFilter !== 'all' && src.materialType !== materialTypeFilter) {
         return false;
       }
@@ -269,7 +264,7 @@ export const LibraryPage: React.FC = () => {
       }
       return true;
     });
-  }, [sources, selectedTopicId, materialTypeFilter, searchQuery]);
+  }, [sources, materialTypeFilter, searchQuery]);
 
   if (coursesLoading) {
     return <LoadingSkeleton lines={4} />;
@@ -328,30 +323,63 @@ export const LibraryPage: React.FC = () => {
     );
   }
 
-  const handleConfirmDeleteTopic = async () => {
-    if (!topicToDelete) return;
-    setDeletingTopic(true);
-    setActionError(null);
+  const canShareCourse = isOwner || Boolean(activeCourse.isAdminAccess);
+  const shareInviteUrl = activeCourse.shareToken
+    ? buildCourseInviteUrl(activeCourse.shareToken)
+    : '';
+  const supportsNativeShare =
+    typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
+  const handleToggleCoursePublic = async () => {
+    setTogglingPublic(true);
+    setShareError(null);
     try {
-      await deleteTopic(topicToDelete.id);
-      if (selectedTopicId === topicToDelete.id) {
-        setSelectedTopicId('all');
+      if (activeCourse.isAdminAccess && !isOwner) {
+        const result = await adminSetApplicationCourseVisibility(
+          activeCourse,
+          !activeCourse.isPublic
+        );
+        updateExternalCourseState((prev) =>
+          prev && prev.id === activeCourse.id
+            ? { ...prev, isPublic: result.isPublic, shareToken: result.shareToken }
+            : prev
+        );
+      } else {
+        await setCourseVisibility(activeCourse.id, !activeCourse.isPublic);
       }
-      setTopicToDelete(null);
     } catch (err) {
-      setActionError(formatReadableError(err));
+      setShareError(formatReadableError(err));
     } finally {
-      setDeletingTopic(false);
+      setTogglingPublic(false);
     }
   };
 
-  const unassignedCount = sources.filter((s) => !s.topicId).length;
-  const activeTopicLabel =
-    selectedTopicId === 'all'
-      ? 'Topics'
-      : selectedTopicId === 'unassigned'
-      ? 'Unassigned'
-      : topicMap.get(selectedTopicId)?.name || 'Topics';
+  const handleCopyShareLink = async () => {
+    if (!shareInviteUrl) return;
+    setShareError(null);
+    try {
+      await navigator.clipboard.writeText(shareInviteUrl);
+      setCopiedShareLink(true);
+      window.setTimeout(() => setCopiedShareLink(false), 2200);
+    } catch {
+      setShareError('Unable to copy automatically. Select and copy the link manually.');
+    }
+  };
+
+  const handleNativeShareCourse = async () => {
+    if (!shareInviteUrl || !supportsNativeShare) return;
+    setShareError(null);
+    try {
+      await navigator.share({
+        title: `${activeCourse.code} — ${activeCourse.name}`,
+        text: `Join ${activeCourse.code} (${activeCourse.name}) on Jovibe Study`,
+        url: shareInviteUrl,
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      void handleCopyShareLink();
+    }
+  };
 
   const currentTypeFilter = activeTab === 'sources' ? materialTypeFilter : savedTypeFilter;
   const currentTypeOptions: Array<{ value: string; label: string }> =
@@ -423,18 +451,9 @@ export const LibraryPage: React.FC = () => {
               )}
             </div>
 
-            {/* Action Row: Topics + (Owner: Add material) + Study on left; (Owner: Share) + History on right */}
+            {/* Action Row: (Owner: Add material) + Study + (Owner/Admin: Share) on left; Manage + History on right */}
             <div className="flex items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setTopicsListOpen(true)}
-                  className="px-2.5 sm:px-3"
-                >
-                  <Folder className="h-3.5 w-3.5" />
-                  <span className="max-w-[90px] sm:max-w-[120px] truncate">{activeTopicLabel}</span>
-                </Button>
                 {isOwner && (
                   <Button
                     size="sm"
@@ -458,6 +477,21 @@ export const LibraryPage: React.FC = () => {
                   <GraduationCap className="h-3.5 w-3.5" />
                   Study
                 </Button>
+                {canShareCourse && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setShareError(null);
+                      setCopiedShareLink(false);
+                      setShareModalOpen(true);
+                    }}
+                    className="px-2.5 sm:px-3"
+                  >
+                    <Share2 className="h-3.5 w-3.5" />
+                    Share
+                  </Button>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
@@ -723,13 +757,12 @@ export const LibraryPage: React.FC = () => {
             courseId={activeCourse.id}
             courseCode={activeCourse.code}
             topics={topics}
-            selectedTopicId={selectedTopicId}
+            selectedTopicId="all"
             externalSearchQuery={searchQuery}
             externalTypeFilter={savedTypeFilter}
             onClearExternalFilters={() => {
               setSearchQuery('');
               setSavedTypeFilter('all');
-              setSelectedTopicId('all');
             }}
             onReaderOpenChange={setSavedReaderOpen}
           />
@@ -879,252 +912,157 @@ export const LibraryPage: React.FC = () => {
         </AnimatePresence>
       </div>
 
-      {/* Scrollable Topics Picker Popup Modal */}
-      <Modal
-        open={topicsListOpen}
-        title="Choose a topic"
-        description={
-          isOwner
-            ? `Filter ${activeCourse.code} materials by topic or manage your topics.`
-            : `Filter ${activeCourse.code} materials by topic.`
-        }
-        onClose={() => setTopicsListOpen(false)}
-      >
-        <div className="space-y-4">
-          <div className="max-h-[55vh] overflow-y-auto scrollbar-hide space-y-1">
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedTopicId('all');
-                setTopicsListOpen(false);
-              }}
-              className={`flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm cursor-pointer transition-colors ${
-                selectedTopicId === 'all'
-                  ? 'bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950 font-medium'
-                  : 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
-              }`}
-            >
-              <span>All materials</span>
-              <span className="font-mono text-xs opacity-70 tabular-nums">{sources.length}</span>
-            </button>
-
-            {unassignedCount > 0 && topics.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedTopicId('unassigned');
-                  setTopicsListOpen(false);
-                }}
-                className={`flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm cursor-pointer transition-colors ${
-                  selectedTopicId === 'unassigned'
-                    ? 'bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950 font-medium'
-                    : 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
-                }`}
-              >
-                <span>General / Unassigned</span>
-                <span className="font-mono text-xs opacity-70 tabular-nums">{unassignedCount}</span>
-              </button>
+      {/* Share Course Modal */}
+      {canShareCourse && (
+        <Modal
+          open={shareModalOpen}
+          title={`Share ${activeCourse.code}`}
+          description={`Make "${activeCourse.name}" public to generate an invite link so others can join and study from this library.`}
+          onClose={() => {
+            setShareModalOpen(false);
+            setShareError(null);
+          }}
+        >
+          <div className="space-y-4">
+            {shareError && (
+              <ErrorBanner message={shareError} onDismiss={() => setShareError(null)} />
             )}
 
-            {topicsLoading ? (
-              <div className="pt-2">
-                <LoadingSkeleton lines={3} />
+            <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">
+                  {activeCourse.isPublic ? (
+                    <Globe className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <Lock className="h-4 w-4" />
+                  )}
+                </div>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+                    {activeCourse.isPublic ? 'Public shared course' : 'Private course'}
+                  </div>
+                  <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                    {activeCourse.isPublic
+                      ? 'Anyone with the invite link can join and study your materials. Only you can upload or edit materials.'
+                      : 'Only visible to your account. Switch to public to get a shareable invite link.'}
+                  </p>
+                </div>
               </div>
-            ) : topics.length === 0 ? (
-              <p className="px-3 py-4 text-xs text-zinc-500 dark:text-zinc-400">
-                {isOwner
-                  ? `No topics in ${activeCourse.code} yet. Create one below or add one when uploading a material or note.`
-                  : `No topics have been organized in ${activeCourse.code} yet.`}
-              </p>
-            ) : (
-              topics.map((topic) => {
-                const selected = selectedTopicId === topic.id;
-                const count = sources.filter((s) => s.topicId === topic.id).length;
-                return (
-                  <div
-                    key={topic.id}
-                    className={`flex items-center justify-between rounded-md transition-colors ${
-                      selected
-                        ? 'bg-zinc-950 text-white dark:bg-zinc-200 dark:text-zinc-950'
-                        : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedTopicId(topic.id);
-                        setTopicsListOpen(false);
-                      }}
-                      className={`min-w-0 flex-1 flex items-center justify-between gap-2 px-3 py-2.5 text-left text-sm cursor-pointer ${
-                        selected
-                          ? 'font-medium text-white dark:text-zinc-950'
-                          : 'text-zinc-800 dark:text-zinc-200'
-                      }`}
-                    >
-                      <span className="truncate">{topic.name}</span>
-                      <span
-                        className={`font-mono text-xs tabular-nums shrink-0 ${
-                          selected
-                            ? 'text-zinc-300 dark:text-zinc-700'
-                            : 'text-zinc-400 dark:text-zinc-500'
-                        }`}
+
+              <Button
+                variant={activeCourse.isPublic ? 'secondary' : 'primary'}
+                size="sm"
+                loading={togglingPublic}
+                onClick={() => void handleToggleCoursePublic()}
+                className="shrink-0"
+              >
+                {activeCourse.isPublic ? 'Make private' : 'Make public'}
+              </Button>
+            </div>
+
+            {activeCourse.isPublic && shareInviteUrl && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="library-course-share-link"
+                  className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+                >
+                  Shareable invite link
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    id="library-course-share-link"
+                    type="text"
+                    readOnly
+                    value={shareInviteUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="min-w-0 flex-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-900 dark:text-zinc-200 focus:border-zinc-950 dark:focus:border-zinc-400 focus:outline-none"
+                  />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button size="sm" onClick={() => void handleCopyShareLink()}>
+                      {copiedShareLink ? (
+                        <Check className="h-3.5 w-3.5" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                      {copiedShareLink ? 'Copied' : 'Copy link'}
+                    </Button>
+                    {supportsNativeShare && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void handleNativeShareCourse()}
                       >
-                        {count}
-                      </span>
-                    </button>
-                    {isOwner && (
-                      <div className="flex items-center pr-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTopicsListOpen(false);
-                            setEditingTopic(topic);
-                            setTopicModalOpen(true);
-                          }}
-                          aria-label={`Rename ${topic.name}`}
-                          className={`inline-flex h-7 w-7 items-center justify-center rounded cursor-pointer ${
-                            selected
-                              ? 'text-zinc-300 hover:bg-zinc-800 hover:text-white dark:text-zinc-700 dark:hover:bg-zinc-300 dark:hover:text-zinc-950'
-                              : 'text-zinc-500 hover:bg-zinc-200 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200'
-                          }`}
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTopicsListOpen(false);
-                            setTopicToDelete(topic);
-                          }}
-                          aria-label={`Delete ${topic.name}`}
-                          className={`inline-flex h-7 w-7 items-center justify-center rounded cursor-pointer ${
-                            selected
-                              ? 'text-zinc-300 hover:bg-red-950/60 hover:text-red-300 dark:text-zinc-700 dark:hover:bg-red-200 dark:hover:text-red-800'
-                              : 'text-zinc-500 hover:bg-red-50 hover:text-red-700 dark:text-zinc-400 dark:hover:bg-red-950/40 dark:hover:text-red-400'
-                          }`}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
+                        <Share2 className="h-3.5 w-3.5" />
+                        Share
+                      </Button>
                     )}
                   </div>
-                );
-              })
+                </div>
+              </div>
             )}
-          </div>
 
-          <div className="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 pt-3">
-            {isOwner ? (
+            <div className="flex items-center justify-between gap-2 border-t border-zinc-200 dark:border-zinc-800 pt-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShareModalOpen(false);
+                  navigate(`/manage-course/${activeCourse.id}`);
+                }}
+              >
+                <Users className="h-3.5 w-3.5" />
+                Manage members &amp; link
+              </Button>
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={() => {
-                  setTopicsListOpen(false);
-                  setEditingTopic(null);
-                  setTopicModalOpen(true);
+                  setShareModalOpen(false);
+                  setShareError(null);
                 }}
               >
-                <Plus className="h-3.5 w-3.5" />
-                New topic
+                Done
               </Button>
-            ) : (
-              <span />
-            )}
-            <Button variant="ghost" size="sm" onClick={() => setTopicsListOpen(false)}>
-              Close
-            </Button>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
 
-      {/* Owner-only Import & Topic Management Modals */}
+      {/* Owner-only Import Modal */}
       {isOwner && (
-        <>
-          <ImportMaterialModal
-            open={importModalOpen}
-            userId={user.uid}
-            courses={ownedCourses}
-            activeCourse={activeCourse}
-            topics={topics}
-            initialTopicId={
-              selectedTopicId !== 'all' && selectedTopicId !== 'unassigned' ? selectedTopicId : ''
+        <ImportMaterialModal
+          open={importModalOpen}
+          userId={user.uid}
+          courses={ownedCourses}
+          activeCourse={activeCourse}
+          topics={topics}
+          initialTopicId=""
+          restoredDraft={reviewingJobDraft ?? (useRestoredDraft ? pendingDraft : null)}
+          draftKey={draftKey}
+          onClose={() => {
+            setImportModalOpen(false);
+            setReviewingJobDraft(null);
+          }}
+          onBackgrounded={(targetCourseId) => {
+            setImportModalOpen(false);
+            setReviewingJobDraft(null);
+            setActiveTab('sources');
+            if (targetCourseId && targetCourseId !== activeCourse.id) {
+              void selectCourse(targetCourseId);
             }
-            restoredDraft={reviewingJobDraft ?? (useRestoredDraft ? pendingDraft : null)}
-            draftKey={draftKey}
-            onClose={() => {
-              setImportModalOpen(false);
-              setReviewingJobDraft(null);
-            }}
-            onBackgrounded={(targetCourseId) => {
-              setImportModalOpen(false);
-              setReviewingJobDraft(null);
-              setActiveTab('sources');
-              if (targetCourseId && targetCourseId !== activeCourse.id) {
-                void selectCourse(targetCourseId);
-              }
-            }}
-            onSaved={(sourceId, savedCourseId) => {
-              setImportModalOpen(false);
-              setReviewingJobDraft(null);
-              setPendingDraft(null);
-              setUseRestoredDraft(false);
-              if (savedCourseId !== activeCourse.id) {
-                void selectCourse(savedCourseId);
-              } else {
-                setActiveSourceId(sourceId);
-              }
-            }}
-          />
-
-      {/* Topic Modals */}
-      <TopicModal
-        open={topicModalOpen}
-        courseLabel={`${activeCourse.code} — ${activeCourse.name}`}
-        initialTopic={editingTopic}
-        onClose={() => {
-          setTopicModalOpen(false);
-          setEditingTopic(null);
-        }}
-        onSubmit={async (input) => {
-          if (editingTopic) {
-            await updateTopic(editingTopic.id, {
-              ...input,
-              order: editingTopic.order,
-            });
-          } else {
-            await createTopic(input);
-          }
-        }}
-      />
-
-      <Modal
-        open={Boolean(topicToDelete)}
-        title="Delete topic?"
-        description={
-          topicToDelete
-            ? `Remove "${topicToDelete.name}" from ${activeCourse.code}? Any materials assigned to this topic will remain safely in your course Library.`
-            : undefined
-        }
-        onClose={() => setTopicToDelete(null)}
-      >
-        <div className="flex items-center justify-end gap-2.5 pt-2">
-          <Button
-            variant="secondary"
-            onClick={() => setTopicToDelete(null)}
-            disabled={deletingTopic}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            onClick={() => void handleConfirmDeleteTopic()}
-            loading={deletingTopic}
-          >
-            Delete topic
-          </Button>
-        </div>
-      </Modal>
-        </>
+          }}
+          onSaved={(sourceId, savedCourseId) => {
+            setImportModalOpen(false);
+            setReviewingJobDraft(null);
+            setPendingDraft(null);
+            setUseRestoredDraft(false);
+            if (savedCourseId !== activeCourse.id) {
+              void selectCourse(savedCourseId);
+            } else {
+              setActiveSourceId(sourceId);
+            }
+          }}
+        />
       )}
     </div>
   );

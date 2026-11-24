@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type, type GenerateContentResponse } from '@google/genai';
+import { getFirstEnvKeyForProvider } from './envKeyPool.ts';
 
 export const ALLOWED_MODELS = [
   'gemini-4-hydrogen',
@@ -112,7 +113,7 @@ export function resolveApiKey(
     throw new Error('NO_API_KEY_CONFIGURED');
   }
 
-  const serverKey = (process.env.GEMINI_API_KEY || '').trim();
+  const serverKey = getFirstEnvKeyForProvider('gemini');
   if (serverKey.length > 0) {
     return { apiKey: serverKey, keySource: 'server_fallback' };
   }

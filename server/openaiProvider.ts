@@ -1,4 +1,5 @@
 import { buildVisionPrompt, VISION_JSON_SCHEMA, toJsonSchema } from './prompts';
+import { getEnvKeysForProvider, getFirstEnvKeyForProvider } from './envKeyPool.ts';
 
 export type OpenAiProviderId = 'nvidia_nim' | 'openrouter' | 'cerebras' | 'groq' | 'cloudflare';
 
@@ -172,23 +173,6 @@ export function areServerProviderKeysAllowed(): boolean {
   return env('ALLOW_SERVER_PROVIDER_KEYS').toLowerCase() !== 'false';
 }
 
-function getOpenRouterServerKey(): string {
-  return env('OPENROUTER_API_KEY') || env('OPEN_ROUTER_API_KEY');
-}
-
-function getCloudflareServerCredential(): string {
-  const token = env('CLOUDFLARE_API_TOKEN') || env('CLOUDFLARE_API_KEY');
-  if (!token) return '';
-  if (token.includes(':')) {
-    return token;
-  }
-  const accountId = env('CLOUDFLARE_ACCOUNT_ID');
-  if (accountId) {
-    return `${accountId}:${token}`;
-  }
-  return '';
-}
-
 function parseCloudflareCredential(raw: string): { accountId: string; apiToken: string } {
   const trimmed = raw.trim();
   const sepIndex = trimmed.indexOf(':');
@@ -214,14 +198,13 @@ export function getServerFallbackProvidersStatus(): Record<
   'gemini' | OpenAiProviderId,
   boolean
 > {
-  const allowProviders = areServerProviderKeysAllowed();
   return {
-    gemini: Boolean(env('GEMINI_API_KEY')),
-    openrouter: allowProviders && Boolean(getOpenRouterServerKey()),
-    cerebras: allowProviders && Boolean(env('CEREBRAS_API_KEY')),
-    groq: allowProviders && Boolean(env('GROQ_API_KEY')),
-    cloudflare: allowProviders && Boolean(getCloudflareServerCredential()),
-    nvidia_nim: allowProviders && Boolean(env('NVIDIA_API_KEY')),
+    gemini: getEnvKeysForProvider('gemini').length > 0,
+    openrouter: getEnvKeysForProvider('openrouter').length > 0,
+    cerebras: getEnvKeysForProvider('cerebras').length > 0,
+    groq: getEnvKeysForProvider('groq').length > 0,
+    cloudflare: getEnvKeysForProvider('cloudflare').length > 0,
+    nvidia_nim: getEnvKeysForProvider('nvidia_nim').length > 0,
   };
 }
 
@@ -258,22 +241,9 @@ export function resolveProviderKey(
 
   // For users who have not entered any personal API key yet, allow configured server .env fallback keys.
   if (areServerProviderKeysAllowed()) {
-    if (provider === 'cloudflare') {
-      const cfCred = getCloudflareServerCredential();
-      if (cfCred) {
-        return { apiKey: cfCred, keySource: 'server_fallback' };
-      }
-    } else if (provider === 'openrouter') {
-      const orKey = getOpenRouterServerKey();
-      if (orKey) {
-        return { apiKey: orKey, keySource: 'server_fallback' };
-      }
-    } else {
-      const definition = getProviderDefinition(provider);
-      const serverKey = env(definition.envKeyName);
-      if (serverKey) {
-        return { apiKey: serverKey, keySource: 'server_fallback' };
-      }
+    const serverKey = getFirstEnvKeyForProvider(provider);
+    if (serverKey) {
+      return { apiKey: serverKey, keySource: 'server_fallback' };
     }
   }
 

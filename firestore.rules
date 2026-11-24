@@ -1069,5 +1069,75 @@ service cloud.firestore {
         }
       }
     }
+
+    // =========================================================================
+    // Persistent Admin Vault (Strictly Sole Verified Admin Only)
+    // Stores ONLY AES-256-GCM encrypted API keys & platform settings.
+    // =========================================================================
+
+    function isValidAdminApiKey(data, keyId) {
+      return data.keys().hasOnly([
+        'id', 'provider', 'label', 'encryptedKey', 'iv', 'authTag', 'keyMask',
+        'enabled', 'status', 'cooldownUntilMs', 'priority',
+        'totalRequests', 'failedRequests', 'rateLimitHits', 'failoverCount',
+        'lastUsedAtMs', 'lastError', 'createdAtMs', 'updatedAtMs'
+      ])
+      && data.keys().hasAll([
+        'id', 'provider', 'label', 'encryptedKey', 'iv', 'authTag', 'keyMask',
+        'enabled', 'status', 'cooldownUntilMs', 'priority',
+        'totalRequests', 'failedRequests', 'rateLimitHits', 'failoverCount',
+        'lastUsedAtMs', 'lastError', 'createdAtMs', 'updatedAtMs'
+      ])
+      && data.id == keyId
+      && isValidId(data.id)
+      && data.provider in ['gemini', 'openrouter', 'groq', 'cloudflare', 'nvidia_nim']
+      && isNonEmptyString(data.label, 120)
+      && isNonEmptyString(data.encryptedKey, 4096)
+      && isNonEmptyString(data.iv, 128)
+      && isNonEmptyString(data.authTag, 128)
+      && isNonEmptyString(data.keyMask, 64)
+      && data.enabled is bool
+      && data.status in ['active', 'cooldown', 'quota_exhausted', 'invalid']
+      && data.cooldownUntilMs is int && data.cooldownUntilMs >= 0
+      && data.priority is int && data.priority >= 1 && data.priority <= 1000
+      && data.totalRequests is int && data.totalRequests >= 0
+      && data.failedRequests is int && data.failedRequests >= 0
+      && data.rateLimitHits is int && data.rateLimitHits >= 0
+      && data.failoverCount is int && data.failoverCount >= 0
+      && data.lastUsedAtMs is int && data.lastUsedAtMs >= 0
+      && isBoundedString(data.lastError, 500)
+      && data.createdAtMs is int && data.createdAtMs > 0
+      && data.updatedAtMs is int && data.updatedAtMs > 0;
+    }
+
+    function isValidAdminSetting(data, settingKey) {
+      return data.keys().hasOnly(['key', 'valueJson', 'updatedAtMs', 'updatedBy'])
+      && data.keys().hasAll(['key', 'valueJson', 'updatedAtMs', 'updatedBy'])
+      && data.key == settingKey
+      && data.key in ['feature_flags', 'quota_config']
+      && isNonEmptyString(data.valueJson, 20000)
+      && data.updatedAtMs is int && data.updatedAtMs > 0
+      && isBoundedString(data.updatedBy, 160);
+    }
+
+    match /adminApiKeys/{keyId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && isValidId(keyId) && isValidAdminApiKey(incoming(), keyId);
+      allow update: if isAdmin() && isValidId(keyId)
+        && isValidAdminApiKey(incoming(), keyId)
+        && incoming().id == existing().id
+        && incoming().provider == existing().provider
+        && incoming().createdAtMs == existing().createdAtMs;
+      allow delete: if isAdmin() && isValidId(keyId);
+    }
+
+    match /adminSettings/{settingKey} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && isValidAdminSetting(incoming(), settingKey);
+      allow update: if isAdmin()
+        && isValidAdminSetting(incoming(), settingKey)
+        && incoming().key == existing().key;
+      allow delete: if isAdmin();
+    }
   }
 }

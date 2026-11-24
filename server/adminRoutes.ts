@@ -17,6 +17,13 @@ import {
   updateAdminApiKey,
 } from './adminKeyPool.ts';
 import {
+  deleteAdminKeyFromFirestore,
+  getAdminVaultStatus,
+  hydrateAdminVaultFromFirestore,
+  persistAdminKeyToFirestore,
+  persistPlatformSettingToFirestore,
+} from './adminFirestoreVault.ts';
+import {
   getFeatureFlags,
   getLagosDateKey,
   getNextLagosMidnightIso,
@@ -509,12 +516,14 @@ export function createAdminRouter(): Router {
   // 3. FEATURE FLAGS & GLOBAL QUOTA SETTINGS
   // =========================================================================
 
-  router.get('/feature-flags', (_req, res) => {
+  router.get('/feature-flags', async (req, res) => {
+    await hydrateAdminVaultFromFirestore({ bearerToken: extractBearerToken(req) || undefined });
     res.json(getFeatureFlags());
   });
 
-  router.put('/feature-flags', (req, res) => {
+  router.put('/feature-flags', async (req, res) => {
     const updated = updateFeatureFlags(req.body ?? {}, req.authUser!.email);
+    await persistPlatformSettingToFirestore('feature_flags', extractBearerToken(req) || undefined);
     writeAdminAuditLog({
       adminUid: req.authUser!.uid,
       adminEmail: req.authUser!.email,
@@ -526,12 +535,14 @@ export function createAdminRouter(): Router {
     res.json(updated);
   });
 
-  router.get('/quota-config', (_req, res) => {
+  router.get('/quota-config', async (req, res) => {
+    await hydrateAdminVaultFromFirestore({ bearerToken: extractBearerToken(req) || undefined });
     res.json(getQuotaConfig());
   });
 
-  router.put('/quota-config', (req, res) => {
+  router.put('/quota-config', async (req, res) => {
     const updated = updateQuotaConfig(req.body ?? {}, req.authUser!.email);
+    await persistPlatformSettingToFirestore('quota_config', extractBearerToken(req) || undefined);
     writeAdminAuditLog({
       adminUid: req.authUser!.uid,
       adminEmail: req.authUser!.email,
@@ -547,15 +558,44 @@ export function createAdminRouter(): Router {
   // 4. ADMIN API KEYS & ROTATION (ALL PROVIDERS EXCEPT CEREBRAS)
   // =========================================================================
 
-  router.get('/api-keys', (_req, res) => {
+  router.get('/api-keys', async (req, res) => {
+    const forceSync = req.query.forceSync === '1' || req.query.forceSync === 'true';
+    const bearer = extractBearerToken(req) || undefined;
+    const vaultStatus = await hydrateAdminVaultFromFirestore({
+      bearerToken: bearer,
+      force: forceSync,
+    });
     res.json({
       supportedProviders: ADMIN_MANAGED_PROVIDERS,
       keys: listAdminApiKeys(),
       providerSources: getProviderKeySourceSummary(),
+      vaultStatus,
     });
   });
 
-  router.post('/api-keys', (req, res) => {
+  router.post('/api-keys/sync-vault', async (req, res) => {
+    const bearer = extractBearerToken(req) || undefined;
+    await hydrateAdminVaultFromFirestore({ bearerToken: bearer, force: true });
+    // Mirror any locally stored keys back up to Firestore so nothing is ever lost
+    const localKeys = listAdminApiKeys();
+    let pushed = 0;
+    for (const k of localKeys) {
+      const r = await persistAdminKeyToFirestore(k.id, bearer);
+      if (r.synced) pushed += 1;
+    }
+    await persistPlatformSettingToFirestore('feature_flags', bearer);
+    await persistPlatformSettingToFirestore('quota_config', bearer);
+
+    res.json({
+      ok: true,
+      pushed,
+      keys: listAdminApiKeys(),
+      providerSources: getProviderKeySourceSummary(),
+      vaultStatus: getAdminVaultStatus(),
+    });
+  });
+
+  router.post('/api-keys', async (req, res) => {
     try {
       const { provider, label, apiKey, priority } = (req.body ?? {}) as {
         provider?: string;
@@ -570,22 +610,35 @@ export function createAdminRouter(): Router {
         priority: typeof priority === 'number' ? priority : undefined,
       });
 
+      const bearer = extractBearerToken(req) || undefined;
+      const syncResult = await persistAdminKeyToFirestore(created.id, bearer);
+
       writeAdminAuditLog({
         adminUid: req.authUser!.uid,
         adminEmail: req.authUser!.email,
         action: 'admin_api_key_added',
         targetType: 'admin_api_key',
         targetId: created.id,
-        details: { provider: created.provider, label: created.label, keyMask: created.keyMask },
+        details: {
+          provider: created.provider,
+          label: created.label,
+          keyMask: created.keyMask,
+          firestoreSynced: syncResult.synced,
+        },
       });
 
-      res.status(201).json({ key: created, providerSources: getProviderKeySourceSummary() });
+      res.status(201).json({
+        key: created,
+        providerSources: getProviderKeySourceSummary(),
+        vaultSynced: syncResult.synced,
+        vaultStatus: getAdminVaultStatus(),
+      });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to add API key.' });
     }
   });
 
-  router.patch('/api-keys/:id', (req, res) => {
+  router.patch('/api-keys/:id', async (req, res) => {
     try {
       const { label, enabled, priority, resetCooldown } = (req.body ?? {}) as {
         label?: string;
@@ -600,6 +653,9 @@ export function createAdminRouter(): Router {
         resetCooldown,
       });
 
+      const bearer = extractBearerToken(req) || undefined;
+      const syncResult = await persistAdminKeyToFirestore(updated.id, bearer);
+
       writeAdminAuditLog({
         adminUid: req.authUser!.uid,
         adminEmail: req.authUser!.email,
@@ -611,35 +667,50 @@ export function createAdminRouter(): Router {
           enabled: updated.enabled,
           priority: updated.priority,
           resetCooldown: Boolean(resetCooldown),
+          firestoreSynced: syncResult.synced,
         },
       });
 
-      res.json({ key: updated, providerSources: getProviderKeySourceSummary() });
+      res.json({
+        key: updated,
+        providerSources: getProviderKeySourceSummary(),
+        vaultSynced: syncResult.synced,
+        vaultStatus: getAdminVaultStatus(),
+      });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to update API key.' });
     }
   });
 
-  router.delete('/api-keys/:id', (req, res) => {
+  router.delete('/api-keys/:id', async (req, res) => {
     const deleted = deleteAdminApiKey(req.params.id);
     if (!deleted) {
       res.status(404).json({ error: 'API key not found.' });
       return;
     }
+    const bearer = extractBearerToken(req) || undefined;
+    const syncResult = await deleteAdminKeyFromFirestore(req.params.id, bearer);
+
     writeAdminAuditLog({
       adminUid: req.authUser!.uid,
       adminEmail: req.authUser!.email,
       action: 'admin_api_key_removed',
       targetType: 'admin_api_key',
       targetId: req.params.id,
-      details: {},
+      details: { firestoreSynced: syncResult.synced },
     });
-    res.json({ ok: true, providerSources: getProviderKeySourceSummary() });
+    res.json({
+      ok: true,
+      providerSources: getProviderKeySourceSummary(),
+      vaultSynced: syncResult.synced,
+      vaultStatus: getAdminVaultStatus(),
+    });
   });
 
   router.post('/api-keys/:id/test', async (req, res) => {
     try {
       const result = await testAdminApiKeyById(req.params.id);
+      await persistAdminKeyToFirestore(req.params.id, extractBearerToken(req) || undefined);
       res.json(result);
     } catch (err) {
       res.status(404).json({ ok: false, error: err instanceof Error ? err.message : 'Test failed.' });
