@@ -11,7 +11,10 @@ import type { MaterialType } from '../types/models';
 import { useAuth } from './AuthContext';
 import { formatReadableError } from '../services/firebase/errors';
 import { createStudySource } from '../services/firebase/sourceService';
-import { ingestUploadedFile } from '../services/ingestion/ingestionPipeline';
+import {
+  ingestImageBatch,
+  ingestUploadedFile,
+} from '../services/ingestion/ingestionPipeline';
 import {
   detectMaterialTypeFromFile,
   stripFileExtension,
@@ -54,6 +57,8 @@ export interface BackgroundIngestionJob {
 
 export interface EnqueueFileExtractionParams {
   file: File;
+  /** Additional image files when combining multiple selected photos into one study material */
+  additionalFiles?: File[];
   courseId: string;
   topicId: string;
   options?: PendingIngestionOptions;
@@ -128,6 +133,7 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
   const cancelledIdsRef = useRef<Set<string>>(new Set());
   const savingIdsRef = useRef<Set<string>>(new Set());
   const fallbackBlobsRef = useRef<Map<string, Blob>>(new Map());
+  const fallbackExtraFilesRef = useRef<Map<string, File[]>>(new Map());
   const dismissTimersRef = useRef<Map<string, number>>(new Map());
   const userIdRef = useRef<string | null>(null);
 
@@ -161,6 +167,7 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
       clearDismissTimer(jobId);
       autoSaveFlagsRef.current.delete(jobId);
       fallbackBlobsRef.current.delete(jobId);
+      fallbackExtraFilesRef.current.delete(jobId);
       setJobs((prev) => prev.filter((j) => j.id !== jobId));
     },
     [clearDismissTimer]
@@ -187,6 +194,7 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
         progressPercent: 96,
         progressStage: 'Saving extracted material to Library...',
         fileBlob: null,
+        extraFiles: null,
         extractedResult: result,
         error: null,
       });
@@ -210,6 +218,7 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
         // Clean up temporary local storage immediately after successful cloud save
         await deletePendingIngestion(jobId);
         fallbackBlobsRef.current.delete(jobId);
+        fallbackExtraFilesRef.current.delete(jobId);
 
         patchJobState(jobId, {
           status: 'completed',
@@ -233,6 +242,7 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
         await updatePendingIngestion(jobId, {
           status: 'failed',
           fileBlob: null,
+          extraFiles: null,
           extractedResult: result,
           progressPercent: 96,
           progressStage: 'Save failed — ready to retry',
@@ -341,27 +351,48 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
           type: currentJob.mimeType || blob.type || 'application/octet-stream',
         });
 
-        const result = await ingestUploadedFile(localFile, {
-          overrideType: currentJob.options.overrideType,
-          visionMode: currentJob.options.visionMode,
-          startPage: currentJob.options.startPage,
-          endPage: currentJob.options.endPage,
-          enableScannedOcr: currentJob.options.enableScannedOcr,
-          signal: controller.signal,
-          onProgress: (p) => {
-            if (cancelledIdsRef.current.has(jobId)) return;
-            // Map 0..100 extraction progress into 8..92% so saving gets 92..100%
-            const scaled =
-              typeof p.percent === 'number'
-                ? Math.min(92, Math.max(8, Math.round(8 + (p.percent / 100) * 84)))
-                : latestPercent;
-            latestPercent = Math.max(latestPercent, scaled);
-            patchJobState(jobId, {
-              progressPercent: latestPercent,
-              progressStage: p.stage,
-            });
-          },
-        });
+        const storedExtras = record?.extraFiles ?? [];
+        const extraFiles: File[] =
+          storedExtras.length > 0
+            ? storedExtras.map(
+                (ef) =>
+                  new File([ef.fileBlob], ef.fileName, {
+                    type: ef.mimeType || ef.fileBlob.type || 'image/jpeg',
+                  })
+              )
+            : fallbackExtraFilesRef.current.get(jobId) ?? [];
+
+        const progressHandler = (p: { stage: string; percent?: number }) => {
+          if (cancelledIdsRef.current.has(jobId)) return;
+          // Map 0..100 extraction progress into 8..92% so saving gets 92..100%
+          const scaled =
+            typeof p.percent === 'number'
+              ? Math.min(92, Math.max(8, Math.round(8 + (p.percent / 100) * 84)))
+              : latestPercent;
+          latestPercent = Math.max(latestPercent, scaled);
+          patchJobState(jobId, {
+            progressPercent: latestPercent,
+            progressStage: p.stage,
+          });
+        };
+
+        const result =
+          extraFiles.length > 0
+            ? await ingestImageBatch([localFile, ...extraFiles], {
+                overrideType: currentJob.options.overrideType,
+                visionMode: currentJob.options.visionMode,
+                signal: controller.signal,
+                onProgress: progressHandler,
+              })
+            : await ingestUploadedFile(localFile, {
+                overrideType: currentJob.options.overrideType,
+                visionMode: currentJob.options.visionMode,
+                startPage: currentJob.options.startPage,
+                endPage: currentJob.options.endPage,
+                enableScannedOcr: currentJob.options.enableScannedOcr,
+                signal: controller.signal,
+                onProgress: progressHandler,
+              });
 
         window.clearInterval(trickleTimer);
         controllersRef.current.delete(jobId);
@@ -372,6 +403,7 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
 
         // Discard raw local binary blob right away once structured text has been extracted
         fallbackBlobsRef.current.delete(jobId);
+        fallbackExtraFilesRef.current.delete(jobId);
 
         const shouldAutoSave =
           autoSaveFlagsRef.current.get(jobId) ?? currentJob.autoSaveWhenDone;
@@ -384,6 +416,7 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
             progressPercent: 100,
             progressStage: 'Extraction complete — ready to review',
             fileBlob: null,
+            extraFiles: null,
             extractedResult: result,
             error: null,
           });
@@ -460,6 +493,7 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
       dismissTimersRef.current.clear();
       queueRef.current = [];
       fallbackBlobsRef.current.clear();
+      fallbackExtraFilesRef.current.clear();
       autoSaveFlagsRef.current.clear();
       setJobs([]);
       return;
@@ -566,7 +600,13 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
       const options = params.options ?? {};
       const materialType =
         options.overrideType ?? detectMaterialTypeFromFile(params.file);
-      const title = stripFileExtension(params.file.name) || 'Untitled Material';
+      const additionalFiles = params.additionalFiles ?? [];
+      const totalFilesCount = 1 + additionalFiles.length;
+      const baseTitle = stripFileExtension(params.file.name) || 'Untitled Material';
+      const title =
+        additionalFiles.length > 0
+          ? `${baseTitle} (+${additionalFiles.length} more)`
+          : baseTitle;
       const autoSaveWhenDone = params.autoSaveWhenDone ?? false;
 
       const record: PendingIngestionRecord = {
@@ -576,14 +616,27 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
         topicId: params.topicId,
         fileName: params.file.name,
         mimeType: params.file.type || 'application/octet-stream',
-        fileSize: params.file.size,
+        fileSize:
+          params.file.size + additionalFiles.reduce((sum, f) => sum + (f.size || 0), 0),
         title,
         materialType,
         fileBlob: params.file,
+        extraFiles:
+          additionalFiles.length > 0
+            ? additionalFiles.map((f) => ({
+                fileName: f.name,
+                mimeType: f.type || 'image/jpeg',
+                fileSize: f.size,
+                fileBlob: f,
+              }))
+            : null,
         options,
         status: 'queued',
         progressPercent: 5,
-        progressStage: 'Stored locally — queued for background extraction...',
+        progressStage:
+          totalFilesCount > 1
+            ? `Stored ${totalFilesCount} images locally — queued for extraction...`
+            : 'Stored locally — queued for background extraction...',
         autoSaveWhenDone,
         extractedResult: null,
         savedSourceId: null,
@@ -594,10 +647,14 @@ export const BackgroundIngestionProvider: React.FC<{ children: React.ReactNode }
 
       // Always keep fallback blob in memory until IndexedDB confirms persistence
       fallbackBlobsRef.current.set(jobId, params.file);
+      if (additionalFiles.length > 0) {
+        fallbackExtraFilesRef.current.set(jobId, additionalFiles);
+      }
       try {
         await savePendingIngestion(record);
         // Persisted safely in IndexedDB; release duplicate in-memory reference
         fallbackBlobsRef.current.delete(jobId);
+        fallbackExtraFilesRef.current.delete(jobId);
       } catch (err) {
         console.warn('Could not persist temporary file in IndexedDB; continuing in memory:', err);
       }

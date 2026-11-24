@@ -19,6 +19,12 @@ export function countUncertainMarkers(text: string): number {
   return matches ? matches.length : 0;
 }
 
+export function isSupportedImageFile(file: { name?: string; type?: string }): boolean {
+  const type = (file.type || '').toLowerCase();
+  if (type.startsWith('image/')) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|avif|heic|heif)$/i.test(file.name || '');
+}
+
 export function detectMaterialTypeFromFile(file: File): MaterialType {
   const name = file.name.toLowerCase();
   const mime = file.type.toLowerCase();
@@ -30,7 +36,7 @@ export function detectMaterialTypeFromFile(file: File): MaterialType {
   ) {
     return 'slides';
   }
-  if (mime.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(name)) {
+  if (isSupportedImageFile({ name, type: mime })) {
     return 'textbook_photo';
   }
   if (name.endsWith('.md') || name.endsWith('.txt') || mime.startsWith('text/')) {
@@ -41,6 +47,31 @@ export function detectMaterialTypeFromFile(file: File): MaterialType {
 
 export function stripFileExtension(fileName: string): string {
   return fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+}
+
+export function buildBatchImageMetadata(fileNames: string[]): {
+  title: string;
+  originalFileName: string;
+  pageOrSlideCount: number;
+} {
+  if (fileNames.length === 0) {
+    return {
+      title: 'Study Notes',
+      originalFileName: '',
+      pageOrSlideCount: 0,
+    };
+  }
+  const firstBaseTitle = stripFileExtension(fileNames[0]) || 'Study Notes';
+  const title =
+    fileNames.length === 1
+      ? firstBaseTitle.slice(0, SCHEMA_LIMITS.SOURCE_TITLE_MAX)
+      : `${firstBaseTitle} (+${fileNames.length - 1} more)`.slice(0, SCHEMA_LIMITS.SOURCE_TITLE_MAX);
+  const originalFileName = fileNames.join(', ').slice(0, 260);
+  return {
+    title,
+    originalFileName,
+    pageOrSlideCount: fileNames.length,
+  };
 }
 
 /**

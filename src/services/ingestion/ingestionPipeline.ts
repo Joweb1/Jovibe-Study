@@ -2,13 +2,17 @@ import type { MaterialType, ProcessingStatus, StudySection } from '../../types/m
 import { extractPdfDocument } from './pdfExtractor';
 import { extractPptxPresentation } from './pptxExtractor';
 import {
+  buildBatchImageMetadata,
   clampSectionsForFirestore,
   countUncertainMarkers,
   detectMaterialTypeFromFile,
+  isSupportedImageFile,
   parseStructuredText,
   sectionsToMarkdown,
   stripFileExtension,
 } from './structureParser';
+
+export { isSupportedImageFile };
 import {
   compressImageFileToBase64,
   extractImageWithVision,
@@ -226,6 +230,183 @@ export async function ingestUploadedFile(
     uncertainCount: 0,
     usedVision: false,
     warnings: [],
+  };
+}
+
+async function runVisionOcrForImageFile(
+  file: File,
+  options: {
+    mode: VisionExtractionMode;
+    pageNumber?: number;
+    signal?: AbortSignal;
+    onProgress?: (progress: IngestionProgress) => void;
+    labelPrefix?: string;
+    progressBase?: number;
+    progressSpan?: number;
+  }
+): Promise<{ sections: StudySection[]; uncertainCount: number; notes: string }> {
+  const base = options.progressBase ?? 0;
+  const span = options.progressSpan ?? 100;
+  const prefix = options.labelPrefix ? `${options.labelPrefix} ` : '';
+
+  if (options.signal?.aborted) {
+    throw new DOMException('Extraction cancelled', 'AbortError');
+  }
+
+  options.onProgress?.({
+    stage: `${prefix}Preparing image for OCR...`,
+    percent: Math.round(base + span * 0.25),
+  });
+  const { base64, mimeType } = await compressImageFileToBase64(file);
+
+  if (options.signal?.aborted) {
+    throw new DOMException('Extraction cancelled', 'AbortError');
+  }
+
+  options.onProgress?.({
+    stage:
+      options.mode === 'handwriting'
+        ? `${prefix}Interpreting handwritten notes with AI Vision...`
+        : `${prefix}Extracting structured text from image with AI Vision...`,
+    percent: Math.round(base + span * 0.6),
+  });
+
+  let visionRes = await extractImageWithVision({
+    imageBase64: base64,
+    mimeType,
+    mode: options.mode,
+    pageNumber: options.pageNumber,
+    signal: options.signal,
+  });
+
+  if (isEffectivelyEmptyVisionResult(visionRes.sections)) {
+    options.onProgress?.({
+      stage: `${prefix}No text detected on first pass — re-analyzing full image...`,
+      percent: Math.round(base + span * 0.8),
+    });
+    const fallbackRes = await extractImageWithVision({
+      imageBase64: base64,
+      mimeType,
+      mode: 'page_image_fallback',
+      pageNumber: options.pageNumber,
+      signal: options.signal,
+    });
+    if (!isEffectivelyEmptyVisionResult(fallbackRes.sections)) {
+      visionRes = fallbackRes;
+    } else {
+      visionRes = {
+        sections: [],
+        uncertainCount: 0,
+        notes: fallbackRes.notes || visionRes.notes,
+      };
+    }
+  }
+
+  return visionRes;
+}
+
+export async function ingestImageBatch(
+  files: File[],
+  options: {
+    overrideType?: MaterialType;
+    visionMode?: VisionExtractionMode;
+    onProgress?: (progress: IngestionProgress) => void;
+    signal?: AbortSignal;
+  } = {}
+): Promise<ExtractionResult> {
+  if (files.length === 0) {
+    throw new Error('Select at least one image before extracting.');
+  }
+  if (files.length === 1) {
+    return ingestUploadedFile(files[0], options);
+  }
+
+  const detectedType = options.overrideType ?? detectMaterialTypeFromFile(files[0]);
+  const mode: VisionExtractionMode =
+    options.visionMode ??
+    (detectedType === 'handwritten_notes'
+      ? 'handwriting'
+      : detectedType === 'scanned_doc'
+      ? 'scanned_doc'
+      : 'textbook_photo');
+
+  const resolvedMaterialType: MaterialType =
+    mode === 'handwriting'
+      ? 'handwritten_notes'
+      : mode === 'scanned_doc'
+      ? 'scanned_doc'
+      : 'textbook_photo';
+
+  const allSections: StudySection[] = [];
+  const warnings: string[] = [];
+  let maxUncertainFromModel = 0;
+  let succeededCount = 0;
+
+  for (let i = 0; i < files.length; i += 1) {
+    if (options.signal?.aborted) {
+      throw new DOMException('Extraction cancelled', 'AbortError');
+    }
+
+    const file = files[i];
+    const pageNum = i + 1;
+    const progressBase = (i / files.length) * 100;
+    const progressSpan = 100 / files.length;
+
+    try {
+      const visionRes = await runVisionOcrForImageFile(file, {
+        mode,
+        pageNumber: pageNum,
+        signal: options.signal,
+        onProgress: options.onProgress,
+        labelPrefix: `Image ${pageNum} of ${files.length}:`,
+        progressBase,
+        progressSpan,
+      });
+
+      if (visionRes.sections.length > 0) {
+        succeededCount += 1;
+        allSections.push(...visionRes.sections);
+        maxUncertainFromModel += visionRes.uncertainCount;
+        if (visionRes.notes) {
+          warnings.push(`Image ${pageNum} (${file.name}): ${visionRes.notes}`);
+        }
+      } else {
+        warnings.push(`Image ${pageNum} (${file.name}): No readable text was detected.`);
+      }
+    } catch (err) {
+      if (options.signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        throw err;
+      }
+      const msg = err instanceof Error ? err.message : 'Vision OCR failed.';
+      warnings.push(`Image ${pageNum} (${file.name}): ${msg}`);
+    }
+  }
+
+  const sections = clampSectionsForFirestore(allSections);
+  const extractedContent = sectionsToMarkdown(sections);
+  const uncertainCount = Math.max(maxUncertainFromModel, countUncertainMarkers(extractedContent));
+
+  if (succeededCount === 0 || !extractedContent.trim()) {
+    throw new Error(
+      'No readable text could be extracted from the selected images. Try clearer, well-lit photos.'
+    );
+  }
+
+  const { title: combinedTitle, originalFileName: combinedFileName } = buildBatchImageMetadata(
+    files.map((f) => f.name)
+  );
+
+  return {
+    title: combinedTitle,
+    materialType: resolvedMaterialType,
+    extractedContent,
+    sections,
+    pageOrSlideCount: files.length,
+    processingStatus: uncertainCount > 0 ? 'needs_review' : 'ready',
+    originalFileName: combinedFileName,
+    uncertainCount,
+    usedVision: true,
+    warnings,
   };
 }
 

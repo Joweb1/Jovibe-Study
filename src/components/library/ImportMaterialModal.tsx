@@ -1,12 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
   Camera,
+  ChevronLeft,
+  ChevronRight,
   EyeOff,
   FileText,
   HardDrive,
   Image as ImageIcon,
+  Layers,
+  Plus,
   Trash2,
   Type as TypeIcon,
   Upload,
@@ -18,12 +22,13 @@ import type {
   StudySection,
   Topic,
 } from '../../types/models';
-import { SCHEMA_LIMITS } from '../../utils/validation';
+import { generateDocumentId, SCHEMA_LIMITS } from '../../utils/validation';
 import { useBackgroundIngestion } from '../../context/BackgroundIngestionContext';
 import { formatReadableError } from '../../services/firebase/errors';
 import { createStudySource } from '../../services/firebase/sourceService';
 import {
   ingestTextInput,
+  isSupportedImageFile,
   type ExtractionResult,
 } from '../../services/ingestion/ingestionPipeline';
 import { inspectPdfPageCount } from '../../services/ingestion/pdfExtractor';
@@ -41,6 +46,15 @@ import { ErrorBanner } from '../ui/StateViews';
 
 type InputTab = 'document' | 'photo' | 'text';
 type WizardStep = 'input' | 'extracting' | 'preview';
+type PhotoBatchMode = 'combine' | 'separate';
+
+interface SelectedPhotoItem {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
+
+const MAX_PHOTO_BATCH_COUNT = 25;
 
 export interface ExtractionDraftPayload {
   title: string;
@@ -101,36 +115,96 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
   const [enableScannedOcr, setEnableScannedOcr] = useState<boolean>(true);
   const [inspectingPdf, setInspectingPdf] = useState<boolean>(false);
 
-  // Photo / Handwriting controls
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  // Photo / Handwriting controls (supports single or multi-image batch)
+  const [photoItems, setPhotoItems] = useState<SelectedPhotoItem[]>([]);
+  const [photoBatchMode, setPhotoBatchMode] = useState<PhotoBatchMode>('combine');
   const [photoDragOver, setPhotoDragOver] = useState<boolean>(false);
   const [photoMode, setPhotoMode] = useState<VisionExtractionMode>('textbook_photo');
+  const photoItemsRef = useRef<SelectedPhotoItem[]>([]);
 
   useEffect(() => {
-    if (!photoFile) {
-      setPhotoPreviewUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(photoFile);
-    setPhotoPreviewUrl(url);
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [photoFile]);
+    photoItemsRef.current = photoItems;
+  }, [photoItems]);
 
-  const handleSelectPhotoFile = (file: File | null) => {
+  useEffect(() => {
+    return () => {
+      photoItemsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    };
+  }, []);
+
+  const clearPhotoItems = useCallback(() => {
+    setPhotoItems((prev) => {
+      prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      return [];
+    });
+  }, []);
+
+  const handleRemovePhotoItem = useCallback((id: string) => {
+    setPhotoItems((prev) => {
+      const removed = prev.find((item) => item.id === id);
+      if (removed) {
+        URL.revokeObjectURL(removed.previewUrl);
+      }
+      return prev.filter((item) => item.id !== id);
+    });
+  }, []);
+
+  const handleMovePhotoItem = useCallback((index: number, delta: -1 | 1) => {
+    setPhotoItems((prev) => {
+      const targetIndex = index + delta;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  }, []);
+
+  const handleAddPhotoFiles = useCallback((incoming: FileList | File[] | null) => {
     setError(null);
-    if (!file) {
-      setPhotoFile(null);
+    if (!incoming || incoming.length === 0) return;
+
+    const files = Array.from(incoming);
+    const validFiles = files.filter((file) => isSupportedImageFile(file));
+    const skippedCount = files.length - validFiles.length;
+
+    if (validFiles.length === 0) {
+      setError('Please select image files (PNG, JPEG, WebP, HEIC, or photos from your gallery).');
       return;
     }
-    if (file.type && !file.type.startsWith('image/')) {
-      setError('Please select an image file (PNG, JPEG, WebP, or photo from your gallery).');
-      return;
-    }
-    setPhotoFile(file);
-  };
+
+    setPhotoItems((prev) => {
+      const remainingSlots = Math.max(0, MAX_PHOTO_BATCH_COUNT - prev.length);
+      if (remainingSlots === 0) {
+        setError(`You can upload up to ${MAX_PHOTO_BATCH_COUNT} images per batch.`);
+        return prev;
+      }
+
+      const filesToAdd = validFiles.slice(0, remainingSlots);
+      const overflowCount = validFiles.length - filesToAdd.length;
+
+      if (skippedCount > 0 && overflowCount > 0) {
+        setError(
+          `Skipped ${skippedCount} non-image file(s) and capped batch at ${MAX_PHOTO_BATCH_COUNT} images.`
+        );
+      } else if (skippedCount > 0) {
+        setError(
+          `Skipped ${skippedCount} unsupported file(s). Only image files (PNG, JPEG, WebP, gallery photos) were added.`
+        );
+      } else if (overflowCount > 0) {
+        setError(
+          `Added the first ${filesToAdd.length} images. Maximum ${MAX_PHOTO_BATCH_COUNT} images per batch.`
+        );
+      }
+
+      const additions: SelectedPhotoItem[] = filesToAdd.map((file) => ({
+        id: generateDocumentId('photo'),
+        file,
+        previewUrl: URL.createObjectURL(file),
+      }));
+      return [...prev, ...additions];
+    });
+  }, []);
 
   // Typed / Pasted text controls
   const [rawTitle, setRawTitle] = useState('');
@@ -190,7 +264,8 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
     setPdfStartPage(1);
     setPdfEndPage(1);
     setEnableScannedOcr(true);
-    setPhotoFile(null);
+    clearPhotoItems();
+    setPhotoBatchMode('combine');
     setPhotoMode('textbook_photo');
     setRawTitle('');
     setRawText('');
@@ -199,7 +274,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
     setSections([]);
     setFullText('');
     setWarnings([]);
-  }, [open, activeCourse.id, initialTopicId, restoredDraft]);
+  }, [open, activeCourse.id, initialTopicId, restoredDraft, clearPhotoItems]);
 
   // Persist preview edits as a local IndexedDB draft so interrupted reviews are recoverable
   useEffect(() => {
@@ -257,13 +332,13 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
       setActiveJobId(null);
     }
     setSelectedFile(null);
-    setPhotoFile(null);
+    clearPhotoItems();
     if (onBackgrounded) {
       onBackgrounded(targetCourseId);
     } else {
       onClose();
     }
-  }, [activeJobId, setJobAutoSave, onBackgrounded, targetCourseId, onClose]);
+  }, [activeJobId, setJobAutoSave, clearPhotoItems, onBackgrounded, targetCourseId, onClose]);
 
   // Observe the active background job while the modal remains open on the extracting step
   useEffect(() => {
@@ -347,13 +422,56 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
       return;
     }
 
-    const fileToProcess = tab === 'document' ? selectedFile : photoFile;
-    if (!fileToProcess) {
-      setError(
-        tab === 'document'
-          ? 'Choose a PDF, PowerPoint (.pptx), Markdown, or text file first.'
-          : 'Choose or capture a photograph first.'
-      );
+    if (tab === 'document') {
+      if (!selectedFile) {
+        setError('Choose a PDF, PowerPoint (.pptx), Markdown, or text file first.');
+        return;
+      }
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setError(
+          "You're offline. Turn on your internet connection to extract text from PDFs, slides, or photos with AI. You can still paste or type plain text notes offline."
+        );
+        return;
+      }
+
+      setQueueingBackground(true);
+      try {
+        const jobId = await enqueueFileExtraction({
+          file: selectedFile,
+          courseId: targetCourseId,
+          topicId: targetTopicId,
+          autoSaveWhenDone: runInBackgroundImmediately,
+          options: {
+            startPage: pdfTotalPages ? pdfStartPage : undefined,
+            endPage: pdfTotalPages ? pdfEndPage : undefined,
+            enableScannedOcr,
+          },
+        });
+
+        if (runInBackgroundImmediately) {
+          setSelectedFile(null);
+          if (onBackgrounded) {
+            onBackgrounded(targetCourseId);
+          } else {
+            onClose();
+          }
+        } else {
+          setActiveJobId(jobId);
+          setStep('extracting');
+        }
+      } catch (err) {
+        setError(formatReadableError(err));
+        setStep('input');
+      } finally {
+        setQueueingBackground(false);
+      }
+      return;
+    }
+
+    // Photo / Handwriting tab (single or batch)
+    if (photoItems.length === 0) {
+      setError('Choose or capture at least one image first.');
       return;
     }
 
@@ -364,32 +482,49 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
       return;
     }
 
+    const visionOptions = {
+      visionMode: photoMode,
+      overrideType:
+        photoMode === 'handwriting'
+          ? ('handwritten_notes' as const)
+          : photoMode === 'scanned_doc'
+          ? ('scanned_doc' as const)
+          : ('textbook_photo' as const),
+    };
+
     setQueueingBackground(true);
     try {
+      if (photoItems.length > 1 && photoBatchMode === 'separate') {
+        for (const item of photoItems) {
+          await enqueueFileExtraction({
+            file: item.file,
+            courseId: targetCourseId,
+            topicId: targetTopicId,
+            autoSaveWhenDone: true,
+            options: visionOptions,
+          });
+        }
+        clearPhotoItems();
+        if (onBackgrounded) {
+          onBackgrounded(targetCourseId);
+        } else {
+          onClose();
+        }
+        return;
+      }
+
+      const [primaryItem, ...restItems] = photoItems;
       const jobId = await enqueueFileExtraction({
-        file: fileToProcess,
+        file: primaryItem.file,
+        additionalFiles: restItems.map((item) => item.file),
         courseId: targetCourseId,
         topicId: targetTopicId,
         autoSaveWhenDone: runInBackgroundImmediately,
-        options: {
-          visionMode: tab === 'photo' ? photoMode : undefined,
-          overrideType:
-            tab === 'photo'
-              ? photoMode === 'handwriting'
-                ? 'handwritten_notes'
-                : photoMode === 'scanned_doc'
-                ? 'scanned_doc'
-                : 'textbook_photo'
-              : undefined,
-          startPage: pdfTotalPages ? pdfStartPage : undefined,
-          endPage: pdfTotalPages ? pdfEndPage : undefined,
-          enableScannedOcr,
-        },
+        options: visionOptions,
       });
 
       if (runInBackgroundImmediately) {
-        setSelectedFile(null);
-        setPhotoFile(null);
+        clearPhotoItems();
         if (onBackgrounded) {
           onBackgrounded(targetCourseId);
         } else {
@@ -476,7 +611,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
       await deleteLocalDraft(draftKey);
       // Discard file references from memory immediately after save
       setSelectedFile(null);
-      setPhotoFile(null);
+      clearPhotoItems();
       onSaved(created.id, targetCourseId);
     } catch (err) {
       setError(formatReadableError(err));
@@ -773,90 +908,205 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                     onDrop={(e) => {
                       e.preventDefault();
                       setPhotoDragOver(false);
-                      const dropped = e.dataTransfer.files?.[0] ?? null;
-                      if (dropped) {
-                        handleSelectPhotoFile(dropped);
-                      }
+                      handleAddPhotoFiles(e.dataTransfer.files);
                     }}
-                    className={`rounded-md border border-dashed px-6 py-8 text-center transition-colors ${
+                    className={`rounded-md border border-dashed px-4 sm:px-6 py-6 sm:py-8 text-center transition-colors ${
                       photoDragOver
                         ? 'border-zinc-950 bg-zinc-100/80 dark:border-zinc-200 dark:bg-zinc-900'
                         : 'border-zinc-300 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-950/60'
                     }`}
                   >
-                    {photoFile && photoPreviewUrl ? (
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="relative overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
-                          <img
-                            src={photoPreviewUrl}
-                            alt="Selected study material preview"
-                            className="max-h-48 max-w-full object-contain"
-                          />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm font-medium text-zinc-950 dark:text-zinc-200 break-all">
-                            {photoFile.name}
-                          </p>
-                          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                            {(photoFile.size / (1024 * 1024)).toFixed(2)} MB
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                          <label className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
-                            <ImageIcon className="h-3.5 w-3.5" />
-                            Choose another image
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => {
-                                handleSelectPhotoFile(e.target.files?.[0] ?? null);
-                                e.target.value = '';
-                              }}
-                              className="sr-only"
-                            />
-                          </label>
-                          <label className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
-                            <Camera className="h-3.5 w-3.5" />
-                            Retake photo
-                            <input
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              onChange={(e) => {
-                                handleSelectPhotoFile(e.target.files?.[0] ?? null);
-                                e.target.value = '';
-                              }}
-                              className="sr-only"
-                            />
-                          </label>
+                    {photoItems.length > 0 ? (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-left">
+                          <div className="min-w-0 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                            <span className="font-mono tabular-nums text-zinc-950 dark:text-zinc-100">
+                              {photoItems.length}
+                            </span>{' '}
+                            {photoItems.length === 1 ? 'image selected' : 'images selected'}
+                            <span className="text-zinc-400 dark:text-zinc-500"> · </span>
+                            <span className="font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+                              {(
+                                photoItems.reduce((sum, item) => sum + item.file.size, 0) /
+                                (1024 * 1024)
+                              ).toFixed(2)}{' '}
+                              MB
+                            </span>
+                          </div>
                           <button
                             type="button"
-                            onClick={() => handleSelectPhotoFile(null)}
-                            className="inline-flex items-center gap-1 rounded-md border border-zinc-200 dark:border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 cursor-pointer"
+                            onClick={clearPhotoItems}
+                            className="inline-flex items-center gap-1 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-600 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 cursor-pointer"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
-                            Remove
+                            Clear all
                           </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 gap-3 text-left">
+                          {photoItems.map((item, idx) => (
+                            <div
+                              key={item.id}
+                              className="flex min-w-0 flex-col overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
+                            >
+                              <div className="relative aspect-[4/3] w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950">
+                                <img
+                                  src={item.previewUrl}
+                                  alt={`Selected page ${idx + 1}: ${item.file.name}`}
+                                  className="h-full w-full object-contain"
+                                />
+                                <span className="absolute top-1.5 left-1.5 rounded bg-zinc-950/80 dark:bg-zinc-100/90 px-1.5 py-0.5 font-mono text-[11px] font-medium text-white dark:text-zinc-950 tabular-nums">
+                                  Page {idx + 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePhotoItem(item.id)}
+                                  aria-label={`Remove ${item.file.name}`}
+                                  title="Remove image"
+                                  className="absolute top-1.5 right-1.5 inline-flex h-7 w-7 items-center justify-center rounded bg-zinc-950/75 text-white hover:bg-red-600 cursor-pointer"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+
+                              <div className="flex flex-1 flex-col justify-between gap-2 p-2.5">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium text-zinc-950 dark:text-zinc-200 break-words line-clamp-2">
+                                    {item.file.name}
+                                  </p>
+                                  <p className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
+                                    {(item.file.size / (1024 * 1024)).toFixed(2)} MB
+                                  </p>
+                                </div>
+
+                                {photoItems.length > 1 && (
+                                  <div className="flex items-center justify-between gap-1 border-t border-zinc-100 dark:border-zinc-800 pt-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMovePhotoItem(idx, -1)}
+                                      disabled={idx === 0}
+                                      aria-label={`Move ${item.file.name} earlier`}
+                                      title="Move earlier"
+                                      className="inline-flex items-center gap-0.5 rounded px-1.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-35 disabled:pointer-events-none dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
+                                    >
+                                      <ChevronLeft className="h-3.5 w-3.5" />
+                                      <span>Prev</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMovePhotoItem(idx, 1)}
+                                      disabled={idx === photoItems.length - 1}
+                                      aria-label={`Move ${item.file.name} later`}
+                                      title="Move later"
+                                      className="inline-flex items-center gap-0.5 rounded px-1.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-35 disabled:pointer-events-none dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
+                                    >
+                                      <span>Next</span>
+                                      <ChevronRight className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {photoItems.length > 1 && (
+                          <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 text-left">
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 mb-2">
+                              <Layers className="h-3.5 w-3.5 shrink-0" />
+                              <span>Batch output</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setPhotoBatchMode('combine')}
+                                className={`rounded-md border p-2.5 text-left cursor-pointer ${
+                                  photoBatchMode === 'combine'
+                                    ? 'border-zinc-950 bg-zinc-50 dark:border-zinc-300 dark:bg-zinc-800/80'
+                                    : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600'
+                                }`}
+                              >
+                                <div className="text-xs font-medium text-zinc-950 dark:text-zinc-200">
+                                  Combine into 1 material
+                                </div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  Merges pages 1–{photoItems.length} in order into a single multi-page study note.
+                                </div>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPhotoBatchMode('separate')}
+                                className={`rounded-md border p-2.5 text-left cursor-pointer ${
+                                  photoBatchMode === 'separate'
+                                    ? 'border-zinc-950 bg-zinc-50 dark:border-zinc-300 dark:bg-zinc-800/80'
+                                    : 'border-zinc-200 hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600'
+                                }`}
+                              >
+                                <div className="text-xs font-medium text-zinc-950 dark:text-zinc-200">
+                                  Separate material per image
+                                </div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  Extracts and saves each image as its own material in your Library.
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                          {photoItems.length < MAX_PHOTO_BATCH_COUNT && (
+                            <>
+                              <label className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+                                <Plus className="h-3.5 w-3.5" />
+                                Add more images
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  multiple
+                                  onChange={(e) => {
+                                    handleAddPhotoFiles(e.target.files);
+                                    e.target.value = '';
+                                  }}
+                                  className="sr-only"
+                                />
+                              </label>
+                              <label className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+                                <Camera className="h-3.5 w-3.5" />
+                                Snap another photo
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  onChange={(e) => {
+                                    handleAddPhotoFiles(e.target.files);
+                                    e.target.value = '';
+                                  }}
+                                  className="sr-only"
+                                />
+                              </label>
+                            </>
+                          )}
                         </div>
                       </div>
                     ) : (
                       <div className="flex flex-col items-center">
                         <ImageIcon className="h-6 w-6 text-zinc-600 dark:text-zinc-400" />
                         <p className="mt-3 text-sm font-medium text-zinc-950 dark:text-zinc-200">
-                          Upload an image or snap a photo
+                          Upload images or snap photos
                         </p>
                         <p className="mt-1 max-w-md text-xs text-zinc-500 dark:text-zinc-400">
-                          Choose a saved photo, screenshot, or image from your device, drag and drop it here, or take a photo with your camera. Supports PNG, JPEG, WebP, and gallery photos.
+                          Select one or multiple saved photos, screenshots, or textbook pages at once, drag and drop a batch here, or snap photos with your camera. Supports PNG, JPEG, WebP, and gallery photos.
                         </p>
                         <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
                           <label className="inline-flex items-center gap-2 rounded-md bg-zinc-950 dark:bg-zinc-100 px-4 py-2 text-xs font-medium text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-zinc-200 cursor-pointer">
                             <Upload className="h-3.5 w-3.5" />
-                            Upload image / photo
+                            Upload images / photos
                             <input
                               type="file"
                               accept="image/*"
+                              multiple
                               onChange={(e) => {
-                                handleSelectPhotoFile(e.target.files?.[0] ?? null);
+                                handleAddPhotoFiles(e.target.files);
                                 e.target.value = '';
                               }}
                               className="sr-only"
@@ -870,7 +1120,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                               accept="image/*"
                               capture="environment"
                               onChange={(e) => {
-                                handleSelectPhotoFile(e.target.files?.[0] ?? null);
+                                handleAddPhotoFiles(e.target.files);
                                 e.target.value = '';
                               }}
                               className="sr-only"
@@ -1182,23 +1432,36 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                 Cancel
               </Button>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {tab !== 'text' && (
+                {tab === 'photo' && photoItems.length > 1 && photoBatchMode === 'separate' ? (
                   <Button
-                    variant="secondary"
                     onClick={() => void handleStartExtraction(true)}
-                    disabled={inspectingPdf || queueingBackground}
+                    disabled={queueingBackground}
                     loading={queueingBackground}
                   >
                     <EyeOff className="h-3.5 w-3.5" />
-                    Extract in background
+                    Extract &amp; save all ({photoItems.length})
                   </Button>
+                ) : (
+                  <>
+                    {tab !== 'text' && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => void handleStartExtraction(true)}
+                        disabled={inspectingPdf || queueingBackground}
+                        loading={queueingBackground}
+                      >
+                        <EyeOff className="h-3.5 w-3.5" />
+                        Extract in background
+                      </Button>
+                    )}
+                    <Button
+                      onClick={() => void handleStartExtraction(false)}
+                      disabled={inspectingPdf || queueingBackground}
+                    >
+                      {tab === 'text' ? 'Structure & preview' : 'Extract & preview'}
+                    </Button>
+                  </>
                 )}
-                <Button
-                  onClick={() => void handleStartExtraction(false)}
-                  disabled={inspectingPdf || queueingBackground}
-                >
-                  {tab === 'text' ? 'Structure & preview' : 'Extract & preview'}
-                </Button>
               </div>
             </>
           )}

@@ -137,8 +137,10 @@ export function writePersistedOnboardingState(
   }
 }
 
+export const SETUP_REMINDER_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Resolves the authoritative onboarding state for a user entering or reloading SOTAL.
+ * Resolves the authoritative onboarding state for a user entering or reloading Jovibe Study.
  * Pure & deterministic so it can be unit-tested thoroughly.
  */
 export function resolveInitialOnboardingState(params: {
@@ -176,16 +178,23 @@ export function resolveInitialOnboardingState(params: {
     return params.persisted;
   }
 
-  // 3. If user skipped earlier during a prior session, only mark completed if they now have a usable Gemini key.
-  // Otherwise, on refresh/reload/sign-in with empty Gemini keys, fall through so the tutorial starts again.
-  if (params.persisted?.status === 'skipped' && hasAnyNonInvalid) {
-    return {
-      ...params.persisted,
-      status: 'completed',
-      step: 'completed',
-      completedAtMs: nowMs,
-      updatedAtMs: nowMs,
-    };
+  // 3. If user skipped earlier:
+  // - If they now have a usable Gemini key, mark completed.
+  // - Otherwise, respect the occasional cooldown (24h) so refreshing the page does NOT nag them every time.
+  if (params.persisted?.status === 'skipped') {
+    if (hasAnyNonInvalid) {
+      return {
+        ...params.persisted,
+        status: 'completed',
+        step: 'completed',
+        completedAtMs: nowMs,
+        updatedAtMs: nowMs,
+      };
+    }
+    const lastSkippedAt = params.persisted.skippedAtMs ?? params.persisted.updatedAtMs;
+    if (typeof lastSkippedAt === 'number' && nowMs - lastSkippedAt < SETUP_REMINDER_COOLDOWN_MS) {
+      return params.persisted;
+    }
   }
 
   // 4. First time on this device (no persisted state or idle) with an existing usable Gemini key:
@@ -203,7 +212,7 @@ export function resolveInitialOnboardingState(params: {
     };
   }
 
-  // Gemini keys are empty (or only invalid) on load/refresh/sign-in -> always start tutorial at Welcome
+  // Gemini keys are empty (or cooldown elapsed after skipping) -> show concise reminder
   return {
     version: 1,
     status: 'in_progress',

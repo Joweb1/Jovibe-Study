@@ -76,6 +76,13 @@ export interface PendingIngestionRecord {
   materialType: MaterialType;
   /** Raw uploaded File/Blob temporarily persisted locally until background extraction completes or is cancelled */
   fileBlob: Blob | null;
+  /** Optional additional image blobs for multi-image combined batch extraction */
+  extraFiles?: Array<{
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+    fileBlob: Blob;
+  }> | null;
   options: PendingIngestionOptions;
   status: BackgroundIngestionStatus;
   progressPercent: number;
