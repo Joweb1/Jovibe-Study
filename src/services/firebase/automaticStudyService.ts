@@ -24,6 +24,7 @@ import type {
 import {
   generateDocumentId,
   sanitizeBoundedString,
+  stripUndefinedDeep,
   timestampToMillis,
 } from '../../utils/validation';
 import { db } from './config';
@@ -169,8 +170,9 @@ export async function createAutomaticStudySession(
   const segmentPath = `${sessionPath}/segments/${segmentId}`;
 
   const cleanTitle = sanitizeBoundedString(input.title, 200) || 'Automatic Study Session';
-  const safePlan = input.studyPlan.slice(0, 100);
-  const tokenEstimate = Math.ceil(JSON.stringify(input.initialEntries).length / 4);
+  const safePlan = stripUndefinedDeep(input.studyPlan.slice(0, 100));
+  const safeInitialEntries = stripUndefinedDeep(input.initialEntries.slice(0, 120));
+  const tokenEstimate = Math.ceil(JSON.stringify(safeInitialEntries).length / 4);
 
   const sessionPayload = {
     userId,
@@ -209,7 +211,7 @@ export async function createAutomaticStudySession(
     sessionId,
     segmentIndex: 0,
     summaryFromCheckpoint: '',
-    entries: input.initialEntries.slice(0, 120),
+    entries: safeInitialEntries,
     tokenEstimate,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -259,7 +261,7 @@ export async function updateSegmentEntries(
     'segments',
     segmentId
   );
-  const boundedEntries = entries.slice(-120);
+  const boundedEntries = stripUndefinedDeep(entries.slice(-120));
   const tokenEstimate = Math.min(500000, Math.ceil(JSON.stringify(boundedEntries).length / 4));
 
   try {
@@ -297,7 +299,7 @@ export async function createLinkedSegment(
     segmentId
   );
   const summary = sanitizeBoundedString(input.summaryFromCheckpoint, 15000);
-  const entries = (input.initialEntries || []).slice(0, 120);
+  const entries = stripUndefinedDeep((input.initialEntries || []).slice(0, 120));
   const tokenEstimate = Math.min(
     500000,
     Math.ceil((summary.length + JSON.stringify(entries).length) / 4)
@@ -370,7 +372,7 @@ export async function createSessionCheckpoint(
     currentUnitIndex: Math.min(100, Math.max(0, input.currentUnitIndex)),
     completedUnitIds: input.completedUnitIds.slice(0, 100),
     nextAction: sanitizeBoundedString(input.nextAction, 300),
-    masterySnapshot: input.masterySnapshot,
+    masterySnapshot: stripUndefinedDeep(input.masterySnapshot || {}),
     weaknesses: input.weaknesses.map((w) => sanitizeBoundedString(w, 200)).filter(Boolean).slice(0, 50),
     createdAt: serverTimestamp(),
   };
@@ -415,18 +417,18 @@ export async function advanceStudySessionState(
   try {
     await updateDoc(ref, {
       status: state.status,
-      studyPlan: state.studyPlan.slice(0, 100),
+      studyPlan: stripUndefinedDeep(state.studyPlan.slice(0, 100)),
       currentUnitIndex: Math.min(100, Math.max(0, state.currentUnitIndex)),
       completedUnitIds: state.completedUnitIds.slice(0, 100),
-      currentObjective: sanitizeBoundedString(state.currentObjective, 600),
-      currentQuestion: sanitizeBoundedString(state.currentQuestion, 2000),
-      latestStudentAnswer: sanitizeBoundedString(state.latestStudentAnswer, 10000),
-      evaluationFeedback: state.evaluationFeedback,
-      scores: state.scores.slice(-200),
-      topicMastery: state.topicMastery,
+      currentObjective: sanitizeBoundedString(state.currentObjective || '', 600),
+      currentQuestion: sanitizeBoundedString(state.currentQuestion || '', 2000),
+      latestStudentAnswer: sanitizeBoundedString(state.latestStudentAnswer || '', 10000),
+      evaluationFeedback: stripUndefinedDeep(state.evaluationFeedback || {}),
+      scores: stripUndefinedDeep(state.scores.slice(-200)),
+      topicMastery: stripUndefinedDeep(state.topicMastery || {}),
       topicsRequiringReview: state.topicsRequiringReview.slice(0, 50),
       lastCheckpointId: state.lastCheckpointId || '',
-      nextAction: sanitizeBoundedString(state.nextAction, 300),
+      nextAction: sanitizeBoundedString(state.nextAction || '', 300),
       activeSegmentId: state.activeSegmentId || '',
       updatedAt: serverTimestamp(),
     });

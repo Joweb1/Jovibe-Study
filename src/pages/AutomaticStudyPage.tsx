@@ -97,26 +97,29 @@ function parseSegmentEntries(segment: StudySessionSegment | undefined): StudySeg
   if (!segment || !Array.isArray(segment.entries)) return [];
   return segment.entries
     .filter((e): e is Record<string, unknown> => Boolean(e) && typeof e === 'object')
-    .map((e, idx) => ({
-      id: typeof e.id === 'string' ? e.id : `entry_${idx}`,
-      kind:
-        e.kind === 'lesson' ||
-        e.kind === 'student_answer' ||
-        e.kind === 'evaluation' ||
-        e.kind === 'reteach' ||
-        e.kind === 'checkpoint_note'
-          ? e.kind
-          : 'lesson',
-      unitId: typeof e.unitId === 'string' ? e.unitId : '',
-      unitTitle: typeof e.unitTitle === 'string' ? e.unitTitle : '',
-      markdown: typeof e.markdown === 'string' ? e.markdown : '',
-      question: typeof e.question === 'string' ? e.question : undefined,
-      score: typeof e.score === 'number' ? e.score : undefined,
-      decision: typeof e.decision === 'string' ? e.decision : undefined,
-      visualPrompt: typeof e.visualPrompt === 'string' ? e.visualPrompt : undefined,
-      visualCaption: typeof e.visualCaption === 'string' ? e.visualCaption : undefined,
-      timestampMs: typeof e.timestampMs === 'number' ? e.timestampMs : Date.now(),
-    }));
+    .map((e, idx) => {
+      const entry: StudySegmentEntry = {
+        id: typeof e.id === 'string' ? e.id : `entry_${idx}`,
+        kind:
+          e.kind === 'lesson' ||
+          e.kind === 'student_answer' ||
+          e.kind === 'evaluation' ||
+          e.kind === 'reteach' ||
+          e.kind === 'checkpoint_note'
+            ? e.kind
+            : 'lesson',
+        unitId: typeof e.unitId === 'string' ? e.unitId : '',
+        unitTitle: typeof e.unitTitle === 'string' ? e.unitTitle : '',
+        markdown: typeof e.markdown === 'string' ? e.markdown : '',
+        timestampMs: typeof e.timestampMs === 'number' ? e.timestampMs : Date.now(),
+      };
+      if (typeof e.question === 'string') entry.question = e.question;
+      if (typeof e.score === 'number') entry.score = e.score;
+      if (typeof e.decision === 'string') entry.decision = e.decision;
+      if (typeof e.visualPrompt === 'string') entry.visualPrompt = e.visualPrompt;
+      if (typeof e.visualCaption === 'string') entry.visualCaption = e.visualCaption;
+      return entry;
+    });
 }
 
 export const AutomaticStudyPage: React.FC = () => {
@@ -616,7 +619,7 @@ export const AutomaticStudyPage: React.FC = () => {
         unitId: firstUnit.unitId,
         unitTitle: firstUnit.title,
         markdown: formatLessonMarkdown(firstLesson),
-        question: firstLesson.checkQuestion,
+        ...(firstLesson.checkQuestion ? { question: firstLesson.checkQuestion } : {}),
         ...(firstLesson.visualPrompt ? { visualPrompt: firstLesson.visualPrompt } : {}),
         ...(firstLesson.visualCaption ? { visualCaption: firstLesson.visualCaption } : {}),
         timestampMs: Date.now(),
@@ -715,7 +718,7 @@ export const AutomaticStudyPage: React.FC = () => {
       markdown: `### Session Context Compacted (Segment ${segment.segmentIndex + 2})\n${compact.compactSummary}${
         updatedState.currentQuestion ? `\n\n**Active Question:** ${updatedState.currentQuestion}` : ''
       }`,
-      question: updatedState.currentQuestion || undefined,
+      ...(updatedState.currentQuestion ? { question: updatedState.currentQuestion } : {}),
       timestampMs: Date.now(),
     };
 
@@ -810,16 +813,17 @@ export const AutomaticStudyPage: React.FC = () => {
         evalParts.push(`### Follow-Up Check\n**${evaluation.followUpQuestion}**`);
       }
 
+      const followUpQuestion =
+        evaluation.decision !== 'advance'
+          ? evaluation.followUpQuestion || activeSession.currentQuestion
+          : '';
       const evalEntry: StudySegmentEntry = {
         id: generateDocumentId('ent'),
         kind: evaluation.decision === 'reteach_simpler' ? 'reteach' : 'evaluation',
         unitId: currentUnit.unitId,
         unitTitle: currentUnit.title,
         markdown: evalParts.join('\n\n'),
-        question:
-          evaluation.decision !== 'advance'
-            ? evaluation.followUpQuestion || activeSession.currentQuestion
-            : undefined,
+        ...(followUpQuestion ? { question: followUpQuestion } : {}),
         score: evaluation.score,
         decision: evaluation.decision,
         timestampMs: Date.now() + 1,
@@ -974,7 +978,7 @@ export const AutomaticStudyPage: React.FC = () => {
         unitId: nextUnit.unitId,
         unitTitle: nextUnit.title,
         markdown: formatLessonMarkdown(lesson),
-        question: lesson.checkQuestion,
+        ...(lesson.checkQuestion ? { question: lesson.checkQuestion } : {}),
         ...(lesson.visualPrompt ? { visualPrompt: lesson.visualPrompt } : {}),
         ...(lesson.visualCaption ? { visualCaption: lesson.visualCaption } : {}),
         timestampMs: Date.now(),
