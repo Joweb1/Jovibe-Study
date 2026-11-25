@@ -39,7 +39,7 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({ onNewCourse }) =
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="inline-flex min-h-9 min-w-0 max-w-[124px] min-[380px]:max-w-[165px] sm:max-w-[230px] items-center justify-between gap-1.5 sm:gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-zinc-950 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800 whitespace-nowrap shrink cursor-pointer transition-colors"
+        className="inline-flex min-h-9 min-w-0 max-w-[10.3125rem] sm:max-w-[14.375rem] items-center justify-between gap-1.5 sm:gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-zinc-950 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800 whitespace-nowrap shrink cursor-pointer transition-colors"
       >
         <span className="min-w-0 truncate">
           {coursesLoading

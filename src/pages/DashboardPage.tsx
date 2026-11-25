@@ -373,7 +373,7 @@ export const DashboardPage: React.FC = () => {
               Completed activities recorded across your courses
             </p>
 
-            <div className="mt-4 grid grid-cols-1 min-[380px]:grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(min(100%,9.5rem),1fr))] gap-3 sm:grid-cols-4">
               {(Object.keys(ACTIVITY_META) as StudyActivityType[]).map((type) => {
                 const meta = ACTIVITY_META[type];
                 const Icon = meta.icon;

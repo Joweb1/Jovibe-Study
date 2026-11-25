@@ -456,7 +456,7 @@ export const ApplicationCoursesSection: React.FC = () => {
             return (
               <div
                 key={cardKey}
-                className={`group relative min-w-0 rounded-2xl border p-4 sm:p-5 lg:p-6 min-h-[196px] sm:min-h-[212px] flex flex-col justify-between text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${
+                className={`group relative min-w-0 rounded-2xl border p-4 sm:p-5 lg:p-6 min-h-[12.25rem] sm:min-h-[13.25rem] flex flex-col justify-between text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${
                   isMenuOpen ? 'z-30 shadow-md' : 'z-0'
                 } ${
                   isActive

@@ -448,7 +448,7 @@ export const CoursesPage: React.FC = () => {
             return (
               <div
                 key={course.id}
-                className={`group relative min-w-0 rounded-2xl border p-4 sm:p-5 lg:p-6 min-h-[152px] sm:min-h-[188px] flex flex-col justify-between text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${
+                className={`group relative min-w-0 rounded-2xl border p-4 sm:p-5 lg:p-6 min-h-[9.5rem] sm:min-h-[11.75rem] flex flex-col justify-between text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${
                   isMenuOpen ? 'z-30 shadow-md' : 'z-0'
                 } ${
                   isActive

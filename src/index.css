@@ -23,6 +23,16 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* Adaptive compact viewport scale for narrow devices (300px–350px, with a safe floor below 300px):
+     scales the root rem unit proportionally to a 420px reference viewport (420px / 16px = 26.25rem)
+     so typography, spacing, header, cards, modals, and intrinsic grids shrink cleanly to match
+     a 420px device density (11.43px at 300px -> 12.19px at 320px -> 13.33px at 350px). */
+  @media (max-width: 350px) {
+    html {
+      font-size: clamp(10.5px, calc(100vw / 26.25), 13.3334px);
+    }
+  }
+
   html.dark {
     color: #e4e4e7;
     background-color: #09090b;

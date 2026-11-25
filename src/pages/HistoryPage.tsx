@@ -311,7 +311,7 @@ export const HistoryPage: React.FC = () => {
       )}
 
       {/* Course Metrics Strip */}
-      <section className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-4 sm:gap-6 border-y border-zinc-200 dark:border-zinc-800 py-5 sm:grid-cols-4">
+      <section className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,9.5rem),1fr))] gap-4 sm:gap-6 border-y border-zinc-200 dark:border-zinc-800 py-5 sm:grid-cols-4">
         <div>
           <div className="text-xs text-zinc-500 dark:text-zinc-400">Logged sessions</div>
           <div className="mt-1 font-mono text-2xl font-semibold text-zinc-950 dark:text-zinc-200 tabular-nums">

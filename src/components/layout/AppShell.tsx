@@ -492,7 +492,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             : effectiveLockViewport
             ? `mx-auto w-full max-w-[1200px] flex-1 min-h-0 flex flex-col px-4 sm:px-6 transition-[padding] duration-200 ${
                 effectiveHideHeader ? 'pt-3' : 'pt-5'
-              } ${effectiveHideBottomNav ? 'pb-3' : 'pb-[84px] md:pb-5'}`
+              } ${effectiveHideBottomNav ? 'pb-3' : 'pb-[5.25rem] md:pb-5'}`
             : `mx-auto w-full max-w-[1200px] flex-1 px-4 sm:px-6 transition-[padding] duration-200 ${
                 effectiveHideHeader ? 'pt-5' : 'pt-8'
               } ${effectiveHideBottomNav ? 'pb-12' : 'pb-24 md:pb-16'}`
@@ -522,7 +522,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             exit={{ opacity: 0, y: 14 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className={`fixed z-40 left-4 right-4 md:left-auto md:right-6 md:w-[340px] ${
-              effectiveHideBottomNav ? 'bottom-4' : 'bottom-[72px] md:bottom-5'
+              effectiveHideBottomNav ? 'bottom-4' : 'bottom-[4.5rem] md:bottom-5'
             }`}
           >
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-[#12151D]/95 px-3.5 py-2.5 shadow-lg">
@@ -612,7 +612,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                         aria-hidden="true"
                       />
                     )}
-                    <Icon className="relative z-10 h-[18px] w-[18px] shrink-0" />
+                    <Icon className="relative z-10 h-[1.125rem] w-[1.125rem] shrink-0" />
                     {active && (
                       <motion.span
                         initial={{ opacity: 0, x: -4 }}

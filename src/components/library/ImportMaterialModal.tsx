@@ -943,7 +943,7 @@ export const ImportMaterialModal: React.FC<ImportMaterialModalProps> = ({
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 gap-3 text-left">
+                        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,9.5rem),1fr))] sm:grid-cols-3 gap-3 text-left">
                           {photoItems.map((item, idx) => (
                             <div
                               key={item.id}

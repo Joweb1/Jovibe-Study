@@ -567,14 +567,14 @@ export const LibraryPage: React.FC = () => {
                 aria-haspopup="menu"
                 aria-expanded={filterMenuOpen}
                 aria-label={`Filter by type: ${activeFilterLabel}`}
-                className={`inline-flex h-[38px] items-center gap-1.5 rounded-md border px-3 text-sm transition-colors cursor-pointer ${
+                className={`inline-flex h-[2.375rem] items-center gap-1.5 rounded-md border px-3 text-sm transition-colors cursor-pointer ${
                   currentTypeFilter !== 'all'
                     ? 'border-zinc-950 bg-zinc-950 text-white dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-950'
                     : 'border-zinc-300 bg-white text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:bg-zinc-800'
                 }`}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
-                <span className="max-w-[100px] sm:max-w-[130px] truncate text-xs font-medium">
+                <span className="max-w-[6.25rem] sm:max-w-[8.125rem] truncate text-xs font-medium">
                   {activeFilterLabel}
                 </span>
               </button>
